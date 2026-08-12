@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>devStudio — run your coding CLIs as a fleet</title>
+<meta name="description" content="A self-hosted console that runs Claude Code, Codex and any other coding CLI as agents: concurrent sessions, per-session git worktrees, schedules and workflows. No API keys — it drives the CLIs you are already signed in to.">
+<meta name="theme-color" content="#05070f">
+<link rel="icon" href="favicon.png">
+<link rel="stylesheet" href="styles.css">
+
+<meta property="og:title" content="devStudio — run your coding CLIs as a fleet">
+<meta property="og:description" content="A self-hosted console for Claude Code, Codex and any CLI you already pay for. Concurrent sessions, a git worktree each, schedules and workflows.">
+<meta property="og:type" content="website">
+</head>
+<body>
+
+<div class="wrap">
+    <header class="masthead">
+        <span class="brand"><span class="mark">&gt;_</span> devStudio</span>
+        <nav>
+            <a href="#what">What it is</a>
+            <a href="#inventory">The parts</a>
+            <a href="#isolation">Isolation</a>
+            <a href="#providers">Providers</a>
+            <a href="#install">Install</a>
+        </nav>
+    </header>
+
+    <div class="hero">
+        <div>
+            <p class="tag">Self-hosted agent console</p>
+            <h1>
+                Your coding CLIs, running as a fleet.
+                <span class="rule">One container. Every session in its own checkout.</span>
+            </h1>
+            <p class="lede">
+                devStudio drives <strong>Claude Code</strong>, <strong>Codex</strong> and whatever else you
+                already have installed — as agents you configure once and then leave to work. Several at a
+                time, each in its own git worktree, on a schedule if you want one.
+            </p>
+            <p class="lede">
+                There is <strong>no API integration anywhere</strong>. Every agent runs the real CLI as a child
+                process, so the only credential involved is the login you complete in the web UI. Your
+                subscription, your machine, your repositories.
+            </p>
+
+            <div class="command">
+                <span class="prompt">$</span>
+                <code>docker run -d -p 7080:7080 -v devstudio-data:/data -v devstudio-home:/home/orchestrator ghcr.io/matthewratcliffe/devstudio:latest</code>
+                <button type="button" data-copy="docker run -d -p 7080:7080 -v devstudio-data:/data -v devstudio-home:/home/orchestrator ghcr.io/matthewratcliffe/devstudio:latest">copy</button>
+            </div>
+
+            <div class="hero-links">
+                <a href="https://github.com/matthewratcliffe/devstudio">Source on GitHub →</a>
+                <a href="#install">Full install</a>
+            </div>
+        </div>
+
+        <div class="wall" aria-label="Four agent sessions running at once"></div>
+    </div>
+</div>
+
+<section id="what">
+    <div class="wrap split">
+        <div>
+            <p class="tag">The idea</p>
+            <p class="claim">
+                You are already paying for the good agents. What you are missing is somewhere to put them.
+            </p>
+        </div>
+        <div>
+            <p>
+                A terminal gives you one agent, in one directory, for as long as you sit there watching it.
+                devStudio gives the same CLIs a place to live: named agents with their own instructions and
+                permissions, conversations that keep running after you close the tab, work that starts at
+                three in the morning because a cron expression said so.
+            </p>
+            <p>
+                Nothing is reimplemented. When an agent works, it is <code>claude</code> or <code>codex</code>
+                on a PATH, signed in as you, reading the same files it would read if you had typed the command
+                yourself. That is the whole design: the orchestrator arranges the work and keeps the
+                transcript — the CLI does the thinking.
+            </p>
+        </div>
+    </div>
+</section>
+
+<section id="inventory">
+    <div class="wrap">
+        <p class="tag">The parts</p>
+        <h2>What you actually configure</h2>
+        <p>
+            Every noun here is a page in the app, and they compose: an agent belongs to a project, works in a
+            repository, and can be the target of a schedule or one step of a workflow.
+        </p>
+
+        <div class="inventory">
+            <div class="item">
+                <h3>Agents</h3>
+                <p>A CLI, a system prompt, a model, a permission mode, and the skills and MCP servers it should have. Any number of them.</p>
+            </div>
+            <div class="item">
+                <h3>Sessions</h3>
+                <p>Conversations that run in parallel up to a cap you set. Each queues its own turns, so you can keep typing while it works.</p>
+            </div>
+            <div class="item">
+                <h3>Guidance</h3>
+                <p>Steer an agent mid-turn instead of queueing behind it — and interrupt the turn in flight if the correction cannot wait.</p>
+            </div>
+            <div class="item">
+                <h3>Projects</h3>
+                <p>Instructions and files every agent in the project inherits, plus the account it signs in with and how long chats get summarised.</p>
+            </div>
+            <div class="item">
+                <h3>Repositories</h3>
+                <p>Clone from the UI, then cut a fresh git worktree per session so concurrent agents never collide in the same checkout.</p>
+            </div>
+            <div class="item">
+                <h3>Workflows</h3>
+                <p>Ordered steps sharing a run context: each finished step publishes its output for every later step to read. Same order runs together.</p>
+            </div>
+            <div class="item">
+                <h3>Schedules</h3>
+                <p>Cron expressions or plain timers, pointed at an agent or a workflow. Unattended runs need no one at the keyboard.</p>
+            </div>
+            <div class="item">
+                <h3>MCP, both ways</h3>
+                <p>Attach servers to agents, and let agents call back into the orchestrator to read another session, steer a run or start one.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="isolation">
+    <div class="wrap split">
+        <div>
+            <p class="tag">Isolation</p>
+            <h2>Four walls, from the outside in</h2>
+            <p>
+                Agents run commands, so the question is not whether to trust them but what each layer is
+                allowed to reach. Every session gets its own worktree, which is what makes running four at
+                once safe rather than merely fast.
+            </p>
+            <p>
+                Permission modes go from asking about everything, through read-only planning, to editing
+                freely — with the last one meant for a worktree you are willing to throw away.
+            </p>
+        </div>
+
+        <div class="nest" aria-label="Nested isolation: container, then project, then worktree, then permission mode">
+            <div class="label"><b>container</b> — the CLIs, their logins, one volume</div>
+            <div class="layer">
+                <div class="label"><b>project</b> — instructions, files, account</div>
+                <div class="layer inner">
+                    <div class="label"><b>worktree</b> — one per session, cut from a branch</div>
+                    <div class="layer inner">
+                        <div class="label"><b>permission mode</b></div>
+                        <div class="leaf">ask · plan · accept edits · no restrictions</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="providers">
+    <div class="wrap">
+        <p class="tag">Providers</p>
+        <h2>Anything you can already run</h2>
+        <p>
+            Two are built in because their output shapes are fiddly. Everything else is described on a form —
+            executable, arguments, how it prints — and becomes an agent provider with no code change.
+        </p>
+
+        <div class="providers">
+            <div class="provider">
+                <div class="who">Claude Code</div>
+                <div class="what">Streams token by token, with tool calls and their durations in the transcript. Signed in through the browser, device code or a pasted token.</div>
+            </div>
+            <div class="provider">
+                <div class="who">OpenAI Codex</div>
+                <div class="what">Same treatment, including resuming a conversation across turns and reporting what each command did.</div>
+            </div>
+            <div class="provider">
+                <div class="who">Any installed CLI</div>
+                <div class="what">Copilot, Gemini, Cursor — give it an argument template and tell it where the answer is in the output.</div>
+            </div>
+            <div class="provider">
+                <div class="who">ACP agents</div>
+                <div class="what">Agent Client Protocol over stdio: the agent brings its own tools and asks before using them, and the answer comes from the session's permission mode.</div>
+            </div>
+            <div class="provider">
+                <div class="who">llama.cpp and friends</div>
+                <div class="what">Any OpenAI-compatible endpoint. A bare model has no tools, so devStudio runs the loop itself — reading, writing and running commands in the workspace on the model's behalf.</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="install">
+    <div class="wrap split">
+        <div>
+            <p class="tag">Install</p>
+            <h2>One container, two volumes</h2>
+            <p>
+                State is JSON on a volume — no database, and a volume backup is the whole backup. The second
+                volume holds the CLI logins, so you sign in once and it survives upgrades.
+            </p>
+            <p>
+                Images are published for <code>amd64</code> and <code>arm64</code> on every push to the
+                default branch. Then open <code>http://localhost:7080</code> and sign in from the Logins page.
+            </p>
+        </div>
+
+        <div>
+<pre><span class="c"># docker-compose.yml</span>
+<span class="k">services</span>:
+  <span class="k">orchestrator</span>:
+    image: ghcr.io/matthewratcliffe/devstudio:latest
+    ports:
+      - <span class="c">"7080:7080"</span>
+      - <span class="c">"1455:1455"</span>   <span class="c"># Codex browser sign-in only</span>
+    volumes:
+      - devstudio-data:/data
+      - devstudio-home:/home/orchestrator
+    restart: unless-stopped
+
+<span class="k">volumes</span>:
+  devstudio-data:
+  devstudio-home:</pre>
+        </div>
+    </div>
+</section>
+
+<footer class="wrap">
+    <span>devStudio</span>
+    <a href="https://github.com/matthewratcliffe/devstudio">GitHub</a>
+    <a href="https://github.com/matthewratcliffe/devstudio/pkgs/container/devstudio">Container image</a>
+    <span class="spacer">Built by Matt Ratcliffe</span>
+</footer>
+
+<script src="wall.js"></script>
+</body>
+</html>

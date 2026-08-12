@@ -1,0 +1,449 @@
+/* ==========================================================================
+   devStudio — project site.
+
+   The palette, the type and the status colours are the application's own, so
+   the site and the thing it describes read as one product. Two faces: the
+   product's monospace carries every label, number and command, and a serif
+   carries the prose — a console described in a technical journal, rather than
+   a page of terminal green.
+   ========================================================================== */
+
+@font-face {
+    font-family: 'JetBrains Mono';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('fonts/jetbrains-mono-400.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'JetBrains Mono';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('fonts/jetbrains-mono-500.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'JetBrains Mono';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('fonts/jetbrains-mono-700.woff2') format('woff2');
+}
+
+:root {
+    --bg-0: #05070f;
+    --bg-1: #0a0e1f;
+    --bg-2: #0f1428;
+    --border: #232a4d;
+    --border-soft: #1a2040;
+
+    /* Status colours, used only where they mean their status. */
+    --cyan: #22e2ff;
+    --magenta: #d946f5;
+    --lime: #6ef7a5;
+    --amber: #ffc857;
+    --red: #ff5f76;
+
+    --text-0: #eef2ff;
+    --text-1: #aab3d6;
+    --text-2: #8790b8;
+
+    --mono: 'JetBrains Mono', 'Cascadia Code', ui-monospace, monospace;
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, serif;
+
+    --gutter: clamp(1.25rem, 5vw, 4.5rem);
+    --measure: 62ch;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+    margin: 0;
+    background:
+        radial-gradient(60rem 30rem at 12% -12%, #16224a55, transparent 60%),
+        radial-gradient(50rem 25rem at 108% 6%, #4a1a5a44, transparent 60%),
+        var(--bg-0);
+    color: var(--text-0);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--cyan); text-decoration: none; }
+a:hover { color: var(--magenta); }
+
+:focus-visible {
+    outline: 2px solid var(--cyan);
+    outline-offset: 3px;
+}
+
+code, kbd, .mono { font-family: var(--mono); }
+
+.wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 var(--gutter);
+}
+
+/* -- the eyebrow label, which is how the app labels its own panels ---------- */
+
+.tag {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-2);
+}
+
+.tag::before { content: '// '; color: var(--magenta); }
+
+/* -- masthead -------------------------------------------------------------- */
+
+.masthead {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.5rem 0 0;
+}
+
+.brand {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-family: var(--mono);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-0);
+}
+
+.brand .mark { color: var(--cyan); }
+
+.masthead nav {
+    margin-left: auto;
+    display: flex;
+    gap: 1.25rem;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+}
+
+.masthead nav a { color: var(--text-1); }
+.masthead nav a:hover { color: var(--cyan); }
+
+/* -- hero ------------------------------------------------------------------ */
+
+.hero {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: clamp(2rem, 5vw, 4.5rem);
+    align-items: center;
+    padding: clamp(3rem, 8vw, 6.5rem) 0 clamp(2.5rem, 6vw, 5rem);
+}
+
+h1 {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: clamp(2.1rem, 5.2vw, 3.4rem);
+    line-height: 1.04;
+    letter-spacing: -0.045em;
+    margin: 0.6rem 0 1.1rem;
+}
+
+h1 .rule {
+    display: block;
+    color: var(--text-2);
+    font-weight: 400;
+    font-size: 0.32em;
+    letter-spacing: 0.02em;
+    margin-top: 0.9rem;
+}
+
+.lede {
+    color: var(--text-1);
+    max-width: var(--measure);
+    margin: 0 0 1.6rem;
+}
+
+.lede strong { color: var(--text-0); font-weight: 600; }
+
+/* The command is the call to action: there is nothing to sign up for. */
+.command {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.7rem 0.85rem;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+}
+
+.command .prompt { color: var(--lime); flex: none; }
+
+/* The command scrolls inside its own line so the copy button stays where it is. */
+.command code {
+    color: var(--text-0);
+    white-space: nowrap;
+    overflow-x: auto;
+    min-width: 0;
+    flex: 1;
+    scrollbar-width: none;
+}
+
+.command code::-webkit-scrollbar { display: none; }
+
+.command button {
+    flex: none;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
+    border-radius: 6px;
+    padding: 0.2rem 0.55rem;
+    cursor: pointer;
+}
+
+.command button:hover { color: var(--cyan); border-color: var(--cyan); }
+
+.hero-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.1rem;
+    margin-top: 1.1rem;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+}
+
+/* -- the wall: concurrent sessions, which is what this thing is for --------- */
+
+.wall {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.9rem;
+}
+
+.pane {
+    background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    padding: 0.8rem 0.85rem 0.9rem;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    min-height: 12.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.pane-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-soft);
+}
+
+.pane-agent { color: var(--text-0); font-weight: 500; }
+.pane-provider { color: var(--text-2); font-size: 0.68rem; }
+
+.dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-left: auto;
+    background: var(--text-2);
+    flex: none;
+}
+
+.pane[data-state="running"] .dot { background: var(--cyan); box-shadow: 0 0 0 3px #22e2ff22; }
+.pane[data-state="waiting"] .dot { background: var(--amber); }
+.pane[data-state="done"] .dot { background: var(--lime); }
+.pane[data-state="failed"] .dot { background: var(--red); }
+
+.pane-body { color: var(--text-1); display: flex; flex-direction: column; gap: 0.35rem; }
+
+.line { opacity: 0; animation: settle 0.32s ease forwards; }
+
+.line.tool {
+    display: flex;
+    gap: 0.5rem;
+    align-items: baseline;
+    color: var(--text-2);
+}
+
+.line.tool .name { color: var(--cyan); }
+.line.tool .arg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.line.tool .took { color: var(--text-2); font-variant-numeric: tabular-nums; }
+
+.caret {
+    display: inline-block;
+    width: 0.5em;
+    height: 1em;
+    margin-left: 0.15em;
+    background: var(--cyan);
+    vertical-align: text-bottom;
+    animation: blink 1.1s steps(1) infinite;
+}
+
+@keyframes settle {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: none; }
+}
+
+@keyframes blink {
+    50% { opacity: 0; }
+}
+
+/* -- sections -------------------------------------------------------------- */
+
+section { padding: clamp(3rem, 7vw, 5.5rem) 0; border-top: 1px solid var(--border-soft); }
+
+h2 {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: clamp(1.4rem, 3vw, 2rem);
+    letter-spacing: -0.035em;
+    line-height: 1.15;
+    margin: 0.5rem 0 1rem;
+    max-width: 22ch;
+}
+
+h3 {
+    font-family: var(--mono);
+    font-size: 0.92rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.4rem;
+}
+
+p { max-width: var(--measure); color: var(--text-1); }
+
+.claim {
+    font-size: clamp(1.15rem, 2.4vw, 1.5rem);
+    line-height: 1.45;
+    color: var(--text-0);
+    max-width: 30ch;
+    margin: 0;
+}
+
+.split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: clamp(2rem, 5vw, 4rem);
+    align-items: start;
+}
+
+/* -- the inventory: the app's own nouns ------------------------------------ */
+
+.inventory {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr));
+    gap: 1px;
+    background: var(--border-soft);
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-top: 2rem;
+}
+
+.item { background: var(--bg-1); padding: 1.15rem 1.25rem 1.35rem; }
+.item p { font-size: 0.92rem; margin: 0; }
+
+/* -- isolation diagram ----------------------------------------------------- */
+
+.nest {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.85rem;
+    background: var(--bg-1);
+}
+
+.nest .layer {
+    border: 1px dashed var(--border);
+    border-radius: 9px;
+    padding: 0.7rem 0.8rem;
+    margin-top: 0.55rem;
+}
+
+.nest .layer:first-of-type { margin-top: 0.5rem; }
+.nest .label { color: var(--text-2); }
+.nest .label b { color: var(--text-0); font-weight: 500; }
+.nest .inner { border-style: solid; border-color: var(--border-soft); background: var(--bg-2); }
+.nest .leaf { color: var(--lime); }
+
+/* -- providers ------------------------------------------------------------- */
+
+.providers { display: grid; gap: 0.6rem; margin-top: 1.5rem; }
+
+.provider {
+    display: grid;
+    grid-template-columns: 12rem minmax(0, 1fr);
+    gap: 1rem;
+    align-items: baseline;
+    padding: 0.85rem 0;
+    border-top: 1px solid var(--border-soft);
+}
+
+.provider:first-child { border-top: 0; }
+.provider .who { font-family: var(--mono); font-size: 0.85rem; color: var(--text-0); }
+.provider .what { color: var(--text-1); font-size: 0.95rem; }
+
+/* -- install --------------------------------------------------------------- */
+
+pre {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    line-height: 1.65;
+    color: var(--text-1);
+}
+
+pre .c { color: var(--text-2); }
+pre .k { color: var(--cyan); }
+
+footer {
+    border-top: 1px solid var(--border-soft);
+    padding: 2rem 0 3rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--text-2);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 1.5rem;
+    align-items: center;
+}
+
+footer .spacer { margin-left: auto; }
+
+/* -- narrow ---------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+    .hero { grid-template-columns: minmax(0, 1fr); }
+    .split { grid-template-columns: minmax(0, 1fr); }
+    .provider { grid-template-columns: minmax(0, 1fr); gap: 0.2rem; }
+    .masthead nav { display: none; }
+}
+
+@media (max-width: 560px) {
+    .wall { grid-template-columns: minmax(0, 1fr); }
+    .wall .pane:nth-child(n + 3) { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .line { animation: none; opacity: 1; }
+    .caret { animation: none; }
+}
