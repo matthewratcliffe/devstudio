@@ -9,6 +9,7 @@ using DevStudio.Domain.Sessions;
 using DevStudio.Domain.Skills;
 using DevStudio.Domain.Workflows;
 using DevStudio.Infrastructure.Git;
+using DevStudio.Infrastructure.Images;
 using DevStudio.Infrastructure.Mcp;
 using DevStudio.Infrastructure.SourceControl;
 using DevStudio.Infrastructure.Persistence;
@@ -67,6 +68,15 @@ public static class DependencyInjection
         services.AddSingleton<ILoopbackCallbackForwarder, LoopbackCallbackForwarder>();
         services.AddSingleton<IMcpTokenService, McpTokenService>();
         services.AddSingleton<IMcpProbeService, McpProbeService>();
+
+        // Image backends. All three are registered whether or not they hold credentials — the UI
+        // shows what each one needs, which is more use than a backend that silently is not there.
+        // Their keys live on the volume with the CLI accounts, not in configuration.
+        services.AddSingleton<IImageSettingsService, ImageSettingsService>();
+        services.AddSingleton<IImageGenerator, PollinationsImageGenerator>();
+        services.AddSingleton<IImageGenerator, CloudflareImageGenerator>();
+        services.AddSingleton<IImageGenerator, GeminiImageGenerator>();
+        services.AddSingleton<IImageGenerationService, ImageGenerationService>();
 
         services.AddSingleton<IGitService, GitService>();
         services.AddSingleton<ISourceControlHosts, SourceControlHosts>();

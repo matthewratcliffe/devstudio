@@ -2,8 +2,16 @@ using System.Text;
 using System.Text.Json.Nodes;
 using DevStudio.Application.Abstractions;
 using DevStudio.Domain.Agents;
+using DevStudio.Domain.Images;
 
 namespace DevStudio.Infrastructure.Providers.OpenAi;
+
+/// <summary>
+/// What a tool call produced. Two audiences, because they want different things: the model needs a
+/// description it can reason about, while the transcript wants the thing itself — an image the model
+/// forgot to mention is still an image the operator should see.
+/// </summary>
+public sealed record ToolOutcome(string ForModel, string? ForTranscript = null);
 
 /// <summary>
 /// The tools a bare model is given so it can actually do the work. The agent CLIs bring their own;
@@ -18,12 +26,21 @@ public sealed class WorkspaceTools
     private readonly string _root;
     private readonly PermissionMode _mode;
     private readonly IProcessRunner _runner;
+    private readonly IImageGenerationService? _images;
+    private readonly string? _sessionId;
 
-    public WorkspaceTools(string workspace, PermissionMode mode, IProcessRunner runner)
+    public WorkspaceTools(
+        string workspace,
+        PermissionMode mode,
+        IProcessRunner runner,
+        IImageGenerationService? images = null,
+        string? sessionId = null)
     {
         _root = Path.GetFullPath(workspace);
         _mode = mode;
         _runner = runner;
+        _images = images;
+        _sessionId = sessionId;
     }
 
     /// <summary>
@@ -64,6 +81,20 @@ public sealed class WorkspaceTools
             }, "command"));
         }
 
+        // Offered whatever the permission mode: drawing a picture changes nothing on the machine.
+        // Writing the copy into the workspace is the part that respects the mode, below.
+        if (_images is { AnyConfigured: true })
+        {
+            tools.Add(Tool("generate_image", "Generate an image from a text description and return a link to it.", new JsonObject
+            {
+                ["prompt"] = Property("string", "What to draw. Detailed prompts work better than short ones."),
+                ["width"] = Property("integer", "Pixels wide. Optional, default 1024."),
+                ["height"] = Property("integer", "Pixels tall. Optional, default 1024."),
+                ["seed"] = Property("integer", "Optional. The same seed and prompt reproduce the same image."),
+                ["backend"] = Property("string", $"Optional service to use: {string.Join(", ", _images.Backends.Where(b => b.Check().Configured).Select(b => b.Backend))}."),
+            }, "prompt"));
+        }
+
         return tools;
     }
 
@@ -76,7 +107,7 @@ public sealed class WorkspaceTools
     private bool CanRunCommands => _mode == PermissionMode.Unrestricted;
 
     /// <summary>Runs one tool call and returns what the model should be told about it.</summary>
-    public async Task<string> InvokeAsync(string name, string argumentsJson, CancellationToken ct)
+    public async Task<ToolOutcome> InvokeAsync(string name, string argumentsJson, CancellationToken ct)
     {
         JsonObject arguments;
         try
@@ -88,25 +119,69 @@ public sealed class WorkspaceTools
         {
             // Told rather than thrown: a model that produced malformed arguments can correct itself
             // on the next step, where an exception would end the turn.
-            return $"Error: the arguments were not valid JSON ({ex.Message}).";
+            return new ToolOutcome($"Error: the arguments were not valid JSON ({ex.Message}).");
         }
 
         try
         {
             return name switch
             {
-                "read_file" => ReadFile(arguments),
-                "list_files" => ListFiles(arguments),
-                "write_file" when CanWrite => WriteFile(arguments),
-                "run_command" when CanRunCommands => await RunCommandAsync(arguments, ct),
-                "write_file" or "run_command" => $"Error: {name} is not allowed in {_mode} mode.",
-                _ => $"Error: there is no tool called '{name}'.",
+                "read_file" => new ToolOutcome(ReadFile(arguments)),
+                "list_files" => new ToolOutcome(ListFiles(arguments)),
+                "write_file" when CanWrite => new ToolOutcome(WriteFile(arguments)),
+                "run_command" when CanRunCommands => new ToolOutcome(await RunCommandAsync(arguments, ct)),
+                "generate_image" when _images is not null => await GenerateImageAsync(arguments, ct),
+                "write_file" or "run_command" => new ToolOutcome($"Error: {name} is not allowed in {_mode} mode."),
+                _ => new ToolOutcome($"Error: there is no tool called '{name}'."),
             };
         }
         catch (Exception ex)
         {
-            return $"Error: {ex.Message}";
+            return new ToolOutcome($"Error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Draws something, then puts it where both audiences can reach it: a link for the transcript,
+    /// and — when the mode allows writing — a copy in the workspace so the agent can go on to use
+    /// the file rather than only refer to it.
+    /// </summary>
+    private async Task<ToolOutcome> GenerateImageAsync(JsonObject arguments, CancellationToken ct)
+    {
+        var request = new ImageRequest
+        {
+            Prompt = Text(arguments, "prompt"),
+            Width = Number(arguments, "width") ?? 1024,
+            Height = Number(arguments, "height") ?? 1024,
+            Seed = Number(arguments, "seed"),
+        };
+
+        ImageBackend? backend = Enum.TryParse<ImageBackend>(Text(arguments, "backend", required: false), true, out var parsed)
+            ? parsed
+            : null;
+
+        var image = await _images!.GenerateAsync(request, backend, _sessionId, ct);
+        var url = _images.UrlFor(image);
+
+        var saved = string.Empty;
+
+        if (CanWrite)
+        {
+            var directory = Path.Combine(_root, "generated-images");
+            Directory.CreateDirectory(directory);
+
+            var source = Path.Combine(_images.GetImagesPath(), image.FileName);
+            File.Copy(source, Path.Combine(directory, image.FileName), overwrite: true);
+
+            saved = $" A copy is in the workspace at generated-images/{image.FileName}.";
+        }
+
+        return new ToolOutcome(
+            $"Generated a {image.Width}×{image.Height} image with {image.Backend} ({image.Model}), available at {url}.{saved} " +
+            $"It has already been shown to the user, so there is no need to repeat the link.",
+
+            // The operator sees the picture whether or not the model chooses to mention it.
+            $"![{image.Prompt}]({url})");
     }
 
     private string ReadFile(JsonObject arguments)

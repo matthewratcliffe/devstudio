@@ -256,6 +256,30 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 .btn-icon { padding: 0.35em 0.55em; }
 .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 
+/* Images an agent generated mid-turn, rendered inline in the transcript. Capped in height so a
+   portrait image cannot push the rest of the conversation off the screen. */
+.md-figure { display: inline-block; max-width: 100%; }
+
+.md-image {
+    display: block;
+    max-width: 100%;
+    max-height: 30rem;
+    width: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin: 0.6rem 0 0.35rem;
+}
+
+.md-download {
+    display: inline-block;
+    margin-bottom: 0.6rem;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.75;
+}
+.md-download:hover { opacity: 1; }
+
 /* -- Cards & grids -------------------------------------------------------- */
 
 .card {

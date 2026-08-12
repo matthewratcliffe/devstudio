@@ -16,6 +16,7 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
     private readonly IAcpConnectionFactory _acp;
     private readonly IHttpClientFactory _httpClients;
     private readonly ConversationStore _conversations;
+    private readonly IImageGenerationService _images;
     private readonly OrchestratorOptions _options;
     private readonly ILoggerFactory _loggerFactory;
 
@@ -26,6 +27,7 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
         IAcpConnectionFactory acp,
         IHttpClientFactory httpClients,
         ConversationStore conversations,
+        IImageGenerationService images,
         IOptions<OrchestratorOptions> options,
         ILoggerFactory loggerFactory)
     {
@@ -35,6 +37,7 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
         _acp = acp;
         _httpClients = httpClients;
         _conversations = conversations;
+        _images = images;
         _options = options.Value;
         _loggerFactory = loggerFactory;
 
@@ -87,6 +90,7 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
             _httpClients,
             _runner,
             _conversations,
+            _images,
             _loggerFactory.CreateLogger<OpenAiCompatibleCli>()),
         _ => new CustomCli(definition, _runner, _options, _loggerFactory.CreateLogger<CustomCli>()),
     };

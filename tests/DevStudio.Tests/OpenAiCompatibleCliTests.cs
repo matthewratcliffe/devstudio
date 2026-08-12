@@ -36,6 +36,10 @@ public class OpenAiCompatibleCliTests : IDisposable
             _endpoint,
             new ProcessRunner(NullLogger<ProcessRunner>.Instance),
             _conversations,
+
+            // No image service, so generate_image is never advertised and the tool list stays as
+            // these tests expect it.
+            null,
             NullLogger.Instance);
 
     private TurnRequest Turn(PermissionMode mode = PermissionMode.AcceptEdits, string? resume = null) => new()

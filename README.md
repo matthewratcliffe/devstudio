@@ -191,6 +191,10 @@ for any earlier step regardless of distance.
 
 ## The orchestrator's MCP server
 
+There are two built-in servers. `images` is attached everywhere by default and exposes only
+`generate_image` (see [Images](#images)). `orchestrator` is opt-in, because its tools can reach other
+sessions.
+
 Attach the built-in `orchestrator` server to an agent and it gains these tools:
 
 `list_agents` · `list_sessions` · `get_session` · `send_message` · `start_session` ·
@@ -252,16 +256,44 @@ the server if it failed to start, rather than the tools silently going missing.
 
 ### Images
 
-Neither `claude` nor `codex` generates images, so nothing here can conjure one on its own. What works
-today:
+Neither `claude` nor `codex` generates images, so the orchestrator does it for them. The **Images**
+page generates from a prompt and keeps a gallery; agents reach the same service through a
+`generate_image` tool and the result appears inline in the transcript. Both write to `<DataPath>/images`
+and are served from `/images/<file>`.
 
-- **An image-generating MCP server.** Register it on the MCP page (with OAuth or a token if it needs
-  one), attach it to an agent or a single chat, and the agent can call it. Whatever it writes into the
-  workspace shows up in the files panel.
-- **A custom CLI provider.** If you have an image tool on the command line, describe it on the CLI
-  providers page and drive it as an agent.
-- **Code the model can write.** SVG, and diagrams via mermaid, are text — agents produce these
-  directly and they preview inline as images.
+Three backends sit behind one interface, so running out of free quota means changing which one is
+selected rather than changing anything else:
+
+| Backend | Setup | Free allowance |
+| --- | --- | --- |
+| **Pollinations** | None — this is the default, and it works on a fresh install | Anonymous is watermarked and limited to one image every 15s; a free token from `auth.pollinations.ai` removes both |
+| **Cloudflare Workers AI** | Account id and an API token with the Workers AI permission | 10,000 neurons a day, resetting 00:00 UTC — roughly 500 images at 1024×1024 on FLUX.1 Schnell, with no per-request throttle |
+| **Gemini** | A Google AI Studio key | Varies by key and region; AI Studio shows yours. The only backend here that *edits* an existing image, and the pro image model needs billing enabled |
+
+Because the anonymous Pollinations tier rejects rather than queues, that backend spaces its own
+requests out — a second image in the same turn waits rather than failing.
+
+Keys are set on the **Logins** page, not in configuration, and are stored on the volume with the CLI
+accounts. They are re-read before every generation, so a key added mid-session applies to the next
+image rather than after a restart.
+
+An agent reaches image generation two ways: the built-in `generate_image` tool on OpenAI-compatible
+providers, and a second built-in MCP server called `images`, which is how `claude` and `codex` sessions
+get at it. That server is **attached to every session by default** and carries nothing but
+`generate_image` — being able to draw a picture should not also mean being able to start sessions and
+steer other agents, which is why it is separate from the `orchestrator` server rather than a flag on it.
+Note that Plan mode refuses all MCP tool calls, so a read-only chat still cannot generate.
+
+Where the permission mode allows writing, a copy is also dropped in the workspace under
+`generated-images/` so the agent can go on to use the file.
+
+The transcript renders the picture inline, with a download link beneath it. It does this for
+`![alt](/images/…)` markdown *and* for a bare `/images/…` path written in prose, because a CLI provider
+generates through MCP and then describes the result in its own words. Only paths this app serves are
+ever turned into an `<img>` — agent output cannot produce a tag pointing at another host. Downloads
+arrive named after the prompt (`a-fluffy-ginger-cat.jpg`) rather than the id.
+
+Agents can still produce SVG and mermaid diagrams directly as text, and those preview inline as before.
 
 ## Picking rather than typing
 

@@ -75,6 +75,39 @@ app.MapGet("/files/{scope}/{fileName}", (string scope, string fileName, IFileLib
         : Results.NotFound();
 });
 
+// Generated images, by the file name held on their record. Path.GetFileName keeps a crafted name
+// from walking out of the folder, and the images are served inline because being looked at is the
+// entire point of them.
+app.MapGet("/images/{fileName}", async (
+    string fileName,
+    IImageGenerationService images,
+    HttpContext context,
+    CancellationToken ct) =>
+{
+    var safeName = Path.GetFileName(fileName);
+    var path = Path.Combine(images.GetImagesPath(), safeName);
+
+    if (!File.Exists(path))
+        return Results.NotFound();
+
+    var contentType = Path.GetExtension(safeName).ToLowerInvariant() switch
+    {
+        ".png" => "image/png",
+        ".webp" => "image/webp",
+        ".gif" => "image/gif",
+        _ => "image/jpeg",
+    };
+
+    if (!context.Request.Query.ContainsKey("download"))
+        return Results.File(path, contentType);
+
+    // Saved under its prompt rather than its id. Falling back to the stored name covers a file whose
+    // record has been deleted from the gallery but which is still on disk.
+    var record = await images.FindByFileNameAsync(safeName, ct);
+
+    return Results.File(path, contentType, record is null ? safeName : images.DownloadNameFor(record));
+});
+
 // Anything an agent produced in its workspace, downloadable. The service refuses a path that
 // resolves outside the session's own directory.
 app.MapGet("/workspace/{sessionId}/{**path}", async (

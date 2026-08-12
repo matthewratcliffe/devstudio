@@ -115,6 +115,18 @@ public static partial class MarkdownLite
     private static string Inline(string text)
     {
         var escaped = Escape(text);
+
+        // Images, but only ones this app serves. Restricting the pattern to /images/ is what keeps
+        // the promise made at the top of the file: an agent cannot talk the renderer into emitting a
+        // tag that points anywhere else, so there is no callback to an attacker's host.
+        escaped = Image().Replace(escaped, m => Figure(m.Groups[2].Value, m.Groups[1].Value));
+
+        // The same path written as plain prose. A CLI provider generates through MCP and then
+        // describes the result in its own words — "Image: /images/x.jpg" — so waiting for markdown
+        // syntax means usually showing a path where a picture belongs. The lookbehind keeps this off
+        // the src and href of the tag the line above just produced.
+        escaped = BareImagePath().Replace(escaped, m => Figure(m.Groups[1].Value, string.Empty));
+
         escaped = InlineCode().Replace(escaped, "<code>$1</code>");
         escaped = Bold().Replace(escaped, "<strong>$1</strong>");
         escaped = Italic().Replace(escaped, "<em>$1</em>");
@@ -140,6 +152,22 @@ public static partial class MarkdownLite
 
     [GeneratedRegex(@"\[([^\]]+)\]\((https?://[^)\s]+)\)")]
     private static partial Regex Link();
+
+    [GeneratedRegex(@"!\[([^\]]*)\]\((/images/[A-Za-z0-9._%-]+)\)")]
+    private static partial Regex Image();
+
+    [GeneratedRegex(@"(?<![=""'/\w])(/images/[A-Za-z0-9._%-]+\.[A-Za-z]{3,4})")]
+    private static partial Regex BareImagePath();
+
+    /// <summary>
+    /// The picture plus a way to keep it. Both are worth having in a transcript: the image answers
+    /// "what did it draw", and the link answers "can I have it" without a right-click.
+    /// </summary>
+    private static string Figure(string url, string alt) =>
+        $"""
+         <span class="md-figure"><img class="md-image" src="{url}" alt="{alt}" loading="lazy" />
+         <a class="md-download" href="{url}?download" download>Download</a></span>
+         """;
 
     [GeneratedRegex(@"(?<!["")>=])(https?://[^\s<""]+)")]
     private static partial Regex BareUrl();

@@ -172,39 +172,68 @@ public sealed class SeedHostedService : IHostedService
     }
 
     /// <summary>
-    /// Makes sure the built-in orchestrator server exists and points at the right port. It cannot be
-    /// deleted from the UI, and if it goes missing some other way it comes back on the next start.
+    /// Makes sure both built-in servers exist and point at the right port. Neither can be deleted
+    /// from the UI, and if one goes missing some other way it comes back on the next start.
     /// </summary>
     private async Task EnsureOrchestratorMcpAsync(CancellationToken ct)
     {
-        var url = $"http://localhost:{_options.HttpPort}/mcp";
-        var existing = (await _mcpServers.GetAllAsync(ct)).FirstOrDefault(s => s.IsBuiltIn);
+        await EnsureBuiltInMcpAsync(
+            "orchestrator",
+            "This orchestrator: list agents and sessions, read another session's transcript, steer a run, leave notes, start work.",
+            "/mcp",
+            isDefault: false,
+            ct);
+
+        // Attached everywhere, because an agent asked for a picture should be able to draw one. It is
+        // a separate server rather than a flag on the one above so that being able to draw does not
+        // also mean being able to start and steer other sessions.
+        await EnsureBuiltInMcpAsync(
+            "images",
+            "Generate an image from a description. Backed by whichever image service is configured on the Logins page.",
+            "/mcp/images",
+            isDefault: true,
+            ct);
+    }
+
+    private async Task EnsureBuiltInMcpAsync(
+        string name,
+        string description,
+        string path,
+        bool isDefault,
+        CancellationToken ct)
+    {
+        var url = $"http://localhost:{_options.HttpPort}{path}";
+
+        // Matched by name, not just by the built-in flag: there is more than one of these now.
+        var existing = (await _mcpServers.GetAllAsync(ct))
+            .FirstOrDefault(s => s.IsBuiltIn && s.Name == name);
 
         if (existing is not null)
         {
-            // Repair only what must stay true; the user's own choices are left alone.
+            // Repair only what must stay true; the user's own choices — including whether this one
+            // is still attached by default — are left alone.
             if (existing.Url == url && existing.Transport == McpTransport.Http)
                 return;
 
             existing.Url = url;
             existing.Transport = McpTransport.Http;
             await _mcpServers.UpsertAsync(existing, ct);
-            _logger.LogInformation("Repaired the built-in orchestrator MCP server");
+            _logger.LogInformation("Repaired the built-in {Name} MCP server", name);
             return;
         }
 
         await _mcpServers.UpsertAsync(new McpServer
         {
-            Name = "orchestrator",
-            Description = "This orchestrator: list agents and sessions, read another session's transcript, steer a run, leave notes, start work.",
+            Name = name,
+            Description = description,
             Transport = McpTransport.Http,
             Url = url,
             IsBuiltIn = true,
-            IsDefault = false,
+            IsDefault = isDefault,
             Enabled = true,
         }, ct);
 
-        _logger.LogInformation("Restored the built-in orchestrator MCP server");
+        _logger.LogInformation("Restored the built-in {Name} MCP server", name);
     }
 
     private async Task SeedWorkflowAsync(CancellationToken ct)

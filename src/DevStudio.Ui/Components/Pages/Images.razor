@@ -1,0 +1,191 @@
+@page "/images"
+@inject IImageGenerationService ImageService
+
+<PageTitle>Images · devStudio</PageTitle>
+
+<div class="card" style="margin-bottom:1.4rem">
+    <div class="field">
+        <label>Prompt</label>
+        <textarea @bind="_prompt" rows="3"
+                  placeholder="A cutaway diagram of a mechanical keyboard switch, technical illustration, muted palette"></textarea>
+    </div>
+
+    <div class="form-grid">
+        <div class="field">
+            <label>Backend</label>
+            <select @bind="_backend" @bind:after="OnBackendChanged">
+                @foreach (var generator in ImageService.Backends)
+                {
+                    <option value="@generator.Backend">
+                        @generator.DisplayName@(generator.Check().Configured ? "" : " — not configured")
+                    </option>
+                }
+            </select>
+        </div>
+        <div class="field">
+            <label>Model</label>
+            <input type="text" @bind="_model" list="image-models" placeholder="backend default" />
+            <datalist id="image-models">
+                @foreach (var model in Selected?.Models ?? [])
+                {
+                    <option value="@model"></option>
+                }
+            </datalist>
+        </div>
+    </div>
+
+    <div class="form-grid">
+        <div class="field">
+            <label>Width</label>
+            <input type="number" @bind="_width" step="64" min="64" />
+        </div>
+        <div class="field">
+            <label>Height</label>
+            <input type="number" @bind="_height" step="64" min="64" />
+        </div>
+        <div class="field">
+            <label>Seed</label>
+            <input type="number" @bind="_seed" placeholder="random" />
+        </div>
+    </div>
+
+    <p class="small muted">@(Selected?.Check().Detail ?? string.Empty)</p>
+
+    <div class="btn-row">
+        <button class="btn btn-primary" @onclick="GenerateAsync" disabled="@_busy">
+            @(_busy ? "Generating…" : "Generate")
+        </button>
+        @if (_busy && _backend == ImageBackend.Pollinations)
+        {
+            <span class="mono-dim">Pollinations spaces requests out, so this can sit for a few seconds.</span>
+        }
+    </div>
+</div>
+
+<div class="grid grid-auto">
+    @foreach (var image in _images)
+    {
+        <div class="card">
+            <a href="@ImageService.UrlFor(image)" target="_blank" rel="noopener noreferrer">
+                <img src="@ImageService.UrlFor(image)" alt="@image.Prompt" loading="lazy"
+                     style="width:100%;border-radius:6px;display:block" />
+            </a>
+            <p class="small" style="margin-top:0.7rem">@image.Prompt</p>
+            <div class="btn-row" style="margin-bottom:0.7rem">
+                <span class="pill">@image.Backend</span>
+                <span class="pill">@image.Width×@image.Height</span>
+                @if (image.Seed is { } seed)
+                {
+                    <span class="pill">seed @seed</span>
+                }
+                @if (image.SessionId is not null)
+                {
+                    <a class="pill" href="/chat/@image.SessionId">from a session</a>
+                }
+            </div>
+            <div class="btn-row">
+                <a class="btn btn-sm" href="@(ImageService.UrlFor(image))?download" download>Download</a>
+                <button class="btn btn-sm" @onclick="() => Reuse(image)">Reuse prompt</button>
+                <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(image)">Delete</button>
+            </div>
+        </div>
+    }
+</div>
+
+@if (_images.Count == 0)
+{
+    <div class="empty">
+        <div class="big">▩</div>
+        No images yet. Agents can make them too — the <code>generate_image</code> tool reaches the same gallery.
+    </div>
+}
+
+@code {
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private IReadOnlyList<GeneratedImage> _images = [];
+
+    private string _prompt = string.Empty;
+    private string _model = string.Empty;
+    private int _width = 1024;
+    private int _height = 1024;
+    private int? _seed;
+    private ImageBackend _backend;
+    private bool _busy;
+
+    private IImageGenerator? Selected => ImageService.Backends.FirstOrDefault(b => b.Backend == _backend);
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Start on something that will actually answer, rather than on whatever sorts first.
+        _backend = ImageService.Backends.FirstOrDefault(b => b.Backend == ImageService.DefaultBackend && b.Check().Configured)?.Backend
+                   ?? ImageService.Backends.FirstOrDefault(b => b.Check().Configured)?.Backend
+                   ?? ImageService.DefaultBackend;
+
+        await ReloadAsync();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader("Images", "Generated locally, from whichever backend is configured");
+    }
+
+    private async Task ReloadAsync() => _images = await ImageService.GetAllAsync();
+
+    /// <summary>A model name from one backend means nothing to another, so it is dropped on a switch.</summary>
+    private void OnBackendChanged() => _model = string.Empty;
+
+    private async Task GenerateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_prompt))
+        {
+            Layout.Notify("Say what to draw first.", "err");
+            return;
+        }
+
+        _busy = true;
+
+        try
+        {
+            await ImageService.GenerateAsync(
+                new ImageRequest
+                {
+                    Prompt = _prompt,
+                    Width = _width,
+                    Height = _height,
+                    Seed = _seed,
+                    Model = string.IsNullOrWhiteSpace(_model) ? null : _model,
+                },
+                _backend);
+
+            await ReloadAsync();
+            Layout.Notify("Image generated.", "ok");
+        }
+        catch (Exception ex)
+        {
+            // The backends put the useful part in the message — a missing key, a rate limit, a
+            // refusal — so it is shown as-is rather than replaced with something generic.
+            Layout.Notify(ex.Message, "err");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Reuse(GeneratedImage image)
+    {
+        _prompt = image.Prompt;
+        _width = image.Width;
+        _height = image.Height;
+        _backend = image.Backend;
+        _model = image.Model;
+    }
+
+    private async Task DeleteAsync(GeneratedImage image)
+    {
+        await ImageService.DeleteAsync(image.Id);
+        await ReloadAsync();
+    }
+}
