@@ -1,0 +1,398 @@
+@page "/cli-providers"
+@inject IEntityStore<CliProvider> ProviderStore
+@inject IEntityStore<Agent> AgentStore
+@inject IProcessRunner Processes
+
+<PageTitle>CLI providers · DevStudio</PageTitle>
+
+<div class="card" style="margin-bottom:1.2rem">
+    <div class="section-tag">Bring your own CLI</div>
+    <p class="small">
+        Claude and Codex are built in because their streaming output needs special handling. Anything
+        else you already have installed and signed in — a Copilot, Gemini or Cursor CLI, or your own
+        script — can be described here and then picked as an agent's provider. No API keys: the CLI
+        uses whatever login it already holds.
+    </p>
+</div>
+
+<div class="btn-row" style="margin-bottom:1.2rem">
+    <button class="btn btn-primary" @onclick="() => Edit(new CliProvider())">New CLI provider</button>
+    <span class="mono-dim">Start from a preset, then adjust.</span>
+</div>
+
+<div class="grid grid-auto">
+    @foreach (var provider in _providers)
+    {
+        <div class="card">
+            <div class="card-head">
+                <h3>@provider.Name</h3>
+                <div class="spacer"></div>
+                <span class="pill pill-lime"><span class="dot"></span>@provider.OutputFormat</span>
+            </div>
+            <p class="small">@provider.Description</p>
+            <div class="mono-dim" style="margin-bottom:0.7rem">
+                @provider.Executable @provider.PromptArguments
+            </div>
+            <div class="btn-row" style="margin-bottom:0.7rem">
+                <span class="pill">@UsageCount(provider) agents</span>
+                @if (!provider.Enabled)
+                {
+                    <span class="pill pill-red">disabled</span>
+                }
+                @if (_probes.TryGetValue(provider.Id, out var probe))
+                {
+                    <span class="pill @(probe.StartsWith("ok") ? "pill-lime" : "pill-red")">@probe</span>
+                }
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-sm" @onclick="() => Edit(provider)">Edit</button>
+                <button class="btn btn-sm btn-ghost" @onclick="() => ProbeAsync(provider)">Test</button>
+                <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(provider)">Delete</button>
+            </div>
+        </div>
+    }
+</div>
+
+@if (_providers.Count == 0)
+{
+    <div class="empty">
+        <div class="big">⌘</div>
+        No custom CLIs yet. Add one to drive a tool you already pay for.
+    </div>
+}
+
+@if (_editing is not null)
+{
+    <div class="modal-backdrop" @onclick="() => _editing = null">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>@(_isNew ? "New CLI provider" : _editing.Name)</h2>
+
+            @if (_isNew)
+            {
+                <div class="btn-row" style="margin-bottom:1rem">
+                    <span class="mono-dim">Preset:</span>
+                    @foreach (var preset in Presets)
+                    {
+                        <button class="btn btn-sm btn-ghost" @onclick="() => Apply(preset)">@preset.Name</button>
+                    }
+                </div>
+            }
+
+            <div class="form-grid">
+                <div class="field">
+                    <label>Name</label>
+                    <input type="text" @bind="_editing.Name" placeholder="Copilot" />
+                </div>
+                <div class="field">
+                    <label>Executable</label>
+                    <input type="text" @bind="_editing.Executable" placeholder="copilot" />
+                    <span class="hint">Must be on PATH inside the container, or an absolute path.</span>
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Description</label>
+                <input type="text" @bind="_editing.Description" />
+            </div>
+
+            <div class="field">
+                <label>Prompt arguments</label>
+                <input type="text" @bind="_editing.PromptArguments" placeholder="-p {{prompt}}" />
+                <span class="hint">
+                    Tokens: <code>{{prompt}}</code>, <code>{{systemPrompt}}</code>, <code>{{model}}</code>,
+                    <code>{{workdir}}</code>. Substituted per argument, so a long prompt stays one argument.
+                    An argument whose token is empty is dropped.
+                </span>
+            </div>
+
+            <div class="form-grid">
+                <div class="field">
+                    <label>Resume arguments</label>
+                    <input type="text" @bind="_editing.ResumeArguments" placeholder="--resume {{sessionId}}" />
+                    <span class="hint">Empty means every turn starts a fresh conversation.</span>
+                </div>
+                <div class="field">
+                    <label>Model arguments</label>
+                    <input type="text" @bind="_editing.ModelArguments" placeholder="--model {{model}}" />
+                </div>
+            </div>
+
+            <div class="form-grid">
+                <div class="field">
+                    <label>Models offered (comma separated)</label>
+                    <input type="text" value="@string.Join(", ", _editing.Models)"
+                           @onchange="e => _editing.Models = SplitList(e.Value?.ToString())"
+                           placeholder="shown in the agent's model dropdown" />
+                </div>
+                <div class="field">
+                    <label>Thinking arguments</label>
+                    <input type="text" @bind="_editing.EffortArguments" placeholder="--effort {{effort}}" />
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Thinking levels offered (comma separated)</label>
+                <input type="text" value="@string.Join(", ", _editing.Efforts)"
+                       @onchange="e => _editing.Efforts = SplitList(e.Value?.ToString())"
+                       placeholder="low, medium, high" />
+            </div>
+
+            <div class="field">
+                <label>Output format</label>
+                <select @bind="_editing.OutputFormat">
+                    <option value="@CliOutputFormat.PlainText">Plain text — everything it prints is the answer</option>
+                    <option value="@CliOutputFormat.JsonLines">JSON lines — one object per line</option>
+                </select>
+            </div>
+
+            @if (_editing.OutputFormat == CliOutputFormat.JsonLines)
+            {
+                <div class="form-grid">
+                    <div class="field">
+                        <label>Text property</label>
+                        <input type="text" @bind="_editing.TextProperty" placeholder="message.content" />
+                    </div>
+                    <div class="field">
+                        <label>Session id property</label>
+                        <input type="text" @bind="_editing.SessionIdProperty" placeholder="session_id" />
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Error property</label>
+                    <input type="text" @bind="_editing.ErrorProperty" placeholder="error" />
+                    <span class="hint">Dotted paths are followed, e.g. <code>result.text</code>.</span>
+                </div>
+            }
+
+            <div class="divider"></div>
+            <div class="section-tag">Sign-in</div>
+
+            <div class="form-grid">
+                <div class="field">
+                    <label>Login arguments</label>
+                    <input type="text" @bind="_editing.LoginArguments" placeholder="auth login" />
+                </div>
+                <div class="field">
+                    <label>Logout arguments</label>
+                    <input type="text" @bind="_editing.LogoutArguments" placeholder="auth logout" />
+                </div>
+            </div>
+
+            <div class="form-grid">
+                <div class="field">
+                    <label>Status arguments</label>
+                    <input type="text" @bind="_editing.StatusArguments" placeholder="auth status" />
+                </div>
+                <div class="field">
+                    <label>Signed-out marker</label>
+                    <input type="text" @bind="_editing.LoggedOutMarker" placeholder="not logged in" />
+                    <span class="hint">Text in the status output meaning signed out.</span>
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Environment (KEY=value per line)</label>
+                <textarea rows="3" value="@EnvironmentText" @onchange="e => SetEnvironment(e.Value?.ToString())"></textarea>
+            </div>
+
+            <div class="check">
+                <input type="checkbox" id="cli-enabled" @bind="_editing.Enabled" />
+                <label for="cli-enabled" style="text-transform:none;letter-spacing:0">Enabled</label>
+            </div>
+
+            <div class="btn-row">
+                <button class="btn btn-primary" @onclick="SaveAsync">Save provider</button>
+                <button class="btn btn-ghost" @onclick="() => _editing = null">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private IReadOnlyList<CliProvider> _providers = [];
+    private IReadOnlyList<Agent> _agents = [];
+    private readonly Dictionary<string, string> _probes = [];
+    private CliProvider? _editing;
+    private bool _isNew;
+
+    private string EnvironmentText =>
+        string.Join('\n', _editing!.Environment.Select(p => $"{p.Key}={p.Value}"));
+
+    /// <summary>
+    /// Starting points for CLIs people are likely to have. They are only defaults — the flags each
+    /// tool accepts change over time, so the form stays fully editable.
+    /// </summary>
+    private static readonly CliProvider[] Presets =
+    [
+        new()
+        {
+            Name = "GitHub Copilot",
+            Description = "GitHub Copilot CLI, signed in with your Copilot subscription.",
+            Executable = "copilot",
+            PromptArguments = "-p {{prompt}} --allow-all-tools",
+            ResumeArguments = "--resume {{sessionId}}",
+            ModelArguments = "--model {{model}}",
+            OutputFormat = CliOutputFormat.PlainText,
+            LoginArguments = "auth login",
+            LogoutArguments = "auth logout",
+            StatusArguments = "auth status",
+            LoggedOutMarker = "not logged in",
+        },
+        new()
+        {
+            Name = "Gemini CLI",
+            Description = "Google's Gemini CLI, signed in with a Google account.",
+            Executable = "gemini",
+            PromptArguments = "-p {{prompt}}",
+            ModelArguments = "-m {{model}}",
+            OutputFormat = CliOutputFormat.PlainText,
+            LoginArguments = string.Empty,
+            StatusArguments = string.Empty,
+        },
+        new()
+        {
+            Name = "Cursor agent",
+            Description = "Cursor's CLI agent, signed in with your Cursor subscription.",
+            Executable = "cursor-agent",
+            PromptArguments = "-p {{prompt}} --output-format text",
+            ResumeArguments = "--resume {{sessionId}}",
+            ModelArguments = "-m {{model}}",
+            OutputFormat = CliOutputFormat.PlainText,
+            LoginArguments = "login",
+            LogoutArguments = "logout",
+            StatusArguments = "status",
+            LoggedOutMarker = "not logged in",
+        },
+    ];
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader("CLI providers", "Drive any signed-in CLI as an agent");
+    }
+
+    private async Task ReloadAsync()
+    {
+        _providers = await ProviderStore.GetAllAsync();
+        _agents = await AgentStore.GetAllAsync();
+    }
+
+    private void Edit(CliProvider provider)
+    {
+        _isNew = _providers.All(p => p.Id != provider.Id);
+        _editing = _isNew ? provider : Clone(provider);
+    }
+
+    private void Apply(CliProvider preset)
+    {
+        if (_editing is null)
+            return;
+
+        var copy = Clone(preset);
+        copy.Id = _editing.Id;
+        copy.CreatedAt = _editing.CreatedAt;
+        _editing = copy;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_editing is null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(_editing.Name) || string.IsNullOrWhiteSpace(_editing.Executable))
+        {
+            Layout.Notify("A provider needs a name and an executable.", "err");
+            return;
+        }
+
+        if (!_editing.PromptArguments.Contains("{{prompt}}", StringComparison.OrdinalIgnoreCase))
+        {
+            Layout.Notify("The prompt arguments must include {{prompt}}, or the agent has nothing to say.", "err");
+            return;
+        }
+
+        await ProviderStore.UpsertAsync(_editing);
+        _editing = null;
+        await ReloadAsync();
+        Layout.Notify("CLI provider saved.", "ok");
+    }
+
+    private async Task DeleteAsync(CliProvider provider)
+    {
+        if (UsageCount(provider) > 0)
+        {
+            Layout.Notify("Agents still use that provider. Move them first.", "err");
+            return;
+        }
+
+        await ProviderStore.DeleteAsync(provider.Id);
+        await ReloadAsync();
+    }
+
+    /// <summary>Checks the executable actually exists before anyone waits on a failing session.</summary>
+    private async Task ProbeAsync(CliProvider provider)
+    {
+        var result = await Processes.RunAsync(new ProcessRequest(provider.Executable, ["--version"], TimeoutSeconds: 20));
+
+        _probes[provider.Id] = result.ExitCode == -1
+            ? "not installed"
+            : $"ok — {FirstLine(result.Text)}";
+
+        StateHasChanged();
+    }
+
+    private int UsageCount(CliProvider provider) =>
+        _agents.Count(a => a.CliProviderId == provider.Id);
+
+    private void SetEnvironment(string? value)
+    {
+        var pairs = new Dictionary<string, string>();
+        foreach (var line in (value ?? string.Empty).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var separator = line.IndexOf('=');
+            if (separator > 0)
+                pairs[line[..separator].Trim()] = line[(separator + 1)..].Trim();
+        }
+
+        _editing!.Environment = pairs;
+    }
+
+    private static List<string> SplitList(string? value) =>
+        (value ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+    private static string FirstLine(string text) =>
+        text.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? string.Empty;
+
+    private static CliProvider Clone(CliProvider provider) => new()
+    {
+        Id = provider.Id,
+        CreatedAt = provider.CreatedAt,
+        Name = provider.Name,
+        Description = provider.Description,
+        Executable = provider.Executable,
+        PromptArguments = provider.PromptArguments,
+        ResumeArguments = provider.ResumeArguments,
+        ModelArguments = provider.ModelArguments,
+        Models = [.. provider.Models],
+        EffortArguments = provider.EffortArguments,
+        Efforts = [.. provider.Efforts],
+        PermissionArguments = new Dictionary<string, string>(provider.PermissionArguments),
+        OutputFormat = provider.OutputFormat,
+        TextProperty = provider.TextProperty,
+        SessionIdProperty = provider.SessionIdProperty,
+        ErrorProperty = provider.ErrorProperty,
+        LoginArguments = provider.LoginArguments,
+        LogoutArguments = provider.LogoutArguments,
+        StatusArguments = provider.StatusArguments,
+        LoggedOutMarker = provider.LoggedOutMarker,
+        Environment = new Dictionary<string, string>(provider.Environment),
+        Enabled = provider.Enabled,
+        Accent = provider.Accent,
+    };
+}

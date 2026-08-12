@@ -1,0 +1,217 @@
+@page "/workflows"
+@implements IDisposable
+@inject IEntityStore<Workflow> WorkflowStore
+@inject IEntityStore<Project> ProjectStore
+@inject IWorkflowEngine Engine
+@inject NavigationManager Nav
+
+<PageTitle>Workflows · DevStudio</PageTitle>
+
+<div class="btn-row" style="margin-bottom:1.2rem">
+    <button class="btn btn-primary" @onclick="CreateAsync">New workflow</button>
+    <span class="mono-dim">
+        Steps run in order; steps sharing an order run at once. Every step's output is published to the
+        run context as <code>{{steps.step-name}}</code> for all later steps.
+    </span>
+</div>
+
+<div class="grid grid-auto" style="margin-bottom:1.6rem">
+    @foreach (var workflow in _workflows)
+    {
+        <div class="card">
+            <div class="card-head">
+                <h3>@workflow.Name</h3>
+                <div class="spacer"></div>
+                <span class="pill">@workflow.Steps.Count steps</span>
+            </div>
+            <p class="small">@workflow.Description</p>
+
+            <div class="btn-row" style="margin-bottom:0.8rem">
+                @foreach (var input in workflow.Inputs)
+                {
+                    <span class="pill">@input.Name</span>
+                }
+                @if (workflow.ProjectId is not null)
+                {
+                    <span class="pill pill-cyan"><span class="dot"></span>@ProjectName(workflow.ProjectId)</span>
+                }
+            </div>
+
+            <div class="btn-row">
+                <button class="btn btn-sm btn-primary" @onclick="() => OpenRunDialog(workflow)">Run</button>
+                <a class="btn btn-sm" href="/workflows/@workflow.Id/edit">Edit</a>
+                <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(workflow)">Delete</button>
+            </div>
+        </div>
+    }
+</div>
+
+@if (_workflows.Count == 0)
+{
+    <div class="empty">
+        <div class="big">⇶</div>
+        No workflows yet. Chain agents into something repeatable.
+    </div>
+}
+
+<div class="section-tag">Runs</div>
+<div class="table-wrap">
+    <table class="table">
+        <thead>
+        <tr><th>Workflow</th><th>Status</th><th>Steps</th><th>Triggered by</th><th>Started</th><th></th></tr>
+        </thead>
+        <tbody>
+        @foreach (var run in _runs.Take(25))
+        {
+            <tr style="cursor:pointer" @onclick="() => OpenRun(run)">
+                <td>@run.WorkflowName</td>
+                <td><StatusPill Run="run.Status" /></td>
+                <td class="mono-dim">@run.Steps.Count(s => s.Status == RunStatus.Succeeded)/@run.Steps.Count</td>
+                <td class="mono-dim">@run.TriggeredBy</td>
+                <td class="mono-dim">@(run.StartedAt?.ToLocalTime().ToString("dd MMM HH:mm") ?? "—")</td>
+                <td>
+                    @if (run.Status == RunStatus.Running)
+                    {
+                        <button class="btn btn-sm btn-danger" @onclick:stopPropagation="true" @onclick="() => CancelAsync(run)">Cancel</button>
+                    }
+                </td>
+            </tr>
+        }
+        @if (_runs.Count == 0)
+        {
+            <tr><td colspan="6" class="mono-dim">No runs yet.</td></tr>
+        }
+        </tbody>
+    </table>
+</div>
+
+@if (_running is not null)
+{
+    <div class="modal-backdrop" @onclick="() => _running = null">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>Run @_running.Name</h2>
+
+            @foreach (var input in _running.Inputs)
+            {
+                <div class="field">
+                    <label>@input.Name @(input.Required ? "*" : "")</label>
+                    <textarea rows="3" value="@GetInput(input.Name)"
+                              @onchange="e => SetInput(input.Name, e.Value?.ToString())"
+                              placeholder="@input.Description"></textarea>
+                </div>
+            }
+
+            <div class="field">
+                <label>Project</label>
+                <select @bind="_runProjectId">
+                    <option value="">@(_running.ProjectId is null ? "None" : "Workflow default")</option>
+                    @foreach (var project in _projects)
+                    {
+                        <option value="@project.Id">@project.Name</option>
+                    }
+                </select>
+            </div>
+
+            <div class="btn-row">
+                <button class="btn btn-primary" @onclick="StartRunAsync">Start run</button>
+                <button class="btn btn-ghost" @onclick="() => _running = null">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private IReadOnlyList<Workflow> _workflows = [];
+    private IReadOnlyList<Project> _projects = [];
+    private IReadOnlyList<WorkflowRun> _runs = [];
+    private Workflow? _running;
+    private readonly Dictionary<string, string> _inputs = [];
+    private string _runProjectId = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Engine.RunUpdated += OnRunUpdated;
+        await ReloadAsync();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader("Workflows", "Repeatable chains of agent work");
+    }
+
+    private async Task ReloadAsync()
+    {
+        _workflows = await WorkflowStore.GetAllAsync();
+        _projects = await ProjectStore.GetAllAsync();
+        _runs = await Engine.GetRunsAsync();
+    }
+
+    private async Task CreateAsync()
+    {
+        var workflow = await WorkflowStore.UpsertAsync(new Workflow { Name = "New workflow" });
+        Nav.NavigateTo($"/workflows/{workflow.Id}/edit");
+    }
+
+    private void OpenRunDialog(Workflow workflow)
+    {
+        _running = workflow;
+        _inputs.Clear();
+        _runProjectId = string.Empty;
+
+        foreach (var input in workflow.Inputs)
+            _inputs[input.Name] = input.DefaultValue ?? string.Empty;
+    }
+
+    private async Task StartRunAsync()
+    {
+        if (_running is null)
+            return;
+
+        try
+        {
+            var inputs = new Dictionary<string, string>(_inputs);
+            if (!string.IsNullOrWhiteSpace(_runProjectId))
+                inputs["projectId"] = _runProjectId;
+
+            var run = await Engine.StartAsync(_running.Id, inputs, "manual");
+            _running = null;
+            Nav.NavigateTo($"/workflows/runs/{run.Id}");
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify(ex.Message, "err");
+        }
+    }
+
+    private async Task CancelAsync(WorkflowRun run)
+    {
+        await Engine.CancelAsync(run.Id);
+        Layout.Notify("Cancelling the run.");
+    }
+
+    private async Task DeleteAsync(Workflow workflow)
+    {
+        await WorkflowStore.DeleteAsync(workflow.Id);
+        await ReloadAsync();
+    }
+
+    private void OpenRun(WorkflowRun run) => Nav.NavigateTo($"/workflows/runs/{run.Id}");
+
+    private string GetInput(string name) => _inputs.TryGetValue(name, out var value) ? value : string.Empty;
+
+    private void SetInput(string name, string? value) => _inputs[name] = value ?? string.Empty;
+
+    private string ProjectName(string? projectId) =>
+        _projects.FirstOrDefault(p => p.Id == projectId)?.Name ?? "project";
+
+    private void OnRunUpdated(WorkflowRun run) => InvokeAsync(async () =>
+    {
+        _runs = await Engine.GetRunsAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose() => Engine.RunUpdated -= OnRunUpdated;
+}

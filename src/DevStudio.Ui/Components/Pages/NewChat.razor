@@ -1,0 +1,108 @@
+@page "/agents/{AgentId}/chat"
+@inject IEntityStore<Agent> AgentStore
+@inject IEntityStore<Project> ProjectStore
+@inject ISessionManager Sessions
+@inject NavigationManager Nav
+
+<PageTitle>New session · DevStudio</PageTitle>
+
+@if (_agent is null)
+{
+    <div class="empty">That agent no longer exists.</div>
+}
+else
+{
+    <div class="card" style="max-width:820px">
+        <div class="section-tag">New session</div>
+        <h2>@_agent.Name</h2>
+        <p class="small">@_agent.Description</p>
+
+        <div class="btn-row" style="margin-bottom:1rem">
+            <span class="pill @(_agent.Provider == AiProvider.Claude ? "pill-cyan" : "pill-magenta")">
+                <span class="dot"></span>@_agent.Provider
+            </span>
+            <span class="pill">@_agent.PermissionMode</span>
+            @if (_agent.UseWorktree && _agent.RepositoryId is not null)
+            {
+                <span class="pill">fresh worktree</span>
+            }
+        </div>
+
+        <div class="field">
+            <label>Project</label>
+            <select @bind="_projectId">
+                <option value="">@(_agent.ProjectId is null ? "None" : "Agent default")</option>
+                @foreach (var project in _projects)
+                {
+                    <option value="@project.Id">@project.Name</option>
+                }
+            </select>
+        </div>
+
+        <div class="field">
+            <label>First prompt</label>
+            <textarea @bind="_prompt" @bind:event="oninput" rows="6" @onkeydown="OnKeyDown"
+                      placeholder="Describe the work. Ctrl+Enter to start."></textarea>
+        </div>
+
+        <div class="btn-row">
+            <button class="btn btn-primary" disabled="@(_starting || string.IsNullOrWhiteSpace(_prompt))" @onclick="StartAsync">
+                @(_starting ? "Starting…" : "Start session")
+            </button>
+            <a class="btn btn-ghost" href="/agents">Back</a>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string AgentId { get; set; } = string.Empty;
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private Agent? _agent;
+    private IReadOnlyList<Project> _projects = [];
+    private string _prompt = string.Empty;
+    private string _projectId = string.Empty;
+    private bool _starting;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _agent = await AgentStore.GetAsync(AgentId);
+        _projects = await ProjectStore.GetAllAsync();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader("New session", _agent?.Name);
+    }
+
+    private async Task StartAsync()
+    {
+        if (_agent is null || string.IsNullOrWhiteSpace(_prompt))
+            return;
+
+        _starting = true;
+        try
+        {
+            var session = await Sessions.StartAsync(new StartSessionRequest
+            {
+                AgentId = _agent.Id,
+                Prompt = _prompt.Trim(),
+                ProjectId = string.IsNullOrWhiteSpace(_projectId) ? null : _projectId,
+            });
+
+            Nav.NavigateTo($"/chat/{session.Id}");
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify(ex.Message, "err");
+            _starting = false;
+        }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && (args.CtrlKey || args.MetaKey))
+            await StartAsync();
+    }
+}

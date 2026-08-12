@@ -46,7 +46,7 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Test
-        run: dotnet test AiShop.slnx -c Release
+        run: dotnet test DevStudio.slnx -c Release
 
   publish:
     name: Build and push image
@@ -97,9 +97,8 @@ jobs:
             type=sha,format=long
             type=raw,value=latest,enable={{is_default_branch}}
           labels: |
-            org.opencontainers.image.title=AI Shop Orchestrator
+            org.opencontainers.image.title=DevStudio
             org.opencontainers.image.description=Self-hosted console for running Claude Code and OpenAI Codex agents side by side
-            org.opencontainers.image.licenses=MIT
 
       - name: Build and push
         id: build
@@ -115,8 +114,9 @@ jobs:
           # a publish rather than a fully emulated SDK run.
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          provenance: mode=max
-          sbom: true
+          # Attestations need a registry; a PR build has nowhere to put them.
+          provenance: ${{ github.event_name != 'pull_request' && 'mode=max' || 'false' }}
+          sbom: ${{ github.event_name != 'pull_request' }}
 
       - name: Attest build provenance
         if: github.event_name != 'pull_request'

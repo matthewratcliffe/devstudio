@@ -34,13 +34,13 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Restore
-        run: dotnet restore AiShop.slnx
+        run: dotnet restore DevStudio.slnx
 
       - name: Build
-        run: dotnet build AiShop.slnx -c Release --no-restore
+        run: dotnet build DevStudio.slnx -c Release --no-restore
 
       - name: Test
-        run: dotnet test AiShop.slnx -c Release --no-build --logger "trx;LogFileName=test-results.trx"
+        run: dotnet test DevStudio.slnx -c Release --no-build --logger "trx;LogFileName=test-results.trx"
 
       - name: Upload test results
         if: always()

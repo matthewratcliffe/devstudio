@@ -7,20 +7,20 @@ FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG TARGETARCH
 WORKDIR /src
 
-COPY AiShop.slnx ./
-COPY src/AiShop.Domain/AiShop.Domain.csproj src/AiShop.Domain/
-COPY src/AiShop.Application/AiShop.Application.csproj src/AiShop.Application/
-COPY src/AiShop.Infrastructure/AiShop.Infrastructure.csproj src/AiShop.Infrastructure/
-COPY src/AiShop.Ui/AiShop.Ui.csproj src/AiShop.Ui/
-COPY tests/AiShop.Tests/AiShop.Tests.csproj tests/AiShop.Tests/
-RUN ARCH=$(case "$TARGETARCH" in arm64) echo arm64;; *) echo x64;; esac) && dotnet restore src/AiShop.Ui/AiShop.Ui.csproj -a "$ARCH"
+COPY DevStudio.slnx ./
+COPY src/DevStudio.Domain/DevStudio.Domain.csproj src/DevStudio.Domain/
+COPY src/DevStudio.Application/DevStudio.Application.csproj src/DevStudio.Application/
+COPY src/DevStudio.Infrastructure/DevStudio.Infrastructure.csproj src/DevStudio.Infrastructure/
+COPY src/DevStudio.Ui/DevStudio.Ui.csproj src/DevStudio.Ui/
+COPY tests/DevStudio.Tests/DevStudio.Tests.csproj tests/DevStudio.Tests/
+RUN ARCH=$(case "$TARGETARCH" in arm64) echo arm64;; *) echo x64;; esac) && dotnet restore src/DevStudio.Ui/DevStudio.Ui.csproj -a "$ARCH"
 
 COPY . .
 
 # Publish restores again on purpose: with --no-restore after a csproj-only restore, the SDK omits the
 # framework static web assets and the published app ends up with no _framework/blazor.web.js — which
 # leaves every page rendered but completely inert.
-RUN ARCH=$(case "$TARGETARCH" in arm64) echo arm64;; *) echo x64;; esac) && dotnet publish src/AiShop.Ui/AiShop.Ui.csproj -c Release -a "$ARCH" --no-self-contained -o /app/publish
+RUN ARCH=$(case "$TARGETARCH" in arm64) echo arm64;; *) echo x64;; esac) && dotnet publish src/DevStudio.Ui/DevStudio.Ui.csproj -c Release -a "$ARCH" --no-self-contained -o /app/publish
 
 # Fail the build rather than ship a UI where nothing works.
 RUN test -f /app/publish/wwwroot/_framework/blazor.web.js     || (echo 'FATAL: blazor.web.js missing from publish output' && exit 1)
@@ -79,4 +79,4 @@ EXPOSE 7080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://127.0.0.1:7080/healthz || exit 1
 
-ENTRYPOINT ["dotnet", "AiShop.Ui.dll"]
+ENTRYPOINT ["dotnet", "DevStudio.Ui.dll"]

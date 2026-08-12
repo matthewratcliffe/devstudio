@@ -1,0 +1,121 @@
+@page "/workflows/runs/{RunId}"
+@implements IDisposable
+@inject IWorkflowEngine Engine
+@inject NavigationManager Nav
+
+<PageTitle>Workflow run · DevStudio</PageTitle>
+
+@if (_run is null)
+{
+    <div class="empty">That run no longer exists.</div>
+}
+else
+{
+    <div class="card" style="margin-bottom:1.2rem">
+        <div class="card-head">
+            <h3>@_run.WorkflowName</h3>
+            <div class="spacer"></div>
+            <StatusPill Run="_run.Status" />
+        </div>
+
+        <dl class="kv" style="margin-bottom:0.8rem">
+            <dt>Triggered by</dt><dd>@_run.TriggeredBy</dd>
+            <dt>Started</dt><dd>@(_run.StartedAt?.ToLocalTime().ToString("dd MMM yyyy HH:mm:ss") ?? "—")</dd>
+            <dt>Finished</dt><dd>@(_run.FinishedAt?.ToLocalTime().ToString("dd MMM yyyy HH:mm:ss") ?? "—")</dd>
+        </dl>
+
+        @if (_run.Inputs.Count > 0)
+        {
+            <div class="section-tag">Inputs</div>
+            <dl class="kv">
+                @foreach (var input in _run.Inputs)
+                {
+                    <dt>@input.Key</dt>
+                    <dd>@input.Value</dd>
+                }
+            </dl>
+        }
+
+        @if (_run.Error is { Length: > 0 })
+        {
+            <div class="toast err" style="margin-top:0.8rem">@_run.Error</div>
+        }
+
+        @if (_run.Status == RunStatus.Running)
+        {
+            <div class="btn-row" style="margin-top:0.8rem">
+                <button class="btn btn-sm btn-danger" @onclick="CancelAsync">Cancel run</button>
+            </div>
+        }
+    </div>
+
+    <div class="section-tag">Steps</div>
+
+    @foreach (var step in _run.Steps.OrderBy(s => s.Order))
+    {
+        <div class="card" style="margin-bottom:0.9rem">
+            <div class="card-head">
+                <h3>@step.Order. @step.StepName</h3>
+                <div class="spacer"></div>
+                <StatusPill Run="step.Status" />
+            </div>
+
+            <div class="mono-dim" style="margin-bottom:0.6rem">
+                @(step.StartedAt?.ToLocalTime().ToString("HH:mm:ss") ?? "—")
+                → @(step.FinishedAt?.ToLocalTime().ToString("HH:mm:ss") ?? "—")
+                @if (step.SessionId is { Length: > 0 })
+                {
+                    <a href="/chat/@step.SessionId" style="margin-left:0.6rem">open session</a>
+                }
+            </div>
+
+            @if (step.Error is { Length: > 0 })
+            {
+                <div class="toast err" style="margin-bottom:0.6rem">@step.Error</div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(step.Output))
+            {
+                <div class="msg msg-agent" style="max-width:100%">
+                    <div class="body">@((MarkupString)MarkdownLite.ToHtml(step.Output))</div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public string RunId { get; set; } = string.Empty;
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private WorkflowRun? _run;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Engine.RunUpdated += OnRunUpdated;
+        _run = await Engine.GetRunAsync(RunId);
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader(_run?.WorkflowName ?? "Run", "Workflow run");
+    }
+
+    private async Task CancelAsync()
+    {
+        await Engine.CancelAsync(RunId);
+        Layout.Notify("Cancelling.");
+    }
+
+    private void OnRunUpdated(WorkflowRun run)
+    {
+        if (run.Id != RunId)
+            return;
+
+        _run = run;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => Engine.RunUpdated -= OnRunUpdated;
+}

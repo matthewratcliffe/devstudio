@@ -1,4 +1,8 @@
-# AI Shop Orchestrator
+# DevStudio
+
+[![CI](https://github.com/matthewratcliffe/devstudio/actions/workflows/ci.yml/badge.svg)](https://github.com/matthewratcliffe/devstudio/actions/workflows/ci.yml)
+[![Publish container image](https://github.com/matthewratcliffe/devstudio/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/matthewratcliffe/devstudio/actions/workflows/docker-publish.yml)
+[![ghcr.io](https://img.shields.io/badge/ghcr.io-devstudio-blue?logo=docker&logoColor=white)](https://github.com/matthewratcliffe/devstudio/pkgs/container/devstudio)
 
 A self-hosted console for running **Claude Code** and **OpenAI Codex** agents side by side. Create
 agents, chat with them concurrently, chain them into scheduled workflows, give them repos and
@@ -32,14 +36,71 @@ only credential involved is the login you complete in the web UI.
 
 ## Running it
 
+### From the published image (recommended)
+
+Every push to the default branch publishes a multi-architecture image (`linux/amd64` and
+`linux/arm64`) to the GitHub Container Registry, so there is nothing to build locally:
+
+```bash
+docker run -d \
+  --name devstudio \
+  -p 7080:7080 \
+  -p 1455:1455 \
+  -v devstudio-data:/data \
+  -v devstudio-home:/home/orchestrator \
+  --restart unless-stopped \
+  ghcr.io/matthewratcliffe/devstudio:latest
+```
+
+Or with Compose — drop `build: .` and point `image:` at the registry:
+
+```yaml
+services:
+  orchestrator:
+    image: ghcr.io/matthewratcliffe/devstudio:latest
+    # ...the rest of docker-compose.yml unchanged
+```
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+The package is public, so `docker pull` needs no credentials. If you fork this and keep your package
+private, authenticate first with a personal access token that has `read:packages`:
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u <your-github-username> --password-stdin
+```
+
+#### Which tag to use
+
+| Tag | Points at | Use it when |
+| --- | --- | --- |
+| `latest` | The newest build of the default branch. | You want to track the project. |
+| `main` | Same thing, named after the branch. | Explicit branch tracking. |
+| `1.4.2` | The exact release tagged `v1.4.2`. | Reproducible deployments. |
+| `1.4` / `1` | Newest patch / newest minor within that line. | Automatic patch or minor updates only. |
+| `sha-<full-commit>` | One specific commit. | Pinning to a known-good build, or bisecting. |
+
+Every image also carries a signed [build provenance attestation](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations),
+so you can verify it came from this repository's workflow rather than someone's laptop:
+
+```bash
+gh attestation verify oci://ghcr.io/matthewratcliffe/devstudio:latest --owner matthewratcliffe
+```
+
+### Building it yourself
+
 ```bash
 docker compose up -d --build
 ```
 
+### First run
+
 Open <http://localhost:7080>, go to **Logins**, and complete the sign-in for Claude, Codex and
 GitHub in the embedded terminal. Each one prints a link and, for Codex and GitHub, a one-time code —
 both are pulled out of the scrollback and shown above the terminal with a copy button. Credentials
-land in the `ai-shop-home` volume and survive restarts and rebuilds.
+land in the `devstudio-home` volume and survive restarts and rebuilds.
 
 Each account picks its own **sign-in method**, because no single flow suits every network:
 
@@ -54,10 +115,10 @@ Each account picks its own **sign-in method**, because no single flow suits ever
 ### Local development
 
 ```bash
-dotnet run --project src/AiShop.Ui
+dotnet run --project src/DevStudio.Ui
 ```
 
-In `Development` the app stores state under `src/AiShop.Ui/.aishop/` and uses your real home
+In `Development` the app stores state under `src/DevStudio.Ui/.devstudio/` and uses your real home
 directory, so it picks up the CLI logins you already have.
 
 ## Architecture
@@ -66,12 +127,12 @@ Clean architecture, dependencies pointing inwards:
 
 ```
 src/
-  AiShop.Domain          entities only — agents, sessions, projects, workflows, schedules, skills, MCP
-  AiShop.Application     abstractions and orchestration — SessionManager, WorkflowEngine, cron parser
-  AiShop.Infrastructure  the outside world — CLI adapters, git, gh, JSON stores, pty terminals, scheduler
-  AiShop.Ui              Blazor Server console, MCP endpoint, PWA
+  DevStudio.Domain          entities only — agents, sessions, projects, workflows, schedules, skills, MCP
+  DevStudio.Application     abstractions and orchestration — SessionManager, WorkflowEngine, cron parser
+  DevStudio.Infrastructure  the outside world — CLI adapters, git, gh, JSON stores, pty terminals, scheduler
+  DevStudio.Ui              Blazor Server console, MCP endpoint, PWA
 tests/
-  AiShop.Tests           cron, templating, persistence, workflow engine
+  DevStudio.Tests           cron, templating, persistence, workflow engine
 ```
 
 The key seam is `IProviderCli`. `ClaudeCli` runs `claude -p --output-format stream-json` and
@@ -287,3 +348,124 @@ blocks waiting for an approval nobody is there to give. Use it with a worktree.
 ```bash
 dotnet test
 ```
+
+Coverage collection is wired up through `coverlet.collector`, so `dotnet test --collect:"XPlat Code Coverage"`
+works without extra packages.
+
+## Continuous integration and releases
+
+Two workflows live in `.github/workflows`:
+
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| `ci.yml` | Every branch push, every pull request, manual. | Restores, builds and tests the solution on .NET 10, caching NuGet between runs and uploading the `.trx` results as an artifact. |
+| `docker-publish.yml` | Push to `main`/`master`, tags matching `v*.*.*`, pull requests, manual. | Runs the tests, then builds the image for `linux/amd64` and `linux/arm64` and pushes it to `ghcr.io/<owner>/<repo>`. |
+
+Things worth knowing about the publish workflow:
+
+- **Pull requests build but never push.** A broken `Dockerfile` fails the PR instead of being found
+  after the merge, and no untrusted branch can publish a tag.
+- **Tests gate the image.** The `publish` job `needs: test`, so a red suite means no image.
+- **Nothing to configure.** It authenticates with the built-in `GITHUB_TOKEN` — no secret to create
+  — and derives the image name from `${{ github.repository }}`, lowercased because ghcr.io rejects
+  uppercase paths. Fork it and it publishes to your namespace with no edits.
+- **The layer cache lives in GitHub Actions cache** (`type=gha`), so the expensive `apt` and `npm`
+  layers are reused between runs.
+- **Provenance and an SBOM** are attached to every push, plus a separate signed attestation you can
+  check with `gh attestation verify`.
+- **`workflow_dispatch` takes a `platforms` input** if you want a quick amd64-only build.
+
+### Cutting a release
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+That publishes `1.0.0`, `1.0`, `1` and `sha-<commit>` — `latest` continues to follow the default
+branch.
+
+### First publish: making the package public
+
+A new GHCR package inherits the repository's visibility, and a package published from a private repo
+stays private even if the repo is later made public. To change it: **repository → Packages → the
+package → Package settings → Change visibility**. While it is private, anyone pulling needs a token
+with `read:packages`.
+
+If the first run fails with `denied: installation not allowed to Create organization package`, the
+repository's **Settings → Actions → General → Workflow permissions** is set to read-only; switch it
+to read and write, or grant packages write there.
+
+### Why the Dockerfile cross-compiles
+
+The build stage is pinned with `FROM --platform=$BUILDPLATFORM` and publishes with `-a $TARGETARCH`.
+The .NET SDK therefore always runs natively on the amd64 runner and merely emits arm64 output,
+instead of the whole toolchain being emulated through QEMU — which turns an arm64 build from tens of
+minutes into roughly the cost of a second publish. Only the final runtime layer is genuinely arm64.
+
+## Operating it
+
+### Upgrading
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+State lives in volumes, not in the image, so an upgrade keeps every agent, project, session and
+login. Roll back by pinning the previous tag or `sha-<commit>` and running the same two commands.
+
+### Backing up
+
+Both volumes matter — `devstudio-data` is the state, `devstudio-home` is the CLI credentials:
+
+```bash
+docker run --rm -v devstudio-data:/data -v "$PWD:/backup" alpine \
+  tar czf /backup/devstudio-data.tgz -C /data .
+```
+
+Restore by extracting the same tarball back into a fresh volume. There is no database, so a file
+copy is a complete and consistent backup once the container is stopped.
+
+### Logs and health
+
+```bash
+docker compose logs -f orchestrator
+curl -fsS http://localhost:7080/healthz
+```
+
+The image declares a `HEALTHCHECK` against `/healthz`, so `docker ps` reports the app's own view of
+itself rather than merely that the process exists.
+
+### Exposing it beyond localhost
+
+The app has **no authentication of its own** and its agents can run commands and reach your git
+forge with your credentials. Treat the port as privileged: keep it on a trusted network, or put it
+behind a reverse proxy that terminates TLS and authenticates users. Blazor Server needs WebSockets
+proxied — with nginx that means `proxy_set_header Upgrade $http_upgrade;` and
+`proxy_set_header Connection "upgrade";` on the location block.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| Pages render but nothing is interactive | `blazor.web.js` missing from the publish output. The Dockerfile asserts it exists and fails the build, so this means you are running a hand-built publish that used `--no-restore`. |
+| *"Claude requested permissions… but you haven't granted it yet"* | An MCP server's tools were not allow-listed. Attaching the server through the UI passes `--allowedTools mcp__<server>` for you; a hand-rolled config has to do the same. |
+| An agent can see MCP tools but never calls them | The agent is in **Plan** mode, which refuses MCP tool calls outright. Use Accept edits. |
+| A scheduled run stalls forever | Default permission mode blocks on an approval prompt nobody can answer. Unattended work needs **Accept edits** or higher, ideally in a worktree. |
+| Codex sign-in lands on a dead `localhost:1455` page | Either edit the port in the address bar to `7080`, or paste the whole failed URL into the field on the sign-in terminal. Device code sign-in avoids the problem entirely. |
+| `git` refuses to use a worktree inside the container | Only relevant outside this image — the image already sets `safe.directory '*'` for the `orchestrator` user. |
+| Logins disappear after a rebuild | The `devstudio-home` volume was not mounted. Credentials live in `/home/orchestrator`. |
+
+## Repository layout
+
+```
+.github/workflows/   CI and container publishing
+src/                 the four projects, dependencies pointing inwards
+tests/               xUnit suite
+Dockerfile           multi-stage, cross-compiling, non-root runtime
+docker-compose.yml   the supported way to run it
+```
+
+## Licence
+
+No licence file yet — add one before publishing the repository, and update the
+`org.opencontainers.image.licenses` label in `.github/workflows/docker-publish.yml` to match.

@@ -1,8 +1,10 @@
 services:
   orchestrator:
+    # Swap these two lines for the published image to skip building:
+    #   image: ghcr.io/matthewratcliffe/devstudio:latest
     build: .
-    image: ai-shop-orchestrator
-    container_name: ai-shop
+    image: devstudio
+    container_name: devstudio
     restart: unless-stopped
     ports:
       - "7080:7080"
@@ -11,9 +13,9 @@ services:
       - "1455:1455"
     volumes:
       # State, cloned repos, worktrees and project files.
-      - ai-shop-data:/data
+      - devstudio-data:/data
       # CLI credentials: log in once through the web UI and they persist here.
-      - ai-shop-home:/home/orchestrator
+      - devstudio-home:/home/orchestrator
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       Orchestrator__MaxConcurrentSessions: "6"
@@ -29,5 +31,5 @@ services:
       start_period: 20s
 
 volumes:
-  ai-shop-data:
-  ai-shop-home:
+  devstudio-data:
+  devstudio-home:
