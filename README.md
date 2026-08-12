@@ -34,6 +34,15 @@ only credential involved is the login you complete in the web UI.
 | **PWA** | Installable, with a themed offline page. |
 | **Persistence** | JSON files on a Docker volume. No database. A volume backup is the whole backup. |
 
+## Project site
+
+A static site lives in [`docs/`](docs/) and is what GitHub Pages serves. To turn it on: **Settings →
+Pages → Source: Deploy from a branch**, branch `main`, folder `/docs`. It will appear at
+<https://matthewratcliffe.github.io/devstudio/>.
+
+It is three files and the fonts already used by the app — no build step, no generator, nothing to
+install. Edit `docs/index.html` and push.
+
 ## Running it
 
 ### From the published image (recommended)
