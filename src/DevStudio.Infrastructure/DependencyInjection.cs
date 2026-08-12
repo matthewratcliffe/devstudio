@@ -14,6 +14,8 @@ using DevStudio.Infrastructure.SourceControl;
 using DevStudio.Infrastructure.Persistence;
 using DevStudio.Infrastructure.Processes;
 using DevStudio.Infrastructure.Providers;
+using DevStudio.Infrastructure.Providers.Acp;
+using DevStudio.Infrastructure.Providers.OpenAi;
 using DevStudio.Infrastructure.Scheduling;
 using DevStudio.Infrastructure.Seed;
 using DevStudio.Infrastructure.Terminals;
@@ -53,6 +55,11 @@ public static class DependencyInjection
         services.AddSingleton<IProviderCli, ClaudeCli>();
         services.AddSingleton<IProviderCli, CodexCli>();
         services.AddSingleton<IProviderCliRegistry, ProviderCliRegistry>();
+
+        // User-defined providers that are not plain commands: an ACP agent driven over its stdio,
+        // and OpenAI-compatible endpoints, whose conversations the orchestrator has to remember.
+        services.AddSingleton<IAcpConnectionFactory, AcpProcessConnectionFactory>();
+        services.AddSingleton<ConversationStore>();
         services.AddSingleton<IAccountService, AccountService>();
 
         // Used to replay OAuth callbacks to the CLI's own loopback listener.

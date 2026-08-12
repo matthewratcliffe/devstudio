@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
@@ -36,6 +37,10 @@ public sealed class CodexCli : IProviderCli
         var channel = Channel.CreateUnbounded<AgentEvent>();
         var arguments = BuildArguments(request);
 
+        // Partial and finished text arrive on separate events, so the turn keeps track of how
+        // much of the current message has already been sent to the transcript.
+        var stream = new MessageStream();
+
         var pump = Task.Run(async () =>
         {
             try
@@ -49,7 +54,7 @@ public sealed class CodexCli : IProviderCli
                         TimeoutSeconds: 0),
                     async (line, isError, _) =>
                     {
-                        foreach (var evt in Translate(line, isError))
+                        foreach (var evt in Translate(line, isError, stream))
                             await channel.Writer.WriteAsync(evt, CancellationToken.None);
                     },
                     ct);
@@ -84,7 +89,11 @@ public sealed class CodexCli : IProviderCli
     {
         var arguments = new List<string> { "exec" };
 
-        if (!string.IsNullOrWhiteSpace(request.ResumeSessionId))
+        // `exec resume` takes a much smaller set of flags than `exec` does, and codex exits with a
+        // usage error rather than ignoring one it does not know. That is why only the first message
+        // of a session ever worked: every reply after it resumes.
+        var resuming = !string.IsNullOrWhiteSpace(request.ResumeSessionId);
+        if (resuming)
         {
             arguments.Add("resume");
             arguments.Add(request.ResumeSessionId!);
@@ -92,8 +101,13 @@ public sealed class CodexCli : IProviderCli
 
         arguments.Add("--json");
         arguments.Add("--skip-git-repo-check");
-        arguments.Add("--cd");
-        arguments.Add(request.WorkingDirectory);
+
+        if (!resuming)
+        {
+            // Not accepted when resuming; the process already runs in the workspace either way.
+            arguments.Add("--cd");
+            arguments.Add(request.WorkingDirectory);
+        }
 
         if (!string.IsNullOrWhiteSpace(request.Model))
         {
@@ -112,16 +126,59 @@ public sealed class CodexCli : IProviderCli
         {
             case PermissionMode.Plan:
             case PermissionMode.Default:
-                arguments.Add("--sandbox");
-                arguments.Add("read-only");
+                AddSandbox("read-only");
                 break;
             case PermissionMode.AcceptEdits:
-                arguments.Add("--sandbox");
-                arguments.Add("workspace-write");
+                if (_options.ContainerIsTheSandbox)
+                {
+                    // codex sandboxes through its own bundled bubblewrap, which cannot create a
+                    // namespace where the host forbids it — bwrap fails and the command never runs.
+                    // The container is the boundary instead, so codex is told not to build one.
+                    AddSandbox("danger-full-access");
+                }
+                else
+                {
+                    AddSandbox("workspace-write");
+
+                    // That sandbox blocks network by default, and a forge CLI that cannot reach its
+                    // host fails in a way that reads as a broken login rather than a closed socket.
+                    arguments.Add("-c");
+                    arguments.Add("sandbox_workspace_write.network_access=true");
+                }
+
                 break;
             case PermissionMode.Unrestricted:
+                // This one resume does accept, and it implies the approval policy below.
                 arguments.Add("--dangerously-bypass-approvals-and-sandbox");
                 break;
+        }
+
+        if (request.PermissionMode != PermissionMode.Unrestricted)
+        {
+            // Nobody is watching a headless run, so a request for approval is answered by nothing
+            // and comes back to the model as a cancelled call — which reads as the tool being
+            // broken or the connector being unauthorised. The sandbox is the guard here, not a
+            // prompt: inside it the model may act, and outside it the attempt simply fails.
+            arguments.Add("-c");
+            arguments.Add("approval_policy=\"never\"");
+        }
+
+        arguments.AddRange(McpOverrides(request.WorkingDirectory));
+
+        // --sandbox is an `exec` flag only, so resuming sets the same thing through config, which
+        // both subcommands take.
+        void AddSandbox(string mode)
+        {
+            if (resuming)
+            {
+                arguments.Add("-c");
+                arguments.Add($"sandbox_mode=\"{mode}\"");
+            }
+            else
+            {
+                arguments.Add("--sandbox");
+                arguments.Add(mode);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(request.ExtraArguments))
@@ -135,6 +192,73 @@ public sealed class CodexCli : IProviderCli
 
         return arguments;
     }
+
+    /// <summary>
+    /// Hands codex the MCP servers this session is meant to have. Codex reads servers from its own
+    /// config rather than from the .mcp.json the other CLIs take, so each one is passed as a config
+    /// override instead. They merge with whatever is already in the user's config.toml.
+    /// </summary>
+    private IEnumerable<string> McpOverrides(string workspace)
+    {
+        var configPath = Path.Combine(workspace, ".mcp.json");
+        if (!File.Exists(configPath))
+            yield break;
+
+        JsonObject? servers = null;
+        try
+        {
+            servers = JsonNode.Parse(File.ReadAllText(configPath))?["mcpServers"] as JsonObject;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read the MCP config at {Path}", configPath);
+        }
+
+        if (servers is null)
+            yield break;
+
+        foreach (var (name, entry) in servers)
+        {
+            if (entry is not JsonObject server)
+                continue;
+
+            // Remote servers are left to the user's own codex config: this app has not verified the
+            // shape codex wants for them, and guessing would produce a server that never connects.
+            if ((server["type"]?.GetValue<string>() ?? "stdio") != "stdio")
+            {
+                _logger.LogInformation(
+                    "MCP server {Server} is not stdio, so it was not passed to codex", name);
+                continue;
+            }
+
+            var key = $"mcp_servers.{TomlKey(name)}";
+
+            yield return "-c";
+            yield return $"{key}.command={TomlString(server["command"]?.GetValue<string>() ?? string.Empty)}";
+
+            var args = (server["args"] as JsonArray ?? []).Select(a => TomlString(a?.GetValue<string>() ?? string.Empty));
+            yield return "-c";
+            yield return $"{key}.args=[{string.Join(", ", args)}]";
+
+            if (server["env"] is JsonObject environment && environment.Count > 0)
+            {
+                var pairs = environment.Select(pair => $"{TomlKey(pair.Key)} = {TomlString(pair.Value?.GetValue<string>() ?? string.Empty)}");
+                yield return "-c";
+                yield return $"{key}.env={{{string.Join(", ", pairs)}}}";
+            }
+        }
+    }
+
+    /// <summary>The value half of an override is parsed as TOML, so a string has to look like one.</summary>
+    private static string TomlString(string value) =>
+        "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+
+    /// <summary>
+    /// A server named in a way that is not a bare TOML key — a dot or a space — has to be quoted,
+    /// or the dotted path would be read as another level of nesting.
+    /// </summary>
+    private static string TomlKey(string name) =>
+        name.All(c => char.IsLetterOrDigit(c) || c is '_' or '-') ? name : TomlString(name);
 
     private Dictionary<string, string> BuildEnvironment(TurnRequest request)
     {
@@ -156,7 +280,7 @@ public sealed class CodexCli : IProviderCli
     /// Codex has changed its JSON event shape between releases, so this reads both the newer
     /// <c>item.*</c> events and the older <c>msg</c> envelope, and never throws on an unknown shape.
     /// </summary>
-    private static IEnumerable<AgentEvent> Translate(string line, bool isError)
+    private static IEnumerable<AgentEvent> Translate(string line, bool isError, MessageStream stream)
     {
         if (string.IsNullOrWhiteSpace(line))
             yield break;
@@ -199,17 +323,41 @@ public sealed class CodexCli : IProviderCli
             var type = root.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null;
 
             // Newer shape: {"type":"item.completed","item":{"item_type":"agent_message","text":"..."}}
-            if (type is "item.completed" or "item.started" && root.TryGetProperty("item", out var item))
+            if (type is "item.completed" or "item.started" or "item.updated" && root.TryGetProperty("item", out var item))
             {
-                var itemType = item.TryGetProperty("item_type", out var it) ? it.GetString() : null;
+                // codex 0.145 names this "type"; older builds used "item_type". Reading only one
+                // of them means the answer is parsed as an unknown event and never reaches the
+                // transcript, which looks exactly like the model saying nothing.
+                var itemType = item.TryGetProperty("type", out var it) || item.TryGetProperty("item_type", out it)
+                    ? it.GetString()
+                    : null;
 
-                if (itemType == "agent_message" && type == "item.completed")
+                if (itemType == "agent_message")
                 {
-                    yield return AgentEvent.Text_(GetString(item, "text"));
+                    // item.updated carries the message so far, item.completed the whole of it.
+                    // Both are cumulative, so only the part not yet shown is worth sending.
+                    var chunk = stream.Advance(GetString(item, "text"));
+                    if (type == "item.completed")
+                        stream.Reset();
+
+                    if (chunk.Length > 0)
+                        yield return AgentEvent.Text_(chunk);
                 }
                 else if (itemType is "command_execution" && type == "item.started")
                 {
-                    yield return new AgentEvent(AgentEventKind.Tool, GetString(item, "command")) { ToolName = "shell" };
+                    yield return new AgentEvent(AgentEventKind.Tool, GetString(item, "command"))
+                    {
+                        ToolName = "shell",
+                        ToolCallId = GetString(item, "id"),
+                    };
+                }
+                else if (itemType is "command_execution" && type == "item.completed")
+                {
+                    // The command has run; the line it opened can now say how long it took.
+                    yield return new AgentEvent(AgentEventKind.ToolCompleted, string.Empty)
+                    {
+                        ToolCallId = GetString(item, "id"),
+                    };
                 }
                 else if (itemType is "file_change" or "patch_apply" && type == "item.completed")
                 {
@@ -229,11 +377,34 @@ public sealed class CodexCli : IProviderCli
                 var msgType = msg.TryGetProperty("type", out var mt) ? mt.GetString() : null;
                 switch (msgType)
                 {
+                    case "agent_message_delta":
+                        // Deltas are already just the new text, so they bypass the cumulative
+                        // bookkeeping and only record how much has gone out.
+                        var delta = GetString(msg, "delta");
+                        if (delta.Length > 0)
+                        {
+                            stream.Emitted(delta);
+                            yield return AgentEvent.Text_(delta);
+                        }
+                        break;
                     case "agent_message":
-                        yield return AgentEvent.Text_(GetString(msg, "message"));
+                        var message = stream.Advance(GetString(msg, "message"));
+                        stream.Reset();
+                        if (message.Length > 0)
+                            yield return AgentEvent.Text_(message);
                         break;
                     case "exec_command_begin":
-                        yield return new AgentEvent(AgentEventKind.Tool, GetString(msg, "command")) { ToolName = "shell" };
+                        yield return new AgentEvent(AgentEventKind.Tool, GetString(msg, "command"))
+                        {
+                            ToolName = "shell",
+                            ToolCallId = GetString(msg, "call_id"),
+                        };
+                        break;
+                    case "exec_command_end":
+                        yield return new AgentEvent(AgentEventKind.ToolCompleted, string.Empty)
+                        {
+                            ToolCallId = GetString(msg, "call_id"),
+                        };
                         break;
                     case "error":
                         yield return AgentEvent.Error(GetString(msg, "message"));
@@ -251,6 +422,41 @@ public sealed class CodexCli : IProviderCli
 
             yield return AgentEvent.Log(line);
         }
+    }
+
+    /// <summary>
+    /// Tracks how much of the message being written has already reached the transcript. Codex
+    /// reports the text so far on every update and again in full when the message is done, so
+    /// without this the answer would be repeated, growing, on every event.
+    /// </summary>
+    private sealed class MessageStream
+    {
+        private string _sent = string.Empty;
+
+        /// <summary>The part of <paramref name="textSoFar"/> that has not been sent yet.</summary>
+        public string Advance(string textSoFar)
+        {
+            if (string.IsNullOrEmpty(textSoFar))
+                return string.Empty;
+
+            // Normally each update extends the last. A rewrite is not something codex does, but if
+            // it ever did, showing the new text whole beats showing a nonsense fragment of it.
+            if (!textSoFar.StartsWith(_sent, StringComparison.Ordinal))
+            {
+                _sent = textSoFar;
+                return textSoFar;
+            }
+
+            var chunk = textSoFar[_sent.Length..];
+            _sent = textSoFar;
+            return chunk;
+        }
+
+        /// <summary>Records text that went out on its own, without going through Advance.</summary>
+        public void Emitted(string chunk) => _sent += chunk;
+
+        /// <summary>Called when a message is finished; the next one starts from nothing.</summary>
+        public void Reset() => _sent = string.Empty;
     }
 
     private static string GetString(JsonElement element, string property)

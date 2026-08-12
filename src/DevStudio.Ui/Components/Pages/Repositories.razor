@@ -113,7 +113,7 @@
                         <tr>
                             <td>@worktree.Branch</td>
                             <td class="mono-dim">@worktree.Path</td>
-                            <td class="mono-dim">@worktree.CreatedAt.ToLocalTime().ToString("dd MMM HH:mm")</td>
+                            <td class="mono-dim"><LocalTime Value="@worktree.CreatedAt" Format="daytime" /></td>
                             <td>
                                 <button class="btn btn-sm btn-danger" @onclick="() => RemoveWorktreeAsync(repository, worktree)">Remove</button>
                             </td>

@@ -90,7 +90,7 @@
                     <td>@session.Title</td>
                     <td class="mono-dim">@(session.CliProviderName ?? session.Provider.ToString())</td>
                     <td><StatusPill Session="session.Status" /></td>
-                    <td class="mono-dim">@session.CreatedAt.ToLocalTime().ToString("dd MMM HH:mm")</td>
+                    <td class="mono-dim"><LocalTime Value="@session.CreatedAt" Format="daytime" /></td>
                 </tr>
             }
             </tbody>

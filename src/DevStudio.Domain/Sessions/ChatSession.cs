@@ -67,6 +67,18 @@ public sealed class ChatMessage
     public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.UtcNow;
     /// <summary>True while the CLI is still writing this message.</summary>
     public bool IsStreaming { get; set; }
+
+    /// <summary>
+    /// The CLI's id for the tool call this line reports, so the event that finishes it can be
+    /// matched back. Null for anything that is not a tool call.
+    /// </summary>
+    public string? ToolCallId { get; set; }
+
+    /// <summary>
+    /// How long the tool took, once it has finished. Measured from the call being announced to the
+    /// CLI reporting a result, so it is wall-clock time including whatever the tool waited on.
+    /// </summary>
+    public int? DurationMs { get; set; }
 }
 
 public enum SessionTrigger

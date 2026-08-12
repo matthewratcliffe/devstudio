@@ -68,7 +68,7 @@
                 <td><StatusPill Run="run.Status" /></td>
                 <td class="mono-dim">@run.Steps.Count(s => s.Status == RunStatus.Succeeded)/@run.Steps.Count</td>
                 <td class="mono-dim">@run.TriggeredBy</td>
-                <td class="mono-dim">@(run.StartedAt?.ToLocalTime().ToString("dd MMM HH:mm") ?? "—")</td>
+                <td class="mono-dim">@if (run.StartedAt is { } __t1) { <LocalTime Value="@__t1" Format="daytime" /> } else { <text>—</text> }</td>
                 <td>
                     @if (run.Status == RunStatus.Running)
                     {

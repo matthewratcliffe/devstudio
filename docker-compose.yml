@@ -21,8 +21,22 @@ services:
       Orchestrator__MaxConcurrentSessions: "6"
       Orchestrator__TurnTimeoutMinutes: "60"
       Orchestrator__SchedulerTickSeconds: "20"
+      # Agents run their own commands. The container is the boundary, so the CLIs are told not to
+      # build a second sandbox inside it: both use bubblewrap, which needs unprivileged user
+      # namespaces, and Docker's default seccomp profile blocks them — bwrap then fails and every
+      # command dies before it starts.
+      #
+      # To keep the CLIs' own sandboxes instead, set this false and give the container the right to
+      # create namespaces by uncommenting security_opt below.
+      Orchestrator__ContainerIsTheSandbox: "true"
       # Uncomment to delete each session's worktree when it finishes.
       # Orchestrator__PruneEphemeralWorktrees: "true"
+    # Lets bubblewrap create the namespaces the CLI sandboxes need. Only useful with
+    # Orchestrator__ContainerIsTheSandbox set to false; it loosens the container's own seccomp
+    # filter, which is the trade being made either way.
+    # security_opt:
+    #   - seccomp:unconfined
+
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7080/healthz"]
       interval: 30s

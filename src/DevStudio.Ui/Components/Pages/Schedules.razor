@@ -39,9 +39,9 @@
                 <td class="mono-dim">@TargetName(schedule)</td>
                 <td class="mono-dim">@ProjectName(schedule.ProjectId)</td>
                 <td class="mono-dim">@Trigger(schedule)</td>
-                <td class="mono-dim">@(schedule.NextRunAt?.ToLocalTime().ToString("ddd dd MMM HH:mm") ?? "—")</td>
+                <td class="mono-dim">@if (schedule.NextRunAt is { } __t1) { <LocalTime Value="@__t1" Format="weekdaydate" /> } else { <text>—</text> }</td>
                 <td class="mono-dim">
-                    @(schedule.LastRunAt?.ToLocalTime().ToString("dd MMM HH:mm") ?? "never")
+                    @if (schedule.LastRunAt is { } __t2) { <LocalTime Value="@__t2" Format="daytime" /> } else { <text>never</text> }
                     @if (schedule.LastError is { Length: > 0 })
                     {
                         <span class="pill pill-red" style="margin-left:0.4rem">error</span>
@@ -154,7 +154,13 @@
                     <div class="field">
                         <label>Cron</label>
                         <input type="text" @bind="_editing.CronExpression" @bind:event="oninput" placeholder="0 9 * * 1-5" />
-                        <span class="hint">@CronHint</span>
+                        <span class="hint">
+                            @CronHint
+                            @if (NextOccurrence is { } next)
+                            {
+                                <LocalTime Value="@next" Format="weekdaydate" />
+                            }
+                        </span>
                     </div>
                 }
                 else if (_editing.Kind == ScheduleKind.Interval)
@@ -210,8 +216,22 @@
             if (!CronExpression.TryParse(_editing.CronExpression, out var cron, out var error) || cron is null)
                 return error;
 
-            var next = cron.GetNextOccurrence(DateTimeOffset.UtcNow, ResolveZone(_editing.TimeZoneId));
-            return next is null ? "Valid, but never fires." : $"Next: {next.Value.ToLocalTime():ddd dd MMM HH:mm}";
+            return NextOccurrence is null ? "Valid, but never fires." : "Next:";
+        }
+    }
+
+    /// <summary>
+    /// When the expression next fires, as an instant. The schedule's own timezone decides when that
+    /// is; the browser decides how it reads.
+    /// </summary>
+    private DateTimeOffset? NextOccurrence
+    {
+        get
+        {
+            if (_editing is null || !CronExpression.TryParse(_editing.CronExpression, out var cron, out _) || cron is null)
+                return null;
+
+            return cron.GetNextOccurrence(DateTimeOffset.UtcNow, ResolveZone(_editing.TimeZoneId));
         }
     }
 

@@ -391,6 +391,19 @@ public sealed class WorkspaceService : IWorkspaceService
             }
         }
 
+        builder.AppendLine("## Local tools");
+        builder.AppendLine(
+            "Work through the command line tools installed here rather than looking for a hosted " +
+            "connector. `git`, `gh` (GitHub) and `glab` (GitLab) are on your PATH and already " +
+            "signed in with this container's credentials, so they need no token from you.");
+        builder.AppendLine();
+        builder.AppendLine(
+            "For a GitLab merge request that means `glab mr view <id>`, `glab mr diff <id>`, " +
+            "`glab mr list`; GitHub is the same shape through `gh`. If one of them reports being " +
+            "signed out, say so rather than reaching for another route — a human fixes that on the " +
+            "Logins page.");
+        builder.AppendLine();
+
         if (!string.IsNullOrWhiteSpace(agent.SystemPrompt))
         {
             builder.AppendLine("## Agent instructions");

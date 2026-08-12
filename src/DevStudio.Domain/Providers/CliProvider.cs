@@ -12,18 +12,69 @@ public enum CliOutputFormat
     JsonLines = 1,
 }
 
+/// <summary>How the orchestrator talks to a user-defined provider.</summary>
+public enum CliTransport
+{
+    /// <summary>Run a command per turn and read what it prints. The original shape.</summary>
+    Process = 0,
+
+    /// <summary>
+    /// Agent Client Protocol: spawn the agent and talk JSON-RPC over its stdio. The agent does the
+    /// work and reports back, so tools, file edits and permission prompts all come from it.
+    /// </summary>
+    Acp = 1,
+
+    /// <summary>
+    /// An OpenAI-compatible HTTP endpoint — llama.cpp's server, ollama, LM Studio. A bare model has
+    /// no tools of its own, so the orchestrator runs the tool loop and executes them itself.
+    /// </summary>
+    OpenAiCompatible = 2,
+}
+
 /// <summary>
-/// A user-defined AI CLI, so any locally installed and already-signed-in tool can drive agents
+/// A user-defined agent backend, so anything already installed or running locally can drive agents
 /// without a code change. Claude and Codex are built in because their output shapes are fiddly;
-/// everything else goes through here.
+/// everything else goes through here. <see cref="Transport"/> decides which of the fields below
+/// apply — process settings, an ACP command, or an HTTP endpoint.
 /// </summary>
 public sealed class CliProvider : Entity
 {
     public string Name { get; set; } = "New CLI";
     public string Description { get; set; } = string.Empty;
 
-    /// <summary>Executable name or absolute path, e.g. <c>copilot</c>.</summary>
+    public CliTransport Transport { get; set; } = CliTransport.Process;
+
+    /// <summary>Executable name or absolute path, e.g. <c>copilot</c>. Process and ACP transports.</summary>
     public string Executable { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Arguments that start the agent in ACP mode, e.g. <c>--experimental-acp</c>. No token
+    /// substitution: the same command serves every turn, and the conversation happens over stdio.
+    /// </summary>
+    public string AcpArguments { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Root of an OpenAI-compatible API, e.g. <c>http://localhost:8080/v1</c> for llama-server.
+    /// </summary>
+    public string BaseUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Sent as a bearer token when set. Local servers usually need nothing; this is here for the
+    /// ones started with an API key.
+    /// </summary>
+    public string ApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// How many times the model may call tools before the turn is cut short. A model that loops
+    /// would otherwise run until the turn times out.
+    /// </summary>
+    public int MaxToolCalls { get; set; } = 25;
+
+    /// <summary>
+    /// Stream the answer as it is written. Worth turning off for a server that only reports tool
+    /// calls on a whole response — the reply then arrives in one piece, but the tools work.
+    /// </summary>
+    public bool Stream { get; set; } = true;
 
     /// <summary>
     /// Arguments for one turn. Tokens are substituted per argument, so <c>{{prompt}}</c> stays a

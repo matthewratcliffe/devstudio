@@ -34,11 +34,7 @@ public sealed class ProcessRunner : IProcessRunner
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        if (request.StandardInput is not null)
-        {
-            await process.StandardInput.WriteAsync(request.StandardInput);
-            process.StandardInput.Close();
-        }
+        await CloseStandardInputAsync(process, request);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         if (request.TimeoutSeconds > 0)
@@ -69,11 +65,7 @@ public sealed class ProcessRunner : IProcessRunner
         var stdoutTask = PumpAsync(process.StandardOutput, false, onLine, ct);
         var stderrTask = PumpAsync(process.StandardError, true, onLine, ct);
 
-        if (request.StandardInput is not null)
-        {
-            await process.StandardInput.WriteAsync(request.StandardInput);
-            process.StandardInput.Close();
-        }
+        await CloseStandardInputAsync(process, request);
 
         try
         {
@@ -90,6 +82,26 @@ public sealed class ProcessRunner : IProcessRunner
         }
 
         return process.ExitCode;
+    }
+
+    /// <summary>
+    /// Sends whatever input the request carries and then closes the pipe. Closing it matters even
+    /// when there is nothing to send: stdin is always redirected, and a CLI that checks whether it
+    /// is piped — codex reads it as extra instructions — waits on an end that never comes.
+    /// </summary>
+    private static async Task CloseStandardInputAsync(Process process, ProcessRequest request)
+    {
+        try
+        {
+            if (request.StandardInput is not null)
+                await process.StandardInput.WriteAsync(request.StandardInput);
+
+            process.StandardInput.Close();
+        }
+        catch (IOException)
+        {
+            // A process that exited immediately takes its stdin with it.
+        }
     }
 
     private static async Task PumpAsync(

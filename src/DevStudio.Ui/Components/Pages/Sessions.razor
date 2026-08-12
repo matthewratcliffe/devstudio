@@ -56,7 +56,7 @@ else
                     <td class="mono-dim">@ProjectName(session.ProjectId)</td>
                     <td><StatusPill Session="session.Status" /></td>
                     <td class="mono-dim">@session.Trigger</td>
-                    <td class="mono-dim">@session.UpdatedAt.ToLocalTime().ToString("dd MMM HH:mm")</td>
+                    <td class="mono-dim"><LocalTime Value="@session.UpdatedAt" Format="daytime" /></td>
                     <td>
                         <div class="btn-row">
                             <a class="btn btn-sm" href="/chat/@session.Id">Open</a>
@@ -88,6 +88,7 @@ else
     private IReadOnlyList<Project> _projects = [];
     private List<ChatSession> _visible = [];
     private readonly HashSet<string> _selected = [];
+    private readonly RenderCoalescer _render = new();
     private string _filter = "all";
 
     protected override async Task OnInitializedAsync()
@@ -169,11 +170,13 @@ else
     private string ProjectName(string? projectId) =>
         projectId is null ? "—" : _projects.FirstOrDefault(p => p.Id == projectId)?.Name ?? "—";
 
-    private void OnSessionUpdated(ChatSession session) => InvokeAsync(async () =>
+    // Collapsed for the same reason as the dashboard: a streaming turn raises this far faster
+    // than the list can be rebuilt from the store.
+    private void OnSessionUpdated(ChatSession session) => _render.Queue(() => InvokeAsync(async () =>
     {
         await ReloadAsync();
         StateHasChanged();
-    });
+    }));
 
     public void Dispose() => SessionManager.SessionUpdated -= OnSessionUpdated;
 }

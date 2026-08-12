@@ -61,6 +61,17 @@ public class SystemPromptLayeringTests : IDisposable
     }
 
     [Fact]
+    public async Task Every_agent_is_told_which_local_tools_it_already_has()
+    {
+        var prompt = await _service.ComposeSystemPromptAsync(new Agent(), null);
+
+        // Left unsaid, an agent goes looking for a hosted connector and reports it as unauthorised.
+        Assert.Contains("glab", prompt);
+        Assert.Contains("gh", prompt);
+        Assert.Contains("glab mr diff", prompt);
+    }
+
+    [Fact]
     public async Task Standards_apply_to_a_session_with_no_project_at_all()
     {
         await _globals.UpsertAsync(new GlobalSettings { Instructions = "GLOBAL-RULE" });

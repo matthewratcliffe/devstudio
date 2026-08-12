@@ -379,7 +379,16 @@ select option { background: var(--bg-1); }
 .composer { border-top: 1px solid var(--border-soft); padding: 0.8rem 1.4rem 1.1rem; background: #05070fcc; }
 .composer textarea { min-height: 62px; }
 .composer .composer-inner { width: 100%; max-width: var(--chat-max); margin: 0 auto; }
-.composer .composer-row { display: flex; gap: 0.6rem; align-items: flex-end; }
+.composer .suggestions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem; }
+.suggestion {
+    border: 1px solid var(--line); background: transparent; color: var(--text-2);
+    border-radius: 999px; padding: 0.3rem 0.75rem;
+    font: inherit; font-size: 0.78rem; text-align: left; cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.suggestion:hover { color: var(--text-1); border-color: var(--cyan); background: var(--surface-2); }
+
+.composer-row { display: flex; gap: 0.6rem; align-items: flex-end; }
 .composer .composer-row textarea { flex: 1; }
 
 /* A blocked tool call is the one thing in the composer that must not be missed. */

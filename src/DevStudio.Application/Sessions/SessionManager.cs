@@ -226,7 +226,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         approval.Status = allow ? ApprovalStatus.Allowed : ApprovalStatus.Denied;
 
         if (allow && approval.SuggestedRule is { Length: > 0 } rule && !session.AllowedTools.Contains(rule))
-            session.AllowedTools.Add(rule);
+            session.AllowedTools = Published(session, session.AllowedTools, list => list.Add(rule));
 
         await _sessions.UpsertAsync(session, ct);
         Notify(session);
@@ -252,12 +252,14 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             return;
         }
 
-        session.Approvals.Add(new ToolApproval
+        var approval = new ToolApproval
         {
             ToolName = toolName,
             Detail = trimmed,
             SuggestedRule = SuggestRule(toolName, trimmed),
-        });
+        };
+
+        session.Approvals = Published(session, session.Approvals, list => list.Add(approval));
     }
 
     /// <summary>
@@ -309,7 +311,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             Interrupted = interrupt,
         };
 
-        session.Guidance.Add(message);
+        session.Guidance = Published(session, session.Guidance, list => list.Add(message));
         AppendMessage(session, MessageRole.Guidance, message.Text);
 
         // Route one: on disk, readable by any agent without an MCP server configured.
@@ -566,7 +568,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                 ResumeSessionId = session.ProviderSessionId,
                 HomeDirectory = account.HomePath,
                 McpServerNames = mcpServerNames,
-                AllowedTools = session.AllowedTools,
+                AllowedTools = AllowedTools(session),
                 Environment = agent.Environment,
                 ExtraArguments = agent.ExtraArguments,
             };
@@ -587,10 +589,27 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                             assistant.IsStreaming = false;
                             assistant = AppendMessage(session, MessageRole.Agent, string.Empty, streaming: true);
                         }
-                        AppendMessage(session, MessageRole.Tool, string.IsNullOrEmpty(evt.ToolName)
+
+                        var tool = AppendMessage(session, MessageRole.Tool, string.IsNullOrEmpty(evt.ToolName)
                             ? evt.Text
                             : $"{evt.ToolName} {evt.Text}".Trim());
+                        tool.ToolCallId = evt.ToolCallId;
                         Notify(session);
+                        break;
+
+                    case AgentEventKind.ToolCompleted:
+                        // The CLIs report a result long after the call, and out of order with the
+                        // prose in between, so the line is found by id rather than by position.
+                        if (session.Messages.LastOrDefault(m =>
+                                m.Role == MessageRole.Tool &&
+                                m.ToolCallId is { Length: > 0 } &&
+                                m.ToolCallId == evt.ToolCallId) is { } called)
+                        {
+                            called.DurationMs = evt.DurationMs
+                                ?? (int)Math.Max(0, (DateTimeOffset.UtcNow - called.Timestamp).TotalMilliseconds);
+                            Notify(session);
+                        }
+
                         break;
 
                     case AgentEventKind.SessionId:
@@ -649,7 +668,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         {
             assistant.IsStreaming = false;
             if (string.IsNullOrWhiteSpace(assistant.Content))
-                session.Messages.Remove(assistant);
+                session.Messages = Published(session, session.Messages, list => list.Remove(assistant));
 
             live.TurnCancellation = null;
             _concurrency.Release();
@@ -801,9 +820,39 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
     private static ChatMessage AppendMessage(ChatSession session, MessageRole role, string content, bool streaming = false)
     {
         var message = new ChatMessage { Role = role, Content = content, IsStreaming = streaming };
-        session.Messages.Add(message);
+        session.Messages = Published(session, session.Messages, list => list.Add(message));
         return message;
     }
+
+    /// <summary>
+    /// Applies a change to a copy and hands back the copy, leaving the original untouched.
+    ///
+    /// A turn runs on a background pump while a browser circuit renders the same session object.
+    /// Appending to the very list the renderer is enumerating throws "collection was modified" and
+    /// takes the circuit down with it — a race that streaming made near-certain, because the
+    /// transcript now changes many times a second. Readers keep enumerating the list they started
+    /// on, which nothing will ever mutate again.
+    ///
+    /// The lock covers writers only: guidance and approvals arrive on the UI thread while the pump
+    /// is writing, and two copies made from the same starting point would lose one of the entries.
+    /// </summary>
+    private static List<T> Published<T>(ChatSession session, List<T> current, Action<List<T>> change)
+    {
+        lock (session)
+        {
+            var copy = new List<T>(current);
+            change(copy);
+            return copy;
+        }
+    }
+
+    /// <summary>
+    /// The standing allow-list plus whatever the operator approved for this session. Approvals are
+    /// second so a rule granted by hand wins nothing it did not already have, and duplicates are
+    /// dropped because some CLIs treat a repeated rule as a parse error.
+    /// </summary>
+    private IReadOnlyList<string> AllowedTools(ChatSession session) =>
+        [.. _options.DefaultAllowedTools.Concat(session.AllowedTools).Distinct()];
 
     private static string BuildTitle(string prompt)
     {

@@ -64,7 +64,12 @@ COPY --from=build /app/publish .
 RUN chown -R orchestrator:orchestrator /app
 
 USER orchestrator
+# The container, the per-session worktree and the permission mode are the isolation here, so the
+# CLIs are told not to wrap commands in bubblewrap as well: it needs unprivileged user namespaces,
+# which many hosts disable, and without them every command fails before it starts.
 ENV HOME=/home/orchestrator \
+    IS_SANDBOX=1 \
+    CLAUDE_CODE_SANDBOXED=1 \
     DOTNET_RUNNING_IN_CONTAINER=true \
     ASPNETCORE_HTTP_PORTS=7080 \
     ASPNETCORE_ENVIRONMENT=Production \

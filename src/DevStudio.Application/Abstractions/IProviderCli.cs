@@ -60,11 +60,20 @@ public enum AgentEventKind
     /// it wanted to do.
     /// </summary>
     PermissionDenied = 6,
+
+    /// <summary>
+    /// A tool call finished. ToolCallId says which one, so the line already in the transcript can
+    /// be given its duration.
+    /// </summary>
+    ToolCompleted = 7,
 }
 
 public sealed record AgentEvent(AgentEventKind Kind, string Text)
 {
     public string? ToolName { get; init; }
+
+    /// <summary>The CLI's own id for a tool call, pairing a Tool event with its ToolCompleted.</summary>
+    public string? ToolCallId { get; init; }
     public decimal? CostUsd { get; init; }
     public int? DurationMs { get; init; }
 

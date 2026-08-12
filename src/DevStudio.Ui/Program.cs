@@ -7,7 +7,14 @@ using DevStudio.Ui.Endpoints;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents()
+    .AddInteractiveServerComponents(options =>
+    {
+        // On everywhere, not just in development: a circuit that dies otherwise reports only that
+        // something threw, which is no help at all when the thing that threw was on a background
+        // render. This is a single-operator tool behind its own login, so the exception detail
+        // reaching the browser is the operator's own.
+        options.DetailedErrors = true;
+    })
     .AddHubOptions(options =>
     {
         // Transcripts and project uploads travel over the circuit, so the default 32 KB is too small.

@@ -2,6 +2,7 @@
 @inject IEntityStore<CliProvider> ProviderStore
 @inject IEntityStore<Agent> AgentStore
 @inject IProcessRunner Processes
+@inject IProviderCliRegistry Clis
 
 <PageTitle>CLI providers · devStudio</PageTitle>
 
@@ -27,11 +28,11 @@
             <div class="card-head">
                 <h3>@provider.Name</h3>
                 <div class="spacer"></div>
-                <span class="pill pill-lime"><span class="dot"></span>@provider.OutputFormat</span>
+                <span class="pill pill-lime"><span class="dot"></span>@TransportLabel(provider)</span>
             </div>
             <p class="small">@provider.Description</p>
             <div class="mono-dim" style="margin-bottom:0.7rem">
-                @provider.Executable @provider.PromptArguments
+                @Summary(provider)
             </div>
             <div class="btn-row" style="margin-bottom:0.7rem">
                 <span class="pill">@UsageCount(provider) agents</span>
@@ -84,9 +85,13 @@
                     <input type="text" @bind="_editing.Name" placeholder="Copilot" />
                 </div>
                 <div class="field">
-                    <label>Executable</label>
-                    <input type="text" @bind="_editing.Executable" placeholder="copilot" />
-                    <span class="hint">Must be on PATH inside the container, or an absolute path.</span>
+                    <label>Transport</label>
+                    <select @bind="_editing.Transport">
+                        <option value="@CliTransport.Process">Command &mdash; run it once per turn</option>
+                        <option value="@CliTransport.Acp">ACP &mdash; drive an agent over its stdio</option>
+                        <option value="@CliTransport.OpenAiCompatible">HTTP &mdash; an OpenAI-compatible endpoint</option>
+                    </select>
+                    <span class="hint">@TransportHint(_editing.Transport)</span>
                 </div>
             </div>
 
@@ -95,6 +100,71 @@
                 <input type="text" @bind="_editing.Description" />
             </div>
 
+            @if (_editing.Transport != CliTransport.OpenAiCompatible)
+            {
+                <div class="field">
+                    <label>Executable</label>
+                    <input type="text" @bind="_editing.Executable" placeholder="copilot" />
+                    <span class="hint">Must be on PATH inside the container, or an absolute path.</span>
+                </div>
+            }
+
+            @if (_editing.Transport == CliTransport.Acp)
+            {
+                <div class="field">
+                    <label>ACP arguments</label>
+                    <input type="text" @bind="_editing.AcpArguments" placeholder="--experimental-acp" />
+                    <span class="hint">
+                        Whatever starts the agent in ACP mode. No tokens here: the prompt goes over the
+                        protocol rather than the command line, and one command serves every turn.
+                    </span>
+                </div>
+            }
+
+            @if (_editing.Transport == CliTransport.OpenAiCompatible)
+            {
+                <div class="form-grid">
+                    <div class="field">
+                        <label>Base URL</label>
+                        <input type="text" @bind="_editing.BaseUrl" placeholder="http://localhost:8080/v1" />
+                        <span class="hint">llama-server, ollama or LM Studio. Include the version segment.</span>
+                    </div>
+                    <div class="field">
+                        <label>API key (optional)</label>
+                        <input type="password" @bind="_editing.ApiKey" placeholder="only if the server wants one" />
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="field">
+                        <label>Models offered (comma separated)</label>
+                        <input type="text" value="@string.Join(", ", _editing.Models)"
+                               @onchange="e => _editing.Models = SplitList(e.Value?.ToString())"
+                               placeholder="the name the server knows the model by" />
+                    </div>
+                    <div class="field">
+                        <label>Tool call limit</label>
+                        <input type="number" @bind="_editing.MaxToolCalls" min="1" />
+                        <span class="hint">
+                            A bare model has no tools of its own, so this app runs them: reading and listing
+                            files always, writing on Accept edits, a shell only on No restrictions.
+                        </span>
+                    </div>
+                </div>
+
+                <div class="check">
+                    <input type="checkbox" id="cli-stream" @bind="_editing.Stream" />
+                    <label for="cli-stream" style="text-transform:none;letter-spacing:0">Stream the answer as it is written</label>
+                </div>
+                <span class="hint">
+                    Turn this off if the model talks but never uses a tool: some servers only report tool
+                    calls on a whole response. llama-server also needs <code>--jinja</code> before it will
+                    pass tools to the model at all.
+                </span>
+            }
+
+            @if (_editing.Transport == CliTransport.Process)
+            {
             <div class="field">
                 <label>Prompt arguments</label>
                 <input type="text" @bind="_editing.PromptArguments" placeholder="-p {{prompt}}" />
@@ -190,6 +260,8 @@
                 </div>
             </div>
 
+            }
+
             <div class="field">
                 <label>Environment (KEY=value per line)</label>
                 <textarea rows="3" value="@EnvironmentText" @onchange="e => SetEnvironment(e.Value?.ToString())"></textarea>
@@ -253,6 +325,22 @@
         },
         new()
         {
+            Name = "Claude Code (ACP)",
+            Description = "Claude Code driven over the Agent Client Protocol rather than as a one-shot command.",
+            Transport = CliTransport.Acp,
+            Executable = "claude-code-acp",
+            AcpArguments = string.Empty,
+        },
+        new()
+        {
+            Name = "llama.cpp",
+            Description = "A local llama-server. The model answers; this app runs the tools.",
+            Transport = CliTransport.OpenAiCompatible,
+            BaseUrl = "http://localhost:8080/v1",
+            MaxToolCalls = 25,
+        },
+        new()
+        {
             Name = "Cursor agent",
             Description = "Cursor's CLI agent, signed in with your Cursor subscription.",
             Executable = "cursor-agent",
@@ -303,13 +391,28 @@
         if (_editing is null)
             return;
 
-        if (string.IsNullOrWhiteSpace(_editing.Name) || string.IsNullOrWhiteSpace(_editing.Executable))
+        if (string.IsNullOrWhiteSpace(_editing.Name))
         {
-            Layout.Notify("A provider needs a name and an executable.", "err");
+            Layout.Notify("A provider needs a name.", "err");
             return;
         }
 
-        if (!_editing.PromptArguments.Contains("{{prompt}}", StringComparison.OrdinalIgnoreCase))
+        // Each transport needs a different thing before it is usable at all.
+        if (_editing.Transport == CliTransport.OpenAiCompatible)
+        {
+            if (!Uri.TryCreate(_editing.BaseUrl, UriKind.Absolute, out _))
+            {
+                Layout.Notify("An HTTP provider needs a base URL, e.g. http://localhost:8080/v1.", "err");
+                return;
+            }
+        }
+        else if (string.IsNullOrWhiteSpace(_editing.Executable))
+        {
+            Layout.Notify("A provider needs an executable.", "err");
+            return;
+        }
+        else if (_editing.Transport == CliTransport.Process
+                 && !_editing.PromptArguments.Contains("{{prompt}}", StringComparison.OrdinalIgnoreCase))
         {
             Layout.Notify("The prompt arguments must include {{prompt}}, or the agent has nothing to say.", "err");
             return;
@@ -336,6 +439,29 @@
     /// <summary>Checks the executable actually exists before anyone waits on a failing session.</summary>
     private async Task ProbeAsync(CliProvider provider)
     {
+        // Nothing to run for an endpoint; asking it whether it is there is the equivalent test.
+        if (provider.Transport == CliTransport.OpenAiCompatible)
+        {
+            try
+            {
+                var endpoint = await Clis.ResolveAsync(AiProvider.Custom, provider.Id);
+                var reachable = await endpoint.GetAuthStatusAsync();
+
+                _probes[provider.Id] = reachable.State == ProviderAuthState.LoggedIn
+                    ? "ok - endpoint answered"
+                    : reachable.Detail ?? "no answer";
+            }
+            catch (Exception ex)
+            {
+                // Resolving refuses a disabled or deleted definition, and an unhandled throw in a
+                // click handler takes the whole circuit down rather than just failing the test.
+                _probes[provider.Id] = FirstLine(ex.Message);
+            }
+
+            StateHasChanged();
+            return;
+        }
+
         var result = await Processes.RunAsync(new ProcessRequest(provider.Executable, ["--version"], TimeoutSeconds: 20));
 
         _probes[provider.Id] = result.ExitCode == -1
@@ -366,6 +492,29 @@
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToList();
 
+    private static string TransportLabel(CliProvider provider) => provider.Transport switch
+    {
+        CliTransport.Acp => "ACP",
+        CliTransport.OpenAiCompatible => "HTTP",
+        _ => provider.OutputFormat.ToString(),
+    };
+
+    private static string Summary(CliProvider provider) => provider.Transport switch
+    {
+        CliTransport.Acp => $"{provider.Executable} {provider.AcpArguments}".Trim(),
+        CliTransport.OpenAiCompatible => provider.BaseUrl,
+        _ => $"{provider.Executable} {provider.PromptArguments}".Trim(),
+    };
+
+    private static string TransportHint(CliTransport transport) => transport switch
+    {
+        CliTransport.Acp =>
+            "The agent is spawned per turn and talked to over JSON-RPC. It brings its own tools and asks before using them.",
+        CliTransport.OpenAiCompatible =>
+            "A model, not an agent. This app advertises the workspace tools, runs whatever the model calls, and feeds the results back.",
+        _ => "The original shape: run a command with the prompt in its arguments and read what it prints.",
+    };
+
     private static string FirstLine(string text) =>
         text.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? string.Empty;
 
@@ -375,7 +524,13 @@
         CreatedAt = provider.CreatedAt,
         Name = provider.Name,
         Description = provider.Description,
+        Transport = provider.Transport,
+        Stream = provider.Stream,
         Executable = provider.Executable,
+        AcpArguments = provider.AcpArguments,
+        BaseUrl = provider.BaseUrl,
+        ApiKey = provider.ApiKey,
+        MaxToolCalls = provider.MaxToolCalls,
         PromptArguments = provider.PromptArguments,
         ResumeArguments = provider.ResumeArguments,
         ModelArguments = provider.ModelArguments,

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
@@ -62,6 +63,8 @@ public sealed class ClaudeCli : IProviderCli
         // connects from here and reports what the server actually said.
         var diagnoses = new ConcurrentBag<Task>();
 
+        DisableBashSandbox(request.HomeDirectory ?? _options.HomePath);
+
         var pump = Task.Run(async () =>
         {
             try
@@ -75,6 +78,15 @@ public sealed class ClaudeCli : IProviderCli
                         TimeoutSeconds: 0),
                     async (line, isError, _) =>
                     {
+                        if (line.Contains("bwrap:", StringComparison.Ordinal))
+                        {
+                            await channel.Writer.WriteAsync(AgentEvent.Error(
+                                "The CLI could not build its bash sandbox, so the command never ran. " +
+                                "That sandbox needs unprivileged user namespaces, which this host " +
+                                "disables. Set Orchestrator__ContainerIsTheSandbox=true and restart, " +
+                                "or allow namespaces with security_opt: seccomp:unconfined."), CancellationToken.None);
+                        }
+
                         foreach (var evt in Translate(line, isError))
                         {
                             await channel.Writer.WriteAsync(evt, CancellationToken.None);
@@ -135,6 +147,10 @@ public sealed class ClaudeCli : IProviderCli
             "-p", request.Prompt,
             "--output-format", "stream-json",
             "--verbose",
+            // Without this the CLI only reports a block of prose once it is finished, so a long
+            // answer arrives in one lump. With it the same text also arrives as deltas, which is
+            // what the transcript renders as the model types.
+            "--include-partial-messages",
         };
 
         if (!string.IsNullOrWhiteSpace(request.Model))
@@ -206,6 +222,50 @@ public sealed class ClaudeCli : IProviderCli
         return arguments;
     }
 
+    /// <summary>
+    /// Turns the CLI's own bash sandbox off in the account's settings.
+    ///
+    /// The environment variable covers the case where the sandbox is being forced on by a remote
+    /// gate, but a settings file that asks for it explicitly beats the variable — and settings live
+    /// in the home volume, which survives a rebuild. Both are needed, because the sandbox is
+    /// bubblewrap: where unprivileged user namespaces are disabled it cannot create its namespace,
+    /// and every command fails before it starts.
+    ///
+    /// Everything else in the file is left exactly as it was; only this one key is settled.
+    /// </summary>
+    private void DisableBashSandbox(string homePath)
+    {
+        if (!_options.ContainerIsTheSandbox)
+            return;
+
+        try
+        {
+            var directory = Path.Combine(homePath, ".claude");
+            var path = Path.Combine(directory, "settings.json");
+
+            var settings = File.Exists(path)
+                ? JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? []
+                : [];
+
+            if (settings["sandbox"] is not JsonObject sandbox)
+                settings["sandbox"] = sandbox = [];
+
+            if (sandbox["enabled"]?.GetValue<bool>() == false)
+                return;
+
+            sandbox["enabled"] = false;
+
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(path, settings.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            _logger.LogInformation("Turned the claude bash sandbox off in {Path}", path);
+        }
+        catch (Exception ex)
+        {
+            // Not fatal: the environment variable may well be enough on its own.
+            _logger.LogWarning(ex, "Could not update the claude settings under {Home}", homePath);
+        }
+    }
+
     private Dictionary<string, string> BuildEnvironment(TurnRequest request)
     {
         var environment = new Dictionary<string, string>
@@ -214,6 +274,17 @@ public sealed class ClaudeCli : IProviderCli
             ["HOME"] = request.HomeDirectory ?? _options.HomePath,
             ["CLAUDE_CODE_NONINTERACTIVE"] = "1",
         };
+
+        // The CLI otherwise wraps each command in bubblewrap, which cannot create its namespace
+        // where unprivileged user namespaces are disabled: bwrap fails and the command dies before
+        // it starts. IS_SANDBOX is the one the bash sandbox actually consults — it means "this is
+        // already a sandbox, do not build another". CLAUDE_CODE_SANDBOXED rides along because it
+        // suppresses the trust prompt, which has nobody to answer it either.
+        if (_options.ContainerIsTheSandbox)
+        {
+            environment["IS_SANDBOX"] = "1";
+            environment["CLAUDE_CODE_SANDBOXED"] = "1";
+        }
 
         foreach (var pair in request.Environment)
             environment[pair.Key] = pair.Value;
@@ -259,6 +330,22 @@ public sealed class ClaudeCli : IProviderCli
 
             switch (type)
             {
+                // The partial-message feed. Only text deltas matter here: tool calls still arrive
+                // whole on the assistant event that follows.
+                case "stream_event":
+                    if (root.TryGetProperty("event", out var streamEvent) &&
+                        streamEvent.TryGetProperty("type", out var streamType) &&
+                        streamType.GetString() == "content_block_delta" &&
+                        streamEvent.TryGetProperty("delta", out var delta) &&
+                        delta.TryGetProperty("type", out var deltaType) &&
+                        deltaType.GetString() == "text_delta" &&
+                        delta.TryGetProperty("text", out var deltaText) &&
+                        deltaText.GetString() is { Length: > 0 } chunk)
+                    {
+                        yield return AgentEvent.Text_(chunk);
+                    }
+                    break;
+
                 case "assistant":
                     if (root.TryGetProperty("message", out var message) &&
                         message.TryGetProperty("content", out var content) &&
@@ -267,9 +354,11 @@ public sealed class ClaudeCli : IProviderCli
                         foreach (var block in content.EnumerateArray())
                         {
                             var blockType = block.TryGetProperty("type", out var bt) ? bt.GetString() : null;
-                            if (blockType == "text" && block.TryGetProperty("text", out var text))
+                            if (blockType == "text")
                             {
-                                yield return AgentEvent.Text_(text.GetString() ?? string.Empty);
+                                // Deliberately dropped: --include-partial-messages already streamed
+                                // this text delta by delta, and yielding the finished block as well
+                                // would print the whole answer a second time.
                             }
                             else if (blockType == "tool_use")
                             {
@@ -277,10 +366,35 @@ public sealed class ClaudeCli : IProviderCli
                                 yield return new AgentEvent(AgentEventKind.Tool, DescribeToolInput(block))
                                 {
                                     ToolName = name,
+                                    ToolCallId = block.TryGetProperty("id", out var callId) ? callId.GetString() : null,
                                 };
                             }
                         }
                     }
+                    break;
+
+                // A tool's result comes back as a user message naming the call it answers. Nothing
+                // in it belongs in the transcript — the tool line is already there — but it is what
+                // says the call has finished, and so how long it took.
+                case "user":
+                    if (root.TryGetProperty("message", out var answer) &&
+                        answer.TryGetProperty("content", out var answered) &&
+                        answered.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var block in answered.EnumerateArray())
+                        {
+                            if (block.TryGetProperty("type", out var kind) && kind.GetString() == "tool_result" &&
+                                block.TryGetProperty("tool_use_id", out var answeredId) &&
+                                answeredId.GetString() is { Length: > 0 } finished)
+                            {
+                                yield return new AgentEvent(AgentEventKind.ToolCompleted, string.Empty)
+                                {
+                                    ToolCallId = finished,
+                                };
+                            }
+                        }
+                    }
+
                     break;
 
                 case "result":

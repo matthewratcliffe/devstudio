@@ -116,7 +116,7 @@ else
                         <td>@session.Title</td>
                         <td class="mono-dim">@session.AgentName</td>
                         <td><StatusPill Session="session.Status" /></td>
-                        <td class="mono-dim">@Ago(session.CreatedAt)</td>
+                        <td class="mono-dim"><Ago Value="@session.CreatedAt" /></td>
                     </tr>
                 }
                 @if (_recent.Count == 0)
@@ -151,7 +151,7 @@ else
                                     ? $"every {schedule.IntervalMinutes}m"
                                     : "manual")
                         </td>
-                        <td class="mono-dim">@(schedule.NextRunAt?.ToLocalTime().ToString("ddd HH:mm") ?? "—")</td>
+                        <td class="mono-dim">@if (schedule.NextRunAt is { } __t1) { <LocalTime Value="@__t1" Format="weekday" /> } else { <text>—</text> }</td>
                     </tr>
                 }
                 @if (_schedules.Count == 0)
@@ -174,7 +174,7 @@ else
                     <tr @onclick='() => Open($"/workflows/runs/{run.Id}")' style="cursor:pointer">
                         <td>@run.WorkflowName</td>
                         <td><StatusPill Run="run.Status" /></td>
-                        <td class="mono-dim">@Ago(run.CreatedAt)</td>
+                        <td class="mono-dim"><Ago Value="@run.CreatedAt" /></td>
                     </tr>
                 }
                 @if (_runs.Count == 0)
@@ -194,6 +194,7 @@ else
     private IReadOnlyList<Project> _projects = [];
     private IReadOnlyList<Schedule> _schedules = [];
     private IReadOnlyList<WorkflowRun> _runs = [];
+    private readonly RenderCoalescer _render = new();
     private List<ChatSession> _live = [];
     private List<ChatSession> _recent = [];
 
@@ -263,30 +264,21 @@ else
             await LaunchAsync();
     }
 
-    private void OnSessionUpdated(ChatSession session) => InvokeAsync(async () =>
+    // Every streamed chunk raises this, and each pass reads the whole session store, so the
+    // reloads are collapsed into one per interval rather than one per chunk.
+    private void OnSessionUpdated(ChatSession session) => _render.Queue(() => InvokeAsync(async () =>
     {
         var all = await Sessions.GetAllAsync();
         _live = all.Where(s => s.IsLive).ToList();
         _recent = all.Where(s => !s.IsArchived).Take(8).ToList();
         StateHasChanged();
-    });
+    }));
 
     private static string? LastLine(ChatSession session) =>
         session.Messages.LastOrDefault(m => m.Role == MessageRole.Agent && !string.IsNullOrWhiteSpace(m.Content))?.Content is { } text
             ? (text.Length <= 140 ? text : text[..137] + "...")
             : null;
 
-    private static string Ago(DateTimeOffset when)
-    {
-        var delta = DateTimeOffset.UtcNow - when;
-        return delta switch
-        {
-            { TotalSeconds: < 60 } => "just now",
-            { TotalMinutes: < 60 } => $"{(int)delta.TotalMinutes}m ago",
-            { TotalHours: < 24 } => $"{(int)delta.TotalHours}h ago",
-            _ => when.ToLocalTime().ToString("dd MMM"),
-        };
-    }
 
     public void Dispose() => Sessions.SessionUpdated -= OnSessionUpdated;
 }

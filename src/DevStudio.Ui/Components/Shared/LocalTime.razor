@@ -1,0 +1,35 @@
+@*
+    Renders a timestamp for the browser's own clock rather than the server's.
+
+    The app runs in a container whose timezone is UTC, so ToLocalTime() there is not local to
+    anybody. The markup carries the instant in ISO form and the browser formats it: the text below
+    is what a reader sees before the script runs, and with the script it becomes their local time.
+*@
+
+<time datetime="@Value.UtcDateTime.ToString("o")" data-fmt="@Format">@Fallback()</time>
+
+@code {
+    /// <summary>The instant to show. Any offset is fine; it is sent as UTC.</summary>
+    [Parameter, EditorRequired] public DateTimeOffset Value { get; set; }
+
+    /// <summary>
+    /// One of the shapes understood by the formatter in app.js: time, short, daytime, weekday,
+    /// weekdaydate, date, full.
+    /// </summary>
+    [Parameter] public string Format { get; set; } = "time";
+
+    /// <summary>
+    /// What the server writes, matching the browser's shape as closely as it can. It is only ever
+    /// seen for the moment before the script formats it, or if scripting is off.
+    /// </summary>
+    private string Fallback() => Value.UtcDateTime.ToString(Format switch
+    {
+        "short" => "HH:mm",
+        "daytime" => "dd MMM HH:mm",
+        "weekday" => "ddd HH:mm",
+        "weekdaydate" => "ddd dd MMM HH:mm",
+        "date" => "dd MMM",
+        "full" => "dd MMM yyyy HH:mm:ss",
+        _ => "HH:mm:ss",
+    });
+}

@@ -4,6 +4,7 @@
 @inject IEntityStore<ChatSession> SessionStore
 @inject IGitService Git
 @inject IEntityStore<McpServer> McpStore
+@inject IEntityStore<GitRepository> RepositoryStore
 @inject IWorkspaceFileService WorkspaceFiles
 @inject IJSRuntime Js
 @inject NavigationManager Nav
@@ -32,7 +33,11 @@ else
                             {
                                 <span class="tool-name">@name</span>
                             }
-                            <span class="mono-dim">@message.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
+                            <span class="mono-dim"><LocalTime Value="@message.Timestamp" Format="time" /></span>
+                            @if (message.DurationMs is { } elapsed)
+                            {
+                                <span class="tool-duration">@Elapsed(elapsed)</span>
+                            }
                         </summary>
                         <div class="body">@ToolDetailOf(message)</div>
                     </details>
@@ -44,7 +49,7 @@ else
                         {
                             <div class="who">
                                 <span>@Who(message)</span>
-                                <span class="mono-dim">@message.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
+                                <span class="mono-dim"><LocalTime Value="@message.Timestamp" Format="time" /></span>
                             </div>
                         }
                         @if (message.Role == MessageRole.Guidance && GuidanceFor(message) is { } guidance)
@@ -102,6 +107,16 @@ else
                         </div>
                     </div>
                 }
+                @if (Suggestions is { Count: > 0 } suggestions)
+                {
+                    <div class="suggestions">
+                        @foreach (var suggestion in suggestions)
+                        {
+                            <button class="suggestion" @onclick="() => SendMessageAsync(suggestion)">@suggestion</button>
+                        }
+                    </div>
+                }
+
                 <div class="composer-row">
                     <textarea @bind="_draft" @bind:event="oninput" @onkeydown="OnKeyDown" @ref="_draftElement"
                               placeholder="@(_session.IsLive ? "The agent is working — your message will be queued." : "Send another turn. Enter to send, Shift+Enter for a new line.")"></textarea>
@@ -161,7 +176,7 @@ else
                 <dt>Turns</dt><dd>@_session.TurnCount</dd>
                 <dt>Trigger</dt><dd>@_session.Trigger</dd>
                 <dt>Directory</dt><dd>@_session.WorkingDirectory</dd>
-                <dt>Started</dt><dd>@(_session.StartedAt?.ToLocalTime().ToString("dd MMM HH:mm") ?? "—")</dd>
+                <dt>Started</dt><dd>@if (_session.StartedAt is { } __t1) { <LocalTime Value="@__t1" Format="daytime" /> } else { <text>—</text> }</dd>
             </dl>
 
             @if (_session.LastError is { Length: > 0 })
@@ -174,7 +189,7 @@ else
                 <div class="divider"></div>
                 <div class="section-tag">Rolling summary</div>
                 <div class="mono-dim" style="margin-bottom:0.4rem">
-                    @_session.SummaryCount summarisation(s) · last @(_session.LastSummarisedAt?.ToLocalTime().ToString("dd MMM HH:mm") ?? "—")
+                    @_session.SummaryCount summarisation(s) · last @if (_session.LastSummarisedAt is { } __t2) { <LocalTime Value="@__t2" Format="daytime" /> } else { <text>—</text> }
                 </div>
                 <div class="small" style="white-space:pre-wrap">@_session.Summary</div>
             }
@@ -190,7 +205,7 @@ else
                             <span class="pill @(guidance.Status == GuidanceStatus.Pending ? "pill-amber" : "pill-lime")">
                                 <span class="dot"></span>@guidance.Status
                             </span>
-                            <div class="mono-dim">@guidance.Source · @guidance.CreatedAt.ToLocalTime().ToString("HH:mm")</div>
+                            <div class="mono-dim">@guidance.Source · <LocalTime Value="@guidance.CreatedAt" Format="short" /></div>
                             <div>@guidance.Text</div>
                         </li>
                     }
@@ -225,7 +240,7 @@ else
                                 </a>
                             }
                             <a href="@DownloadUrl(file, inline: false)">@file.RelativePath</a>
-                            <div class="mono-dim">@Size(file.SizeBytes) · @file.ModifiedAt.ToLocalTime().ToString("dd MMM HH:mm")</div>
+                            <div class="mono-dim">@Size(file.SizeBytes) · <LocalTime Value="@file.ModifiedAt" Format="daytime" /></div>
                         </li>
                     }
                 </ul>
@@ -315,9 +330,12 @@ else
     private string _gitStatus = string.Empty;
     private IReadOnlyList<McpServer> _mcpServers = [];
     private IReadOnlyList<WorkspaceFile> _files = [];
+    private IReadOnlyList<GitRepository> _repositories = [];
     private bool _showAllFiles;
     private bool _shouldScroll;
     private bool _forceScroll;
+    private readonly RenderCoalescer _render = new();
+    private bool _disposed;
 
     protected override async Task OnInitializedAsync()
     {
@@ -334,6 +352,7 @@ else
     private async Task LoadAsync()
     {
         _mcpServers = (await McpStore.GetAllAsync()).Where(s => s.Enabled).ToList();
+        _repositories = await RepositoryStore.GetAllAsync();
         _session = await Sessions.GetAsync(SessionId);
         _notes = _session?.Notes ?? string.Empty;
         await RefreshFilesAsync();
@@ -395,6 +414,19 @@ else
         _draft = string.Empty;
         await SendMessageAsync(message);
     }
+
+    /// <summary>
+    /// Replies worth one click, read off the conversation. Recomputed as the transcript changes,
+    /// which is cheap: it is a look at the last agent message, not a call to a model.
+    /// </summary>
+    private IReadOnlyList<string> Suggestions =>
+        _session is null ? [] : ReplySuggestions.For(_session, ForgeOf(_session));
+
+    /// <summary>Which forge the session's repository belongs to, so the wording matches it.</summary>
+    private SourceControlProvider? ForgeOf(ChatSession session) =>
+        session.RepositoryId is { Length: > 0 } id
+            ? _repositories.FirstOrDefault(r => r.Id == id)?.SourceControl
+            : null;
 
     private async Task SendMessageAsync(string message)
     {
@@ -590,8 +622,30 @@ else
             return;
         }
 
-        InvokeAsync(StateHasChanged);
+        // A running turn updates the transcript far faster than anyone can read it, so those
+        // updates are coalesced. Anything else — a finished turn, a status change — draws at once.
+        if (session.IsLive)
+            QueueRender();
+        else
+            InvokeAsync(StateHasChanged);
     }
+
+    private void QueueRender() => _render.Queue(() => InvokeAsync(() =>
+    {
+        if (!_disposed)
+            StateHasChanged();
+    }));
+
+    /// <summary>
+    /// How long a tool took, at a readable precision: milliseconds while that is the interesting
+    /// part, and seconds or minutes once it is not.
+    /// </summary>
+    private static string Elapsed(int milliseconds) => milliseconds switch
+    {
+        < 1000 => $"{milliseconds}ms",
+        < 60_000 => $"{milliseconds / 1000.0:0.#}s",
+        _ => $"{milliseconds / 60000}m {milliseconds % 60000 / 1000}s",
+    };
 
     /// <summary>A tool event is stored as "name detail", so the name is the first token.</summary>
     private static string ToolNameOf(ChatMessage message)
@@ -633,6 +687,7 @@ else
 
     public ValueTask DisposeAsync()
     {
+        _disposed = true;
         Sessions.SessionUpdated -= OnSessionUpdated;
         return ValueTask.CompletedTask;
     }

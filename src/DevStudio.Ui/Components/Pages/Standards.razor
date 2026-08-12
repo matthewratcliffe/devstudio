@@ -63,7 +63,7 @@
                             }
                         </td>
                         <td class="mono-dim">@Size(file.SizeBytes)</td>
-                        <td class="mono-dim">@file.UploadedAt.ToLocalTime().ToString("dd MMM HH:mm")</td>
+                        <td class="mono-dim"><LocalTime Value="@file.UploadedAt" Format="daytime" /></td>
                         <td>
                             <div class="btn-row">
                                 <a class="btn btn-sm btn-ghost" href="/files/global/@file.FileName" target="_blank">Download</a>

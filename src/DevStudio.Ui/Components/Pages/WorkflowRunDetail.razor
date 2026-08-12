@@ -20,8 +20,8 @@ else
 
         <dl class="kv" style="margin-bottom:0.8rem">
             <dt>Triggered by</dt><dd>@_run.TriggeredBy</dd>
-            <dt>Started</dt><dd>@(_run.StartedAt?.ToLocalTime().ToString("dd MMM yyyy HH:mm:ss") ?? "—")</dd>
-            <dt>Finished</dt><dd>@(_run.FinishedAt?.ToLocalTime().ToString("dd MMM yyyy HH:mm:ss") ?? "—")</dd>
+            <dt>Started</dt><dd>@if (_run.StartedAt is { } __t1) { <LocalTime Value="@__t1" Format="full" /> } else { <text>—</text> }</dd>
+            <dt>Finished</dt><dd>@if (_run.FinishedAt is { } __t2) { <LocalTime Value="@__t2" Format="full" /> } else { <text>—</text> }</dd>
         </dl>
 
         @if (_run.Inputs.Count > 0)
@@ -61,8 +61,8 @@ else
             </div>
 
             <div class="mono-dim" style="margin-bottom:0.6rem">
-                @(step.StartedAt?.ToLocalTime().ToString("HH:mm:ss") ?? "—")
-                → @(step.FinishedAt?.ToLocalTime().ToString("HH:mm:ss") ?? "—")
+                @if (step.StartedAt is { } __t3) { <LocalTime Value="@__t3" Format="time" /> } else { <text>—</text> }
+                → @if (step.FinishedAt is { } __t4) { <LocalTime Value="@__t4" Format="time" /> } else { <text>—</text> }
                 @if (step.SessionId is { Length: > 0 })
                 {
                     <a href="/chat/@step.SessionId" style="margin-left:0.6rem">open session</a>

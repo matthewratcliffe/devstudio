@@ -38,6 +38,33 @@ public sealed class OrchestratorOptions
     /// <summary>GitHub host, for GitHub Enterprise Server.</summary>
     public string GitHubHost { get; set; } = "github.com";
 
+    /// <summary>
+    /// Says that this container is the isolation, so the CLIs should not each build a sandbox
+    /// inside it. Both of them use bubblewrap, which needs unprivileged user namespaces — a host
+    /// that disables those (Docker's default seccomp profile among them) fails to create the
+    /// namespace, and every command dies before it starts. That reads as the tool being broken
+    /// rather than the sandbox being unavailable, which is what makes it so hard to place.
+    ///
+    /// True is right for the intended deployment, where the container, the per-session worktree and
+    /// the permission mode are the isolation. Set it false when running the orchestrator directly
+    /// on a machine you care about, or when the container is allowed to create namespaces and the
+    /// CLIs' own sandboxes can do their job.
+    /// </summary>
+    public bool ContainerIsTheSandbox { get; set; } = true;
+
+    /// <summary>
+    /// Tools every agent may use without being asked, in the CLI's own permission syntax. These are
+    /// the local commands the container exists to provide: an agent that has to stop and ask before
+    /// running <c>glab</c> gets no answer at all when nobody is watching, and reports the tool as
+    /// broken. Anything approved from the UI is added to this per session.
+    /// </summary>
+    public List<string> DefaultAllowedTools { get; set; } =
+    [
+        "Bash(glab:*)",
+        "Bash(gh:*)",
+        "Bash(git:*)",
+    ];
+
     /// <summary>Port this app listens on, used for the built-in MCP server's own URL.</summary>
     public int HttpPort { get; set; } = 7080;
 

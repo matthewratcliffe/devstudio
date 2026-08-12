@@ -1,6 +1,8 @@
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
 using DevStudio.Domain.Providers;
+using DevStudio.Infrastructure.Providers.Acp;
+using DevStudio.Infrastructure.Providers.OpenAi;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -11,6 +13,9 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
     private readonly Dictionary<AiProvider, IProviderCli> _byProvider;
     private readonly IEntityStore<CliProvider> _definitions;
     private readonly IProcessRunner _runner;
+    private readonly IAcpConnectionFactory _acp;
+    private readonly IHttpClientFactory _httpClients;
+    private readonly ConversationStore _conversations;
     private readonly OrchestratorOptions _options;
     private readonly ILoggerFactory _loggerFactory;
 
@@ -18,12 +23,18 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
         IEnumerable<IProviderCli> clis,
         IEntityStore<CliProvider> definitions,
         IProcessRunner runner,
+        IAcpConnectionFactory acp,
+        IHttpClientFactory httpClients,
+        ConversationStore conversations,
         IOptions<OrchestratorOptions> options,
         ILoggerFactory loggerFactory)
     {
         _byProvider = clis.ToDictionary(c => c.Provider);
         _definitions = definitions;
         _runner = runner;
+        _acp = acp;
+        _httpClients = httpClients;
+        _conversations = conversations;
         _options = options.Value;
         _loggerFactory = loggerFactory;
 
@@ -64,6 +75,19 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
             .ToList();
     }
 
-    private CustomCli Build(CliProvider definition) =>
-        new(definition, _runner, _options, _loggerFactory.CreateLogger<CustomCli>());
+    /// <summary>
+    /// One definition, three ways of talking to it: run a command per turn, drive an ACP agent over
+    /// its stdio, or run the tool loop ourselves against an HTTP endpoint.
+    /// </summary>
+    private IProviderCli Build(CliProvider definition) => definition.Transport switch
+    {
+        CliTransport.Acp => new AcpCli(definition, _acp, _options, _loggerFactory.CreateLogger<AcpCli>()),
+        CliTransport.OpenAiCompatible => new OpenAiCompatibleCli(
+            definition,
+            _httpClients,
+            _runner,
+            _conversations,
+            _loggerFactory.CreateLogger<OpenAiCompatibleCli>()),
+        _ => new CustomCli(definition, _runner, _options, _loggerFactory.CreateLogger<CustomCli>()),
+    };
 }
