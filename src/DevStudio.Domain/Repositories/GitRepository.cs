@@ -13,6 +13,14 @@ public sealed class GitRepository : Entity
     public SourceControlProvider SourceControl { get; set; } = SourceControlProvider.GitHub;
     /// <summary>Absolute path of the primary clone inside the container volume.</summary>
     public string LocalPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Attached from a host bind mount rather than cloned by this app. The checkout belongs to
+    /// whoever mounted it — an IDE on the host is usually editing it at the same time — so it is
+    /// never cloned, never deleted, and its worktrees are cut on the mount where that IDE can see
+    /// them.
+    /// </summary>
+    public bool IsLocal { get; set; }
     public string DefaultBranch { get; set; } = "main";
     public DateTimeOffset? LastFetchedAt { get; set; }
     public string? LastError { get; set; }

@@ -1,3 +1,5 @@
+@using System.Reflection
+@inject IReleaseChecker Releases
 <nav class="sidebar @(Open ? "open" : "")">
     <a class="brand" href="/">
         <span class="brand-mark">&gt;_</span>
@@ -24,6 +26,9 @@
         </NavLink>
         <NavLink class="nav-link" href="/projects" @onclick="OnNavigate">
             <span class="ico">▣</span> Projects
+        </NavLink>
+        <NavLink class="nav-link" href="/images" @onclick="OnNavigate">
+            <span class="ico">▩</span> Images
         </NavLink>
     </div>
 
@@ -62,8 +67,14 @@
         </NavLink>
     </div>
 
-    <div style="margin-top:auto" class="mono-dim">
-        v@(Version)
+    <div class="nav-foot">
+        <span class="build" title="@Version">v@(Version)</span>
+
+        @if (_release is { UpdateAvailable: true })
+        {
+            <a class="build-update" href="@_release.Url" target="_blank" rel="noopener noreferrer"
+               title="Pull the new image to upgrade">@(_release.Latest) available</a>
+        }
     </div>
 </nav>
 
@@ -72,6 +83,30 @@
     [Parameter] public int LiveCount { get; set; }
     [Parameter] public EventCallback OnNavigate { get; set; }
 
-    private static string Version =>
-        typeof(NavMenu).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
+    private ReleaseStatus? _release;
+
+    /// <summary>
+    /// The informational version, which is the release tag a CI build was stamped with. The assembly
+    /// version is the fallback, and reads 1.0.0 on a build nobody gave a version to.
+    /// </summary>
+    private static string Version { get; } =
+        ReleaseVersion.Parse(typeof(NavMenu).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion)?.ToString()
+        ?? typeof(NavMenu).Assembly.GetName().Version?.ToString(3)
+        ?? "1.0.0";
+
+    protected override void OnInitialized()
+    {
+        // Deliberately not awaited: the answer is cached for hours and the nav should never wait on
+        // a network call to render.
+        _ = ShowReleaseAsync();
+    }
+
+    private async Task ShowReleaseAsync()
+    {
+        _release = await Releases.CheckAsync();
+
+        if (_release.UpdateAvailable)
+            await InvokeAsync(StateHasChanged);
+    }
 }

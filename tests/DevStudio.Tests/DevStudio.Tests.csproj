@@ -19,6 +19,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\DevStudio.Desktop.Core\DevStudio.Desktop.Core.csproj" />
+    <ProjectReference Include="..\..\src\DevStudio.Ui\DevStudio.Ui.csproj" />
     <ProjectReference Include="..\..\src\DevStudio.Infrastructure\DevStudio.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\DevStudio.Application\DevStudio.Application.csproj" />
     <ProjectReference Include="..\..\src\DevStudio.Domain\DevStudio.Domain.csproj" />

@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DevStudio.Desktop</RootNamespace>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- CI restores and builds the whole solution on Linux; without this the Windows-only
+         targeting pack is refused there and the desktop project breaks the container pipeline. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- The WebView2 package ships WinForms and WPF wrappers side by side. Only the WinForms one is
+         used, but the WPF assembly is still resolved and reports a WindowsBase conflict that means
+         nothing here. -->
+    <MSBuildWarningsAsMessages>MSB3277</MSBuildWarningsAsMessages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Embedded in the exe as the shell icon, and copied out as a file for the tray. -->
+    <Content Include="app.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Nothing is referenced from the web app: the shell runs it as a child process, exactly the
+         binary the container runs. This is here only so a local build produces a server to launch. -->
+    <ProjectReference Include="..\DevStudio.Desktop.Core\DevStudio.Desktop.Core.csproj" />
+    <ProjectReference Include="..\DevStudio.Ui\DevStudio.Ui.csproj"
+                      ReferenceOutputAssembly="false"
+                      ExcludeAssets="all"
+                      Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />
+    <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
+
+</Project>

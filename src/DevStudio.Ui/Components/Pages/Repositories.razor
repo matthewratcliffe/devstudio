@@ -2,6 +2,7 @@
 @inject IEntityStore<GitRepository> RepositoryStore
 @inject IGitService Git
 @inject ISourceControlRegistry Forges
+@inject Microsoft.Extensions.Options.IOptions<OrchestratorOptions> Options
 
 <PageTitle>Repositories · devStudio</PageTitle>
 
@@ -57,6 +58,79 @@
     }
 </div>
 
+<div class="card" style="margin-bottom:1.2rem">
+    <div class="section-tag">Attach local folder</div>
+
+    @if (Git.LocalRepositoryRoots.Count == 0)
+    {
+        <p class="mono-dim">
+            Nothing is mounted. To work on the same checkout your IDE has open, bind mount it into the
+            container and list the mount point here:
+        </p>
+        <pre class="mono-dim" style="white-space:pre-wrap;font-size:0.75rem">volumes:
+  - D:/repos:/host/repos
+environment:
+  Orchestrator__LocalRepositoryRoots__0: "/host/repos"</pre>
+    }
+    else
+    {
+        <div class="btn-row" style="margin-bottom:0.6rem">
+            <button class="btn btn-sm btn-ghost" disabled="@(_browsing || _browse?.ParentPath is null && _browse?.Path is null)"
+                    @onclick="() => BrowseAsync(_browse?.Path is null ? null : _browse.ParentPath)">
+                ↑ Up
+            </button>
+            <span class="mono-dim">@(_browse?.Path ?? "mounted roots")</span>
+        </div>
+
+        <div class="field" style="max-width:320px">
+            <label>Name (optional)</label>
+            <input type="text" @bind="_localName" placeholder="the folder name" />
+        </div>
+
+        @if (_browse is { Entries.Count: 0 })
+        {
+            <div class="mono-dim">Nothing here. The mount may be empty, or its folders are all hidden.</div>
+        }
+        else if (_browse is not null)
+        {
+            <div class="table-wrap" style="max-height:320px;overflow-y:auto">
+                <table class="table">
+                    <tbody>
+                    @foreach (var entry in _browse.Entries)
+                    {
+                        <tr>
+                            <td>@entry.Name</td>
+                            <td class="mono-dim">
+                                @if (entry.IsRegistered)
+                                {
+                                    <span class="pill">already attached</span>
+                                }
+                                else if (entry.IsGitRepository)
+                                {
+                                    <span class="pill">git repo</span>
+                                }
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-ghost" disabled="@_browsing" @onclick="() => BrowseAsync(entry.Path)">Open</button>
+                                @if (entry.IsGitRepository && !entry.IsRegistered)
+                                {
+                                    <button class="btn btn-sm btn-primary" disabled="@_attaching" @onclick="() => AttachAsync(entry.Path)">Attach</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        <div class="mono-dim" style="margin-top:0.7rem">
+            Attached repos are never cloned or deleted. Worktrees for them are cut into
+            <code>@Options.Value.LocalWorktreesFolderName</code> beside the checkout, so the IDE sees them too.
+        </div>
+    }
+</div>
+
 @if (_repositories.Count == 0)
 {
     <div class="empty">
@@ -71,11 +145,15 @@
         <div class="card-head">
             <h3>@repository.Name</h3>
             <div class="spacer"></div>
+            @if (repository.IsLocal)
+            {
+                <span class="pill">local mount</span>
+            }
             <span class="pill">@repository.SourceControl</span>
             <span class="pill">@repository.DefaultBranch</span>
             <span class="pill">@repository.Worktrees.Count worktrees</span>
         </div>
-        <div class="mono-dim">@repository.RemoteUrl</div>
+        <div class="mono-dim">@(string.IsNullOrWhiteSpace(repository.RemoteUrl) ? "no origin remote" : repository.RemoteUrl)</div>
         <div class="mono-dim" style="margin-bottom:0.7rem">@repository.LocalPath</div>
 
         @if (repository.LastError is { Length: > 0 })
@@ -84,10 +162,13 @@
         }
 
         <div class="btn-row" style="margin-bottom:0.8rem">
-            <button class="btn btn-sm" @onclick="() => FetchAsync(repository)">Fetch</button>
+            @if (!string.IsNullOrWhiteSpace(repository.RemoteUrl))
+            {
+                <button class="btn btn-sm" @onclick="() => FetchAsync(repository)">Fetch</button>
+            }
             <button class="btn btn-sm btn-ghost" @onclick="() => ToggleBranchesAsync(repository)">Branches</button>
             <button class="btn btn-sm btn-ghost" @onclick="() => NewWorktreeAsync(repository)">New worktree</button>
-            <button class="btn btn-sm btn-danger" @onclick="() => ForgetAsync(repository)">Forget</button>
+            <button class="btn btn-sm btn-danger" @onclick="() => ForgetAsync(repository)">@(repository.IsLocal ? "Detach" : "Forget")</button>
         </div>
 
         @if (_branchesFor == repository.Id)
@@ -135,12 +216,23 @@
     private IReadOnlyList<string> _branches = [];
     private string? _branchesFor;
 
+    private LocalBrowseResult? _browse;
+    private bool _browsing;
+    private bool _attaching;
+    private string _localName = string.Empty;
+
     private string _remoteUrl = string.Empty;
     private string _name = string.Empty;
     private bool _cloning;
     private bool _loadingRemote;
 
-    protected override async Task OnInitializedAsync() => await ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+
+        if (Git.LocalRepositoryRoots.Count > 0)
+            await BrowseAsync(null);
+    }
 
     protected override void OnAfterRender(bool firstRender)
     {
@@ -168,6 +260,45 @@
         finally
         {
             _cloning = false;
+        }
+    }
+
+    private async Task BrowseAsync(string? path)
+    {
+        _browsing = true;
+        try
+        {
+            _browse = await Git.BrowseLocalAsync(path);
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify(ex.Message, "err");
+        }
+        finally
+        {
+            _browsing = false;
+        }
+    }
+
+    private async Task AttachAsync(string path)
+    {
+        _attaching = true;
+        try
+        {
+            var repository = await Git.AttachLocalAsync(path, string.IsNullOrWhiteSpace(_localName) ? null : _localName.Trim());
+            _localName = string.Empty;
+            await ReloadAsync();
+            // Re-listing marks the folder as attached rather than leaving an Attach button that no-ops.
+            await BrowseAsync(_browse?.Path);
+            Layout.Notify($"Attached {repository.Name}.", "ok");
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify(ex.Message, "err");
+        }
+        finally
+        {
+            _attaching = false;
         }
     }
 
@@ -237,8 +368,13 @@
     private async Task ForgetAsync(GitRepository repository)
     {
         // Only the registration goes; the clone stays on the volume so nothing is lost by accident.
+        var wasLocal = repository.IsLocal;
         await RepositoryStore.DeleteAsync(repository.Id);
         await ReloadAsync();
-        Layout.Notify("Removed from the list. The clone is still on disk.", "ok");
+
+        if (wasLocal && Git.LocalRepositoryRoots.Count > 0)
+            await BrowseAsync(_browse?.Path);
+
+        Layout.Notify(wasLocal ? "Detached. The folder on the mount is untouched." : "Removed from the list. The clone is still on disk.", "ok");
     }
 }

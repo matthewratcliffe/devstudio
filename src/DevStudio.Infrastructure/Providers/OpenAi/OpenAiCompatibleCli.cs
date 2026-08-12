@@ -22,6 +22,7 @@ public sealed class OpenAiCompatibleCli : IProviderCli
     private readonly IHttpClientFactory _clients;
     private readonly IProcessRunner _runner;
     private readonly ConversationStore _conversations;
+    private readonly IImageGenerationService? _images;
     private readonly ILogger _logger;
 
     public OpenAiCompatibleCli(
@@ -29,12 +30,14 @@ public sealed class OpenAiCompatibleCli : IProviderCli
         IHttpClientFactory clients,
         IProcessRunner runner,
         ConversationStore conversations,
+        IImageGenerationService? images,
         ILogger logger)
     {
         _definition = definition;
         _clients = clients;
         _runner = runner;
         _conversations = conversations;
+        _images = images;
         _logger = logger;
     }
 
@@ -107,10 +110,10 @@ public sealed class OpenAiCompatibleCli : IProviderCli
         if (string.IsNullOrWhiteSpace(_definition.BaseUrl))
             throw new InvalidOperationException($"'{_definition.Name}' has no endpoint configured.");
 
-        var tools = new WorkspaceTools(request.WorkingDirectory, request.PermissionMode, _runner);
-
         // A forgotten session starts over rather than resuming half a conversation.
         var sessionId = request.ResumeSessionId ?? Guid.NewGuid().ToString("n");
+
+        var tools = new WorkspaceTools(request.WorkingDirectory, request.PermissionMode, _runner, _images, sessionId);
         var messages = _conversations.Get(request.ResumeSessionId);
 
         var toolDefinitions = tools.Definitions();
@@ -162,11 +165,18 @@ public sealed class OpenAiCompatibleCli : IProviderCli
                     ToolCallId = call.Id,
                     DurationMs = (int)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
                 }, ct);
+
+                // Some tools produce something worth showing in its own right — a generated image
+                // being the case in point. Emitting it here means the operator sees it even if the
+                // model never mentions it in its answer.
+                if (!string.IsNullOrWhiteSpace(result.ForTranscript))
+                    await events.WriteAsync(AgentEvent.Text_(result.ForTranscript + "\n\n"), ct);
+
                 messages.Add(new JsonObject
                 {
                     ["role"] = "tool",
                     ["tool_call_id"] = call.Id,
-                    ["content"] = result,
+                    ["content"] = result.ForModel,
                 });
             }
         }

@@ -256,6 +256,30 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 .btn-icon { padding: 0.35em 0.55em; }
 .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 
+/* Images an agent generated mid-turn, rendered inline in the transcript. Capped in height so a
+   portrait image cannot push the rest of the conversation off the screen. */
+.md-figure { display: inline-block; max-width: 100%; }
+
+.md-image {
+    display: block;
+    max-width: 100%;
+    max-height: 30rem;
+    width: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin: 0.6rem 0 0.35rem;
+}
+
+.md-download {
+    display: inline-block;
+    margin-bottom: 0.6rem;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.75;
+}
+.md-download:hover { opacity: 1; }
+
 /* -- Cards & grids -------------------------------------------------------- */
 
 .card {
@@ -549,3 +573,18 @@ select option { background: var(--bg-1); }
     border-style: dashed;
 }
 .msg-summary .who { color: var(--blue); }
+
+/* Sidebar footer: the build, and a word when a newer one exists. Quiet until it is looked at —
+   it is provenance, not a call to action. */
+.nav-foot {
+    margin-top: auto; padding: 0.9rem 0.2rem 0.2rem;
+    display: flex; flex-direction: column; gap: 0.25rem;
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.04em;
+}
+.nav-foot .build { color: var(--text-2); opacity: 0.5; transition: opacity 0.15s ease; }
+.nav-foot:hover .build { opacity: 0.9; }
+.nav-foot .build-update {
+    color: var(--cyan); opacity: 0.8; text-decoration: none;
+}
+.nav-foot .build-update::before { content: "↑ "; }
+.nav-foot .build-update:hover { opacity: 1; text-decoration: underline; }

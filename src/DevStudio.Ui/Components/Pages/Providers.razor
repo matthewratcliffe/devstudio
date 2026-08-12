@@ -8,6 +8,8 @@
 @inject ISourceControlHosts ForgeHosts
 @inject ITerminalService Terminals
 @inject ILoopbackCallbackForwarder Callbacks
+@inject IImageSettingsService ImageSetup
+@inject IImageGenerationService Images
 @inject IJSRuntime Js
 
 <PageTitle>Logins · devStudio</PageTitle>
@@ -15,10 +17,11 @@
 <div class="card" style="margin-bottom:1.2rem">
     <div class="section-tag">How this works</div>
     <p class="small">
-        There is no API key anywhere in this app — every agent runs the real CLI, so the CLI's own login
+        No agent here is driven by an API key — every agent runs the real CLI, so the CLI's own login
         is what matters. Each account is a separate home directory on the volume, which is what lets a
         personal and a work login coexist: pick one per project, and the session's CLI runs with that
-        account's credentials.
+        account's credentials. Image generation is the one exception, at the bottom of this page: it
+        has no CLI to borrow a login from.
     </p>
 </div>
 
@@ -133,6 +136,123 @@
             </div>
         </div>
     }
+</div>
+
+<div class="section-tag" style="margin-top:1rem">Image generation</div>
+<p class="small">
+    The one place in this app that does hold keys — image generation is an HTTP call, not a CLI, so
+    there is no login to borrow. Pollinations needs nothing at all and is what the
+    <a href="/images">Images</a> page and the <code>generate_image</code> tool use until you configure
+    something better.
+</p>
+
+<div class="grid grid-3" style="margin-bottom:1.4rem">
+    <div class="card">
+        <div class="card-head">
+            <h3>Pollinations</h3>
+            <div class="spacer"></div>
+            <span class="pill pill-cyan"><span class="dot"></span>no account needed</span>
+        </div>
+
+        <div class="field">
+            <label>API token</label>
+            <input type="password" @bind="_imageSettings.Pollinations.ApiToken" placeholder="anonymous" />
+            <span class="hint">
+                Free from <code>auth.pollinations.ai</code>. Without one you get a watermark and one
+                image every @_imageSettings.Pollinations.MinSecondsBetweenRequests seconds. Use a
+                server-side key (<code>sk_</code>).
+            </span>
+        </div>
+
+        <div class="form-grid">
+            <div class="field">
+                <label>Model</label>
+                <input type="text" @bind="_imageSettings.Pollinations.Model" placeholder="flux" />
+            </div>
+            <div class="field">
+                <label>Seconds between requests</label>
+                <input type="number" min="0" @bind="_imageSettings.Pollinations.MinSecondsBetweenRequests" />
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <h3>Cloudflare Workers AI</h3>
+            <div class="spacer"></div>
+            <StatusPill Auth="@AuthStateFor(ImageBackend.Cloudflare)" />
+        </div>
+
+        <div class="field">
+            <label>Account id</label>
+            <input type="text" @bind="_imageSettings.Cloudflare.AccountId" />
+            <span class="hint">On the Workers &amp; Pages overview in the Cloudflare dashboard.</span>
+        </div>
+
+        <div class="field">
+            <label>API token</label>
+            <input type="password" @bind="_imageSettings.Cloudflare.ApiToken" />
+            <span class="hint">
+                Needs the Workers AI permission. 10,000 neurons a day are free — about 500 images at
+                1024×1024 on FLUX.1 Schnell — resetting at 00:00 UTC.
+            </span>
+        </div>
+
+        <div class="field">
+            <label>Model</label>
+            <input type="text" @bind="_imageSettings.Cloudflare.Model" />
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <h3>Gemini</h3>
+            <div class="spacer"></div>
+            <StatusPill Auth="@AuthStateFor(ImageBackend.Gemini)" />
+        </div>
+
+        <div class="field">
+            <label>AI Studio key</label>
+            <input type="password" @bind="_imageSettings.Gemini.ApiKey" />
+            <span class="hint">
+                The only backend here that can edit an existing image. Free-tier limits vary by key
+                and region; the pro image model needs billing enabled.
+            </span>
+        </div>
+
+        <div class="field">
+            <label>Model</label>
+            <input type="text" @bind="_imageSettings.Gemini.Model" />
+        </div>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom:1.4rem">
+    <div class="form-grid">
+        <div class="field">
+            <label>Default backend</label>
+            <select @bind="_imageSettings.DefaultBackend">
+                @foreach (var backend in Enum.GetValues<ImageBackend>())
+                {
+                    <option value="@backend">@backend</option>
+                }
+            </select>
+            <span class="hint">Used when a caller — or an agent's tool call — does not name one.</span>
+        </div>
+        <div class="field">
+            <label>Maximum dimension</label>
+            <input type="number" min="64" @bind="_imageSettings.MaxDimension" />
+        </div>
+        <div class="field">
+            <label>Timeout (seconds)</label>
+            <input type="number" min="10" @bind="_imageSettings.TimeoutSeconds" />
+        </div>
+    </div>
+
+    <div class="btn-row">
+        <button class="btn btn-primary" @onclick="SaveImageSettingsAsync">Save image settings</button>
+        <span class="mono-dim">Applies to the next image — running sessions pick it up too.</span>
+    </div>
 </div>
 
 @if (_session is not null)
@@ -283,7 +403,29 @@
     private string? _newAccountCliId;
     private string _newAccountName = string.Empty;
 
-    protected override async Task OnInitializedAsync() => await RefreshAsync();
+    /// <summary>Edited in place and written back whole — there is only ever one of these.</summary>
+    private ImageSettings _imageSettings = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _imageSettings = await ImageSetup.LoadAsync();
+        await RefreshAsync();
+    }
+
+    /// <summary>
+    /// Reuses the account pill for the image backends: a key that is present is as much as can be
+    /// said without spending a request to find out whether it is also valid.
+    /// </summary>
+    private ProviderAuthState AuthStateFor(ImageBackend backend) =>
+        Images.Backends.FirstOrDefault(b => b.Backend == backend)?.Check().Configured == true
+            ? ProviderAuthState.LoggedIn
+            : ProviderAuthState.LoggedOut;
+
+    private async Task SaveImageSettingsAsync()
+    {
+        await ImageSetup.SaveAsync(_imageSettings);
+        Layout.Notify("Image settings saved.", "ok");
+    }
 
     protected override void OnAfterRender(bool firstRender)
     {

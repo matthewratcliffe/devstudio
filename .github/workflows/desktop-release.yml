@@ -1,0 +1,193 @@
+name: Desktop installers
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*.*.*"]
+  pull_request:
+    # A pull request builds every installer — so a broken desktop build fails the PR — but never
+    # uploads them anywhere.
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.derive.outputs.value }}
+      release: ${{ steps.derive.outputs.release }}
+    steps:
+      # A tag is the released version; anything else gets a throwaway version so packaging is
+      # exercised on every push without ever colliding with a real release.
+      - id: derive
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=0.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  package:
+    name: ${{ matrix.name }}
+    needs: version
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    permissions:
+      # Only used on a tag, where the installers are attached to the GitHub release the updaters read.
+      contents: write
+
+    strategy:
+      # One platform failing should not hide whether the others packaged.
+      fail-fast: false
+      matrix:
+        include:
+          # Windows gets the WinForms shell — WebView2, and a tray icon. macOS and Linux get the
+          # Photino shell, which wraps WKWebView and WebKitGTK.
+          - name: Windows (x64)
+            os: windows-latest
+            rid: win-x64
+            shell-project: src/DevStudio.Desktop/DevStudio.Desktop.csproj
+            main-exe: DevStudio.Desktop.exe
+            channel: win-x64
+            icon: src/DevStudio.Desktop/app.ico
+            extra-pack-args: --framework webview2
+
+          - name: macOS (Apple silicon)
+            os: macos-latest
+            rid: osx-arm64
+            shell-project: src/DevStudio.Desktop.Photino/DevStudio.Desktop.Photino.csproj
+            main-exe: devstudio
+            channel: osx-arm64
+            icon: src/DevStudio.Desktop.Photino/app.png
+            extra-pack-args: --packAppId com.matthewratcliffe.devstudio
+
+          - name: macOS (Intel)
+            os: macos-13
+            rid: osx-x64
+            shell-project: src/DevStudio.Desktop.Photino/DevStudio.Desktop.Photino.csproj
+            main-exe: devstudio
+            channel: osx-x64
+            icon: src/DevStudio.Desktop.Photino/app.png
+            extra-pack-args: --packAppId com.matthewratcliffe.devstudio
+
+          - name: Linux (x64)
+            os: ubuntu-latest
+            rid: linux-x64
+            shell-project: src/DevStudio.Desktop.Photino/DevStudio.Desktop.Photino.csproj
+            main-exe: devstudio
+            channel: linux-x64
+            icon: src/DevStudio.Desktop.Photino/app.png
+            extra-pack-args: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      # Two self-contained publishes: the shell, and the same web app the container runs, nested in
+      # ./server where the shell looks for it. Neither needs .NET installed on the target machine.
+      - name: Publish the shell
+        run: >
+          dotnet publish ${{ matrix.shell-project }}
+          -c Release -r ${{ matrix.rid }} --self-contained
+          -p:Version=${{ needs.version.outputs.value }}
+          -o artifacts/publish
+
+      - name: Publish the server
+        run: >
+          dotnet publish src/DevStudio.Ui/DevStudio.Ui.csproj
+          -c Release -r ${{ matrix.rid }} --self-contained
+          -p:Version=${{ needs.version.outputs.value }}
+          -o artifacts/publish/server
+
+      # The publish is worthless if the UI came out inert, and that failure is silent at runtime.
+      - name: Verify the published output
+        shell: bash
+        run: |
+          for file in "artifacts/publish/${{ matrix.main-exe }}" \
+                      "artifacts/publish/server/wwwroot/_framework/blazor.web.js"; do
+            [ -f "$file" ] || { echo "FATAL: $file missing from the publish output"; exit 1; }
+          done
+
+      # The AppImage vpk builds mounts itself through FUSE.
+      - name: Install Linux packaging dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfuse2
+
+      - name: Install Velopack
+        shell: bash
+        run: |
+          dotnet tool install -g vpk
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Build installer and update packages
+        shell: bash
+        run: >
+          vpk pack
+          --packId devStudio
+          --packVersion ${{ needs.version.outputs.value }}
+          --packTitle devStudio
+          --packAuthors "Matthew Ratcliffe"
+          --packDir artifacts/publish
+          --mainExe ${{ matrix.main-exe }}
+          --icon ${{ matrix.icon }}
+          --channel ${{ matrix.channel }}
+          --outputDir artifacts/releases
+          ${{ matrix.extra-pack-args }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: devstudio-${{ matrix.channel }}-${{ needs.version.outputs.value }}
+          path: |
+            artifacts/releases/*Setup*
+            artifacts/releases/*.dmg
+            artifacts/releases/*.pkg
+            artifacts/releases/*.AppImage
+            artifacts/releases/*Portable*
+          if-no-files-found: error
+
+      # The release assets are also the update feed: an installed app reads its channel's release
+      # index and packages straight off this release, so uploading them is what makes updates work.
+      # --merge because four jobs attach to the same release.
+      - name: Publish to the release
+        if: needs.version.outputs.release == 'true'
+        shell: bash
+        run: >
+          vpk upload github
+          --outputDir artifacts/releases
+          --repoUrl ${{ github.server_url }}/${{ github.repository }}
+          --token ${{ secrets.GITHUB_TOKEN }}
+          --channel ${{ matrix.channel }}
+          --tag ${{ github.ref_name }}
+          --releaseName "devStudio ${{ needs.version.outputs.value }}"
+          --merge
+          --publish
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "### ${{ matrix.name }} — devStudio ${{ needs.version.outputs.value }}"
+            echo
+            ls -lh artifacts/releases | awk 'NR>1 {print "- `" $9 "` (" $5 ")"}'
+          } >> "$GITHUB_STEP_SUMMARY"

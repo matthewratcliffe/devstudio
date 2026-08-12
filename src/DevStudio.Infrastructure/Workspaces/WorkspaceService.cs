@@ -68,10 +68,13 @@ public sealed class WorkspaceService : IWorkspaceService
 
         var repositoryId = agent.RepositoryId ?? project?.RepositoryId;
         SessionWorkspace workspace;
+        var isLocalRepository = false;
 
         if (!string.IsNullOrWhiteSpace(repositoryId) &&
             await _repositories.GetAsync(repositoryId!, ct) is { } repository)
         {
+            isLocalRepository = repository.IsLocal;
+
             if (agent.UseWorktree)
             {
                 var branch = $"agent/{TemplateRenderer.Slugify(agent.Name)}/{sessionId[..8]}";
@@ -105,6 +108,11 @@ public sealed class WorkspaceService : IWorkspaceService
 
         if (projectId is not null)
             await MaterialiseProjectFilesAsync(projectId, workspace.Path, ct);
+
+        // Everything staged above is untracked. In a volume clone nobody sees it; in a checkout an
+        // IDE on the host has open it reads as a dozen stray files, and gets committed by accident.
+        if (isLocalRepository)
+            await IgnoreStagedArtefactsAsync(workspace.Path, ct);
 
         return workspace;
     }
@@ -247,6 +255,57 @@ public sealed class WorkspaceService : IWorkspaceService
             ct);
 
         return selected.Select(s => s.Name).ToList();
+    }
+
+    /// <summary>
+    /// Adds the files this app stages into a workspace to that checkout's private exclude list, so
+    /// they never show up as untracked work in an editor pointed at the same directory. It is the
+    /// per-clone list, not .gitignore, so nothing is added to the repository itself.
+    /// </summary>
+    private async Task IgnoreStagedArtefactsAsync(string workspacePath, CancellationToken ct)
+    {
+        string[] patterns =
+        [
+            "/global-files/",
+            "/project-files/",
+            "/GUIDANCE.md",
+            "/AGENTS.orchestrator.md",
+            "/.mcp.json",
+            "/.claude/skills/",
+        ];
+
+        try
+        {
+            // A worktree keeps its exclude file under the main repository, so git has to say where.
+            var gitDir = await _git.RunAsync(workspacePath, ["rev-parse", "--absolute-git-dir"], ct);
+            if (!gitDir.Succeeded || string.IsNullOrWhiteSpace(gitDir.Output))
+                return;
+
+            var infoPath = Path.Combine(gitDir.Output.Trim(), "info");
+            Directory.CreateDirectory(infoPath);
+            var excludePath = Path.Combine(infoPath, "exclude");
+
+            var lines = File.Exists(excludePath)
+                ? (await File.ReadAllLinesAsync(excludePath, ct)).ToList()
+                : [];
+
+            var missing = patterns.Where(p => !lines.Contains(p, StringComparer.Ordinal)).ToList();
+            if (missing.Count == 0)
+                return;
+
+            if (lines.Count > 0 && !string.IsNullOrWhiteSpace(lines[^1]))
+                lines.Add(string.Empty);
+
+            lines.Add("# devStudio: files staged into this workspace by the orchestrator.");
+            lines.AddRange(missing);
+
+            await File.WriteAllLinesAsync(excludePath, lines, ct);
+        }
+        catch (Exception ex)
+        {
+            // Cosmetic. A session that cannot write the exclude file still runs fine.
+            _logger.LogWarning(ex, "Could not update the git exclude list for {Path}", workspacePath);
+        }
     }
 
     public async Task MaterialiseGlobalFilesAsync(string workspacePath, CancellationToken ct = default)

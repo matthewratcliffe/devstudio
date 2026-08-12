@@ -5,6 +5,10 @@
 # TARGETARCH, which is far quicker than emulating the whole toolchain under QEMU.
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG TARGETARCH
+# Stamped into the assembly so the UI can show which build this is, and compare it against the
+# newest published release. Left at 0.0.0 for a local build, which the update check reads as
+# "unversioned" and stays quiet about.
+ARG VERSION=0.0.0
 WORKDIR /src
 
 COPY DevStudio.slnx ./
@@ -20,7 +24,7 @@ COPY . .
 # Publish restores again on purpose: with --no-restore after a csproj-only restore, the SDK omits the
 # framework static web assets and the published app ends up with no _framework/blazor.web.js — which
 # leaves every page rendered but completely inert.
-RUN ARCH=$(case "$TARGETARCH" in arm64) echo arm64;; *) echo x64;; esac) && dotnet publish src/DevStudio.Ui/DevStudio.Ui.csproj -c Release -a "$ARCH" --no-self-contained -o /app/publish
+RUN ARCH=$(case "$TARGETARCH" in arm64) echo arm64;; *) echo x64;; esac) && dotnet publish src/DevStudio.Ui/DevStudio.Ui.csproj -c Release -a "$ARCH" -p:Version="$VERSION" --no-self-contained -o /app/publish
 
 # Fail the build rather than ship a UI where nothing works.
 RUN test -f /app/publish/wwwroot/_framework/blazor.web.js     || (echo 'FATAL: blazor.web.js missing from publish output' && exit 1)

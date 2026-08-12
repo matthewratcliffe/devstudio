@@ -26,12 +26,15 @@ only credential involved is the login you complete in the web UI.
 | **Workflows** | Ordered steps with a shared run context: every finished step publishes its output as `{{steps.step-name}}`, readable by *all* later steps. Steps sharing an order run at the same time. |
 | **Scheduler** | Cron expressions, plain timers, or manual-only saved runs — targeting an agent or a workflow, optionally inside a project folder. |
 | **Repositories** | Clone repos from the UI (or pick from `gh repo list`), and cut a fresh git worktree per session so parallel agents never collide. |
+| **Your own checkout** | Bind mount a folder from the host and attach it from the UI ([how](#working-on-the-code-your-ide-has-open)). Agents work in the same files your IDE has open, in worktrees cut beside the checkout so you can see them. |
 | **GitHub and GitLab** | `gh` and `glab` both ship in the image and share the container login, so agents can open pull or merge requests and read issues. A project picks one forge; it can still have several repositories from it. Set `Orchestrator__GitLabHost` (or `GitHubHost`) for a self-managed instance. |
 | **Quick chat** | A conversation with no project and no agent — pick a CLI and talk. Read-only, in a scratch directory. |
 | **Output files** | Everything an agent writes in its workspace is listed in the chat, with images previewed inline and every file downloadable. |
 | **Skills** | Reusable instruction files, written to `.claude/skills/<slug>/SKILL.md` (and mirrored to `AGENTS.orchestrator.md` for Codex) before a session starts. |
 | **MCP — both directions** | Register MCP servers and attach them to agents (`.mcp.json` per workspace), **and** the orchestrator exposes its own MCP server at `/mcp` so agents can list sessions, read another agent's transcript, steer a run, leave notes, start sessions and run workflows. HTTP servers can authenticate with an OAuth client-credentials grant, refreshed automatically, or a pasted bearer token. **Test** connects like a CLI would and lists the tools the server actually offers. Servers attach to agents, and a chat — including a quick chat — can carry extra servers of its own, applied from its next turn. The built-in orchestrator entry cannot be deleted and is restored on start if it goes missing. |
 | **PWA** | Installable, with a themed offline page. |
+| **Version in the corner** | The build you are running sits under the sidebar, with a line beside it when a newer release exists. |
+| **Desktop app** | Installers for Windows, macOS and Linux that run the whole thing natively — no Docker, no volumes, direct access to your files ([how](#as-a-desktop-app-windows-macos-linux)). Updates download in the background and install when you quit. |
 | **Persistence** | JSON files on a Docker volume. No database. A volume backup is the whole backup. |
 
 ## Project site
@@ -98,6 +101,110 @@ so you can verify it came from this repository's workflow rather than someone's 
 gh attestation verify oci://ghcr.io/matthewratcliffe/devstudio:latest --owner matthewratcliffe
 ```
 
+### As a desktop app (Windows, macOS, Linux)
+
+Docker is the supported way to run this on a server. On your own machine there is a second option:
+an installed app with no container, no volumes, and no bind mounts to configure — agents reach your
+files because they are already your files.
+
+| Platform | Download | Notes |
+| --- | --- | --- |
+| **Windows** | `devStudio-win-Setup.exe` | Per-user, no administrator. Installs the WebView2 runtime if Windows does not already have it. |
+| **macOS** (Apple silicon) | `devStudio-osx-arm64-Setup.pkg` | |
+| **macOS** (Intel) | `devStudio-osx-x64-Setup.pkg` | |
+| **Linux** (x64) | `devStudio-linux-x64.AppImage` | `chmod +x` and run. Needs WebKitGTK — `sudo apt install libwebkit2gtk-4.1-0` on Debian and Ubuntu. |
+
+All four are on the [latest release](https://github.com/matthewratcliffe/devstudio/releases/latest).
+
+It is the same application on every platform: a small shell starts `DevStudio.Ui` — the exact binary
+the container runs — on `127.0.0.1`, and shows it in the system web view. Windows uses WebView2 and
+gets a tray icon, so closing the window leaves the agents running and **Quit** from the tray stops
+them. macOS and Linux use [Photino](https://www.tryphotino.io/) — WKWebView and WebKitGTK — where
+there is no tray, so closing the window stops the server with it.
+
+Two flags, for the platforms without a menu to click:
+
+```bash
+devstudio --check-tools   # what is installed, what is missing, and how to install it
+devstudio --update        # install a waiting update now instead of on the next quit
+```
+
+#### What changes without the container
+
+| | Container | Desktop |
+| --- | --- | --- |
+| Reaching your code | A bind mount, attached from the UI | Every repository under your home directory is already attachable |
+| State | `devstudio-data` volume | `%LOCALAPPDATA%\devStudio-data`, `~/Library/Application Support/devStudio`, `~/.local/share/devStudio` |
+| CLI logins | The `devstudio-home` volume, separate from yours | Your real `~/.claude` and `~/.codex` — the logins you already have |
+| Sandbox | The container is the boundary, so the CLIs are told not to build their own | No container, so the CLIs keep their own: codex runs `workspace-write`, claude keeps its bash sandbox |
+| `git`, `node`, `claude`, `codex`, `gh`, `glab`, `rg` | Baked into the image | Must be on your PATH — **Check tools…** in the tray menu, or `--check-tools`, says what is missing |
+| Updates | You pull a new image; the UI tells you when there is one | Downloaded in the background, installed when you quit |
+
+The sandbox row is the one to read twice. In the container, an agent that runs something reckless
+wrecks a container. On the desktop it is running as you, with your files and your credentials. The
+CLIs' own sandboxes are left on to compensate, but they are not the same boundary, and permission
+modes matter more here than they do in Docker.
+
+State lives outside the install directory, because each update installs a new copy of the application
+and removes the old one. Point `DEVSTUDIO_DATA` somewhere else if you would rather keep it elsewhere.
+
+The window uses port 7080 when it is free — same as the container, so a bookmark keeps working — and
+any free port otherwise.
+
+#### Updates that do not interrupt anything
+
+The installed app checks GitHub a couple of minutes after start and every six hours after that. When
+there is a newer release it **downloads it in the background and then leaves it alone**: applying an
+update restarts the app, and a restart takes every agent mid-turn with it.
+
+The download is installed when you quit, so the next launch is already the new version and no session
+was lost to it. Windows says so once, with a tray notification and a menu item that offers to restart
+now; macOS and Linux put it in the window title. Nothing installs itself while you are working.
+
+`--update` (or the tray item) applies a waiting update immediately, for when nothing is running.
+
+#### Building the installers yourself
+
+Each platform builds on its own runner — the shell is native code either way, and Velopack's
+installers are built by the tools of the platform they target.
+
+```bash
+# Windows
+dotnet publish src/DevStudio.Desktop -c Release -r win-x64 --self-contained -o artifacts/publish
+dotnet publish src/DevStudio.Ui      -c Release -r win-x64 --self-contained -o artifacts/publish/server
+vpk pack --packId devStudio --packVersion 1.0.0 --packDir artifacts/publish \
+         --mainExe DevStudio.Desktop.exe --icon src/DevStudio.Desktop/app.ico \
+         --channel win-x64 --framework webview2 --outputDir artifacts/releases
+
+# macOS and Linux — same two publishes, the Photino shell, and the platform's own channel
+dotnet publish src/DevStudio.Desktop.Photino -c Release -r osx-arm64 --self-contained -o artifacts/publish
+dotnet publish src/DevStudio.Ui              -c Release -r osx-arm64 --self-contained -o artifacts/publish/server
+vpk pack --packId devStudio --packVersion 1.0.0 --packDir artifacts/publish \
+         --mainExe devstudio --icon src/DevStudio.Desktop.Photino/app.png \
+         --channel osx-arm64 --packAppId com.matthewratcliffe.devstudio --outputDir artifacts/releases
+```
+
+Two self-contained publishes, the server nested in `server/` where the shell looks for it, so the
+target machine needs no .NET installed. That is about 220 MB on disk and a ~100 MB installer.
+
+`.github/workflows/desktop-release.yml` runs exactly those steps as a four-way matrix. Every push
+builds all four installers and uploads them as workflow artifacts; a `v*.*.*` tag also attaches them
+to that tag's GitHub release, each on its own Velopack channel — which is the feed the installed app
+reads, so uploading them is what makes updates work.
+
+Nothing is signed yet: SmartScreen will warn on Windows and Gatekeeper will refuse the macOS build
+until it is opened from the right-click menu once. Add `--signParams` (Windows) or
+`--signAppIdentity` / `--notaryProfile` (macOS) to the `vpk pack` step once you have certificates.
+
+For development, run a shell straight from the repository — either one falls back to whatever
+`DevStudio.Ui` build output it can find:
+
+```bash
+dotnet build
+dotnet run --project src/DevStudio.Desktop          # Windows
+dotnet run --project src/DevStudio.Desktop.Photino  # macOS and Linux
+```
+
 ### Building it yourself
 
 ```bash
@@ -107,7 +214,8 @@ docker compose up -d --build
 ### First run
 
 Open <http://localhost:7080>, go to **Logins**, and complete the sign-in for Claude, Codex and
-GitHub in the embedded terminal. Each one prints a link and, for Codex and GitHub, a one-time code —
+GitHub in the embedded terminal. It is a real terminal on every platform — `script` in the container,
+ConPTY on Windows — which these CLIs check for before they will start a device-code flow at all. Each one prints a link and, for Codex and GitHub, a one-time code —
 both are pulled out of the scrollback and shown above the terminal with a copy button. Credentials
 land in the `devstudio-home` volume and survive restarts and rebuilds.
 
@@ -120,6 +228,75 @@ Each account picks its own **sign-in method**, because no single flow suits ever
 | **Paste a token** | You paste a key or token into a masked field; it goes straight to the CLI's stdin. | Codex (`--with-api-key`) and GitHub (`--with-token`). The CLI stores it in its own credential store — this app never keeps a copy, and the value never appears in the terminal transcript. |
 | **Long-lived token** | Claude only: `claude setup-token` mints a durable credential through the browser. | Best for schedules and workflows that run unattended. |
 | **Console account** | Claude only: sign in with an Anthropic Console account billed by API usage. | Instead of a Claude subscription. |
+
+### Working on the code your IDE has open
+
+By default every checkout lives on the `devstudio-data` volume, where nothing on the host can see it.
+To point agents at a repository you are editing yourself, bind mount it and tell the app that mount
+is attachable. (None of this applies to the [desktop app](#as-a-desktop-app-windows-macos-linux), which has no
+container to mount anything into — your repositories are already reachable there.)
+
+```yaml
+services:
+  orchestrator:
+    volumes:
+      - devstudio-data:/data
+      - devstudio-home:/home/orchestrator
+      # Forward slashes on Windows. The path on the left is yours; the one on the right is what
+      # the container sees.
+      - D:/repos:/host/repos
+    environment:
+      Orchestrator__LocalRepositoryRoots__0: "/host/repos"
+```
+
+The same thing with `docker run` — the list is index-numbered, so each root is its own variable:
+
+```bash
+docker run -d \
+  --name devstudio \
+  -p 7080:7080 \
+  -v devstudio-data:/data \
+  -v devstudio-home:/home/orchestrator \
+  -v D:/repos:/host/repos \
+  -v C:/work/client:/host/client \
+  -e Orchestrator__LocalRepositoryRoots__0=/host/repos \
+  -e Orchestrator__LocalRepositoryRoots__1=/host/client \
+  ghcr.io/matthewratcliffe/devstudio:latest
+```
+
+Mount and root have to agree: the root is the path *inside* the container, the right-hand side of
+the `-v`. A root that is not mounted simply never appears in the picker.
+
+Restart after changing either — the roots are read once at start.
+
+Then **Repositories → Attach local folder**: browse the mount, and any folder holding a `.git`
+offers an **Attach** button. Nothing is cloned or copied — the app registers the path as it stands,
+reads `origin` and the default branch off it, and marks the repo as a local mount.
+
+`LocalRepositoryRoots` is an allow-list, and the only thing standing between a folder picker in a web
+UI and the whole container filesystem. Paths outside it — including anything reached with `..` or
+through a symlink — are refused by the browser and by the attach itself. List the mounts, nothing
+else.
+
+A few things follow from the checkout being shared:
+
+- **Worktrees land on the mount.** An agent with *Use worktree* on gets a branch of its own in
+  `../.devstudio-worktrees/<repo>-<branch>`, beside the checkout rather than inside it. You can open
+  that folder in the IDE, diff it, and merge it — while your own working copy stays on your branch.
+- **Turn worktrees off and you share one working copy.** The agent then edits the same files you
+  have open, and `git` in the container and `git` in the IDE fight over `.git/index.lock`. It works,
+  but the worktree is the calmer arrangement.
+- **Staged files are excluded automatically.** `global-files/`, `project-files/`, `.mcp.json`,
+  `GUIDANCE.md` and the rest are added to that clone's `.git/info/exclude`, so they never appear as
+  untracked changes in your editor and never reach a commit. It is the private exclude file, so
+  nothing is added to the repository.
+- **Line endings.** A repository cloned on Windows and used from a Linux container will produce
+  whole-file diffs unless `core.autocrlf` agrees with both. Set it before letting an agent commit.
+- **Speed.** Bind mounts from a Windows drive are slow for large repositories. If it hurts, keep the
+  checkout in the WSL2 filesystem and mount that path instead — the IDE can open it over `\\wsl$\`
+  and the container gets native I/O.
+
+**Detach** removes the registration only. The folder on the mount is never touched.
 
 ### Local development
 
@@ -138,8 +315,11 @@ Clean architecture, dependencies pointing inwards:
 src/
   DevStudio.Domain          entities only — agents, sessions, projects, workflows, schedules, skills, MCP
   DevStudio.Application     abstractions and orchestration — SessionManager, WorkflowEngine, cron parser
-  DevStudio.Infrastructure  the outside world — CLI adapters, git, gh, JSON stores, pty terminals, scheduler
+  DevStudio.Infrastructure  the outside world — CLI adapters, git, gh, JSON stores, pty terminals (ConPTY and script), scheduler
   DevStudio.Ui              Blazor Server console, MCP endpoint, PWA
+  DevStudio.Desktop.Core    shared desktop plumbing: the server child, paths, tool preflight, updates
+  DevStudio.Desktop         Windows tray shell — WebView2, tray icon, balloon notifications
+  DevStudio.Desktop.Photino macOS and Linux shell — WKWebView and WebKitGTK through Photino
 tests/
   DevStudio.Tests           cron, templating, persistence, workflow engine
 ```
@@ -190,6 +370,10 @@ Available in every step: workflow inputs by name, `{{previous}}`, and `{{steps.<
 for any earlier step regardless of distance.
 
 ## The orchestrator's MCP server
+
+There are two built-in servers. `images` is attached everywhere by default and exposes only
+`generate_image` (see [Images](#images)). `orchestrator` is opt-in, because its tools can reach other
+sessions.
 
 Attach the built-in `orchestrator` server to an agent and it gains these tools:
 
@@ -252,16 +436,44 @@ the server if it failed to start, rather than the tools silently going missing.
 
 ### Images
 
-Neither `claude` nor `codex` generates images, so nothing here can conjure one on its own. What works
-today:
+Neither `claude` nor `codex` generates images, so the orchestrator does it for them. The **Images**
+page generates from a prompt and keeps a gallery; agents reach the same service through a
+`generate_image` tool and the result appears inline in the transcript. Both write to `<DataPath>/images`
+and are served from `/images/<file>`.
 
-- **An image-generating MCP server.** Register it on the MCP page (with OAuth or a token if it needs
-  one), attach it to an agent or a single chat, and the agent can call it. Whatever it writes into the
-  workspace shows up in the files panel.
-- **A custom CLI provider.** If you have an image tool on the command line, describe it on the CLI
-  providers page and drive it as an agent.
-- **Code the model can write.** SVG, and diagrams via mermaid, are text — agents produce these
-  directly and they preview inline as images.
+Three backends sit behind one interface, so running out of free quota means changing which one is
+selected rather than changing anything else:
+
+| Backend | Setup | Free allowance |
+| --- | --- | --- |
+| **Pollinations** | None — this is the default, and it works on a fresh install | Anonymous is watermarked and limited to one image every 15s; a free token from `auth.pollinations.ai` removes both |
+| **Cloudflare Workers AI** | Account id and an API token with the Workers AI permission | 10,000 neurons a day, resetting 00:00 UTC — roughly 500 images at 1024×1024 on FLUX.1 Schnell, with no per-request throttle |
+| **Gemini** | A Google AI Studio key | Varies by key and region; AI Studio shows yours. The only backend here that *edits* an existing image, and the pro image model needs billing enabled |
+
+Because the anonymous Pollinations tier rejects rather than queues, that backend spaces its own
+requests out — a second image in the same turn waits rather than failing.
+
+Keys are set on the **Logins** page, not in configuration, and are stored on the volume with the CLI
+accounts. They are re-read before every generation, so a key added mid-session applies to the next
+image rather than after a restart.
+
+An agent reaches image generation two ways: the built-in `generate_image` tool on OpenAI-compatible
+providers, and a second built-in MCP server called `images`, which is how `claude` and `codex` sessions
+get at it. That server is **attached to every session by default** and carries nothing but
+`generate_image` — being able to draw a picture should not also mean being able to start sessions and
+steer other agents, which is why it is separate from the `orchestrator` server rather than a flag on it.
+Note that Plan mode refuses all MCP tool calls, so a read-only chat still cannot generate.
+
+Where the permission mode allows writing, a copy is also dropped in the workspace under
+`generated-images/` so the agent can go on to use the file.
+
+The transcript renders the picture inline, with a download link beneath it. It does this for
+`![alt](/images/…)` markdown *and* for a bare `/images/…` path written in prose, because a CLI provider
+generates through MCP and then describes the result in its own words. Only paths this app serves are
+ever turned into an `<img>` — agent output cannot produce a tag pointing at another host. Downloads
+arrive named after the prompt (`a-fluffy-ginger-cat.jpg`) rather than the id.
+
+Agents can still produce SVG and mermaid diagrams directly as text, and those preview inline as before.
 
 ## Picking rather than typing
 
@@ -326,7 +538,8 @@ the full history and just record the summary.
 ## Configuration
 
 Everything is under the `Orchestrator` configuration section, overridable with
-`Orchestrator__<Key>` environment variables:
+`Orchestrator__<Key>` environment variables. The defaults below are the container's; the
+[desktop app](#as-a-desktop-app-windows-macos-linux) sets its own for paths, the home directory and the sandbox:
 
 | Key | Default | Purpose |
 | --- | --- | --- |
@@ -334,10 +547,14 @@ Everything is under the `Orchestrator` configuration section, overridable with
 | `RepositoriesPath` | `/data/repos` | Clones. |
 | `WorktreesPath` | `/data/worktrees` | Per-session worktrees. |
 | `ScratchPath` | `/data/scratch` | Workspace for agents with no repo or project. |
+| `LocalRepositoryRoots` | *(empty)* | Host directories, bind mounted into the container, that may be browsed and attached as repositories. Empty turns the feature off. One indexed env var per root: `Orchestrator__LocalRepositoryRoots__0`, `__1`, … See [Working on the code your IDE has open](#working-on-the-code-your-ide-has-open). |
+| `LocalWorktreesFolderName` | `.devstudio-worktrees` | Folder created beside an attached repo that its worktrees are cut into. |
 | `HomePath` | `/home/orchestrator` | The default account's home: `~/.claude`, `~/.codex` and the `gh` login. Extra accounts live under `<DataPath>/accounts/`. Empty means the real user home. |
 | `MaxConcurrentSessions` | `6` | Cap on agent turns running at once. |
 | `TurnTimeoutMinutes` | `60` | A turn is abandoned after this long. |
 | `SchedulerTickSeconds` | `20` | How often due schedules are checked. |
+| `UpdateCheckEnabled` | `true` | Ask GitHub every six hours whether a newer release exists, and say so under the sidebar. Nothing is downloaded or installed — a container cannot replace itself. The desktop builds set this false, because they update themselves. |
+| `UpdateRepository` | `matthewratcliffe/devstudio` | Repository the check reads releases from, as `owner/name`. |
 | `PruneEphemeralWorktrees` | `false` | Delete a session's worktree when it finishes. Off, because uncommitted work would go with it. |
 
 ## Permission modes
@@ -422,6 +639,13 @@ docker compose pull && docker compose up -d
 State lives in volumes, not in the image, so an upgrade keeps every agent, project, session and
 login. Roll back by pinning the previous tag or `sha-<commit>` and running the same two commands.
 
+You do not have to watch for releases: the running build shows its version under the sidebar, and
+when a newer one is published a quiet line appears beside it linking to the release. That is all it
+does — a container cannot replace itself, so the two commands above stay yours to run. The check
+reads one GitHub URL every six hours and is turned off with
+`Orchestrator__UpdateCheckEnabled=false`. The [desktop builds](#as-a-desktop-app-windows-macos-linux)
+do not use it; they update themselves.
+
 ### Backing up
 
 Both volumes matter — `devstudio-data` is the state, `devstudio-home` is the CLI credentials:
@@ -467,8 +691,8 @@ proxied — with nginx that means `proxy_set_header Upgrade $http_upgrade;` and
 ## Repository layout
 
 ```
-.github/workflows/   CI and container publishing
-src/                 the four projects, dependencies pointing inwards
+.github/workflows/   CI, container publishing and the desktop installer
+src/                 seven projects, dependencies pointing inwards
 tests/               xUnit suite
 Dockerfile           multi-stage, cross-compiling, non-root runtime
 docker-compose.yml   the supported way to run it

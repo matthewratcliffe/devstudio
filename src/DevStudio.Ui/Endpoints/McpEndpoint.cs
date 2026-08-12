@@ -4,6 +4,7 @@ using DevStudio.Application.Abstractions;
 using DevStudio.Application.Sessions;
 using DevStudio.Application.Workflows;
 using DevStudio.Domain.Agents;
+using DevStudio.Domain.Images;
 using DevStudio.Domain.Projects;
 using DevStudio.Domain.Sessions;
 using DevStudio.Domain.Workflows;
@@ -20,9 +21,28 @@ public static class McpEndpoint
 {
     private const string ProtocolVersion = "2025-06-18";
 
+    /// <summary>Tools exposed on the images-only surface. Deliberately one.</summary>
+    private static readonly string[] ImageTools = ["generate_image"];
+
     public static IEndpointRouteBuilder MapMcp(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/mcp", async (HttpContext context, IServiceProvider services, CancellationToken ct) =>
+        Map(app, "/mcp", "devstudio", only: null);
+
+        // A second surface carrying nothing but image generation. It is attached to every session by
+        // default, and the whole point of it being separate is that "this chat can draw a picture"
+        // should not also mean "this chat can start sessions and steer other agents".
+        Map(app, "/mcp/images", "devstudio-images", ImageTools);
+
+        return app;
+    }
+
+    private static void Map(
+        IEndpointRouteBuilder app,
+        string path,
+        string serverName,
+        IReadOnlyCollection<string>? only)
+    {
+        app.MapPost(path, async (HttpContext context, IServiceProvider services, CancellationToken ct) =>
         {
             JsonNode? body;
             try
@@ -43,7 +63,7 @@ public static class McpEndpoint
                 var responses = new JsonArray();
                 foreach (var item in batch)
                 {
-                    var response = await HandleAsync(item, services, ct);
+                    var response = await HandleAsync(item, services, serverName, only, ct);
                     if (response is not null)
                         responses.Add(response);
                 }
@@ -51,17 +71,20 @@ public static class McpEndpoint
                 return responses.Count == 0 ? Results.NoContent() : Results.Json(responses);
             }
 
-            var single = await HandleAsync(body, services, ct);
+            var single = await HandleAsync(body, services, serverName, only, ct);
             return single is null ? Results.NoContent() : Results.Json(single);
         });
 
         // Some clients probe with GET before opening a stream; answer politely rather than 404.
-        app.MapGet("/mcp", () => Results.Json(new { name = "devstudio", protocolVersion = ProtocolVersion }));
-
-        return app;
+        app.MapGet(path, () => Results.Json(new { name = serverName, protocolVersion = ProtocolVersion }));
     }
 
-    private static async Task<JsonNode?> HandleAsync(JsonNode? message, IServiceProvider services, CancellationToken ct)
+    private static async Task<JsonNode?> HandleAsync(
+        JsonNode? message,
+        IServiceProvider services,
+        string serverName,
+        IReadOnlyCollection<string>? only,
+        CancellationToken ct)
     {
         if (message is not JsonObject request)
             return Error(null, -32600, "Invalid request.");
@@ -83,13 +106,13 @@ public static class McpEndpoint
                     ["capabilities"] = new JsonObject { ["tools"] = new JsonObject() },
                     ["serverInfo"] = new JsonObject
                     {
-                        ["name"] = "devstudio",
+                        ["name"] = serverName,
                         ["version"] = "1.0.0",
                     },
                 }),
                 "ping" => Success(id, new JsonObject()),
-                "tools/list" => Success(id, new JsonObject { ["tools"] = BuildToolList() }),
-                "tools/call" => Success(id, await CallToolAsync(request["params"] as JsonObject, services, ct)),
+                "tools/list" => Success(id, new JsonObject { ["tools"] = BuildToolList(only) }),
+                "tools/call" => Success(id, await CallToolAsync(request["params"] as JsonObject, services, only, ct)),
                 _ => Error(id, -32601, $"Unknown method '{method}'."),
             };
         }
@@ -99,7 +122,28 @@ public static class McpEndpoint
         }
     }
 
-    private static JsonArray BuildToolList() =>
+    /// <summary>
+    /// The tool list, narrowed to <paramref name="only"/> when this surface is a restricted one.
+    /// Filtering the advertisement is not the protection — <see cref="CallToolAsync"/> enforces the
+    /// same set — but a tool a model cannot see is one it will not try.
+    /// </summary>
+    private static JsonArray BuildToolList(IReadOnlyCollection<string>? only)
+    {
+        if (only is null)
+            return AllTools();
+
+        var filtered = new JsonArray();
+
+        foreach (var tool in AllTools())
+        {
+            if (tool?["name"]?.GetValue<string>() is { } name && only.Contains(name))
+                filtered.Add(tool.DeepClone());
+        }
+
+        return filtered;
+    }
+
+    private static JsonArray AllTools() =>
     [
         Tool("list_agents", "List every configured agent with its provider and permission mode.", new JsonObject()),
         Tool("list_sessions", "List orchestrator sessions, newest first.", Props(
@@ -131,12 +175,28 @@ public static class McpEndpoint
         Tool("run_workflow", "Start a workflow run in the background.", Props(
             ("workflowId", "string", "Workflow to run."),
             ("inputs", "object", "Input values keyed by input name.")), "workflowId"),
+        Tool("generate_image", "Generate an image from a text description. Returns a URL this orchestrator serves it from.", Props(
+            ("prompt", "string", "What to draw. Detailed prompts work better than short ones."),
+            ("width", "number", "Pixels wide. Optional, default 1024."),
+            ("height", "number", "Pixels tall. Optional, default 1024."),
+            ("seed", "number", "Optional. The same seed and prompt reproduce the same image."),
+            ("backend", "string", "Optional service: Pollinations, Cloudflare or Gemini. Defaults to the configured one."),
+            ("sessionId", "string", "Optional. Your own session id, so the image is filed against this session.")), "prompt"),
     ];
 
-    private static async Task<JsonObject> CallToolAsync(JsonObject? parameters, IServiceProvider services, CancellationToken ct)
+    private static async Task<JsonObject> CallToolAsync(
+        JsonObject? parameters,
+        IServiceProvider services,
+        IReadOnlyCollection<string>? only,
+        CancellationToken ct)
     {
         var name = parameters?["name"]?.GetValue<string>() ?? string.Empty;
         var arguments = parameters?["arguments"] as JsonObject ?? [];
+
+        // A restricted surface refuses what it does not advertise. Without this, knowing the tool
+        // names would be enough to reach the full set through the narrow endpoint.
+        if (only is not null && !only.Contains(name))
+            return Text($"'{name}' is not available on this server.", isError: true);
 
         var sessions = services.GetRequiredService<ISessionManager>();
 
@@ -274,6 +334,38 @@ public static class McpEndpoint
                     .StartAsync(Required(arguments, "workflowId"), inputs, "mcp", ct);
 
                 return Text($"Started workflow run {run.Id}.");
+            }
+
+            // The CLI-driven providers bring their own toolsets and never see the orchestrator's
+            // internal ones, so this is how Claude and Codex sessions reach image generation.
+            case "generate_image":
+            {
+                var images = services.GetRequiredService<IImageGenerationService>();
+
+                if (!images.AnyConfigured)
+                    return Text("No image backend is configured.", isError: true);
+
+                ImageBackend? backend = Enum.TryParse<ImageBackend>(
+                    arguments["backend"]?.GetValue<string>(), true, out var parsed) ? parsed : null;
+
+                var image = await images.GenerateAsync(
+                    new ImageRequest
+                    {
+                        Prompt = Required(arguments, "prompt"),
+                        Width = (int?)arguments["width"]?.GetValue<double>() ?? 1024,
+                        Height = (int?)arguments["height"]?.GetValue<double>() ?? 1024,
+                        Seed = (int?)arguments["seed"]?.GetValue<double>(),
+                    },
+                    backend,
+                    arguments["sessionId"]?.GetValue<string>(),
+                    ct);
+
+                // Handed back as markdown so a CLI that quotes it verbatim gets an inline picture.
+                // The transcript also renders a bare /images/ path, so a paraphrase still shows it.
+                return Text(
+                    $"Generated a {image.Width}×{image.Height} image with {image.Backend} ({image.Model}). " +
+                    $"Include this line in your reply exactly as written so the user can see it:\n\n" +
+                    $"![{image.Prompt}]({images.UrlFor(image)})");
             }
 
             default:
