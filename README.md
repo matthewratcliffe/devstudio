@@ -1,7 +1,6 @@
 # DevStudio
 
 [![CI](https://github.com/matthewratcliffe/devstudio/actions/workflows/ci.yml/badge.svg)](https://github.com/matthewratcliffe/devstudio/actions/workflows/ci.yml)
-[![Publish container image](https://github.com/matthewratcliffe/devstudio/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/matthewratcliffe/devstudio/actions/workflows/docker-publish.yml)
 [![ghcr.io](https://img.shields.io/badge/ghcr.io-devstudio-blue?logo=docker&logoColor=white)](https://github.com/matthewratcliffe/devstudio/pkgs/container/devstudio)
 
 A self-hosted console for running **Claude Code** and **OpenAI Codex** agents side by side. Create
@@ -190,10 +189,12 @@ vpk pack --packId devStudio --packVersion 1.0.0 --packDir artifacts/publish \
 Two self-contained publishes, the server nested in `server/` where the shell looks for it, so the
 target machine needs no .NET installed. That is about 220 MB on disk and a ~100 MB installer.
 
-`.github/workflows/desktop-release.yml` runs exactly those steps as a four-way matrix. Every push
-builds all four installers and uploads them as workflow artifacts; a `v*.*.*` tag also attaches them
-to that tag's GitHub release, each on its own Velopack channel — which is the feed the installed app
-reads, so uploading them is what makes updates work.
+`.github/workflows/ci.yml` runs exactly those steps as a four-way matrix. Every push to
+the default branch builds all four installers and publishes them to a GitHub release of their own,
+each on its own Velopack channel — which is the feed the installed app reads, so publishing them is
+what makes updates work. No tag needed: the release is tagged `v<major>.<minor>.<run number>`, taking
+major and minor from the newest `v*.*.*` tag, so every build outranks the one before it. Pushing a
+real tag releases that exact version and lifts the base for the builds that follow.
 
 Nothing is signed yet: SmartScreen will warn on Windows and Gatekeeper will refuse the macOS build
 until it is opened from the right-click menu once. Add `--signParams` (Windows) or
@@ -583,18 +584,24 @@ works without extra packages.
 
 ## Continuous integration and releases
 
-Two workflows live in `.github/workflows`:
+Everything is built by one workflow, `.github/workflows/ci.yml`, so a commit that ships is a commit
+where the tests, the image and all four installers built — off one version, in one run.
 
-| Workflow | Trigger | What it does |
+| Job | Runs on | What it does |
 | --- | --- | --- |
-| `ci.yml` | Every branch push, every pull request, manual. | Restores, builds and tests the solution on .NET 10, caching NuGet between runs and uploading the `.trx` results as an artifact. |
-| `docker-publish.yml` | Push to `main`/`master`, tags matching `v*.*.*`, pull requests, manual. | Runs the tests, then builds the image for `linux/amd64` and `linux/arm64` and pushes it to `ghcr.io/<owner>/<repo>`. |
+| **Unit tests** | Every push, every pull request, manual. | Restores, builds and tests the solution on .NET 10, caching NuGet between runs and uploading the `.trx` results as an artifact. |
+| **Version** | Default branch, `v*.*.*` tags, manual. | Derives the one version the rest of the run stamps into the image, the installers and the release. |
+| **Container image** | Default branch, `v*.*.*` tags, manual. | Builds for `linux/amd64` and `linux/arm64` and pushes to `ghcr.io/<owner>/<repo>`. |
+| **Installers** | Default branch, `v*.*.*` tags, manual. | Four runners in parallel: Windows, macOS on Intel and Apple silicon, and Linux. |
+| **Publish the release** | Default branch and `v*.*.*` tags. | Attaches all four channels to a GitHub release, one channel at a time. |
 
-Things worth knowing about the publish workflow:
+Things worth knowing:
 
-- **Pull requests build but never push.** A broken `Dockerfile` fails the PR instead of being found
-  after the merge, and no untrusted branch can publish a tag.
-- **Tests gate the image.** The `publish` job `needs: test`, so a red suite means no image.
+- **A pull request runs the tests and nothing else.** Packaging is slow, and four platforms plus a
+  two-architecture image is a long wait for a review. The cost is that a break in the `Dockerfile`
+  or in packaging surfaces on merge rather than on the PR — `workflow_dispatch` on the branch is
+  the way to check before merging when you have touched either.
+- **Tests gate everything.** Every other job `needs: test`, so a red suite publishes nothing.
 - **Nothing to configure.** It authenticates with the built-in `GITHUB_TOKEN` — no secret to create
   — and derives the image name from `${{ github.repository }}`, lowercased because ghcr.io rejects
   uppercase paths. Fork it and it publishes to your namespace with no edits.
@@ -602,16 +609,22 @@ Things worth knowing about the publish workflow:
   layers are reused between runs.
 - **Provenance and an SBOM** are attached to every push, plus a separate signed attestation you can
   check with `gh attestation verify`.
-- **`workflow_dispatch` takes a `platforms` input** if you want a quick amd64-only build.
+- **`workflow_dispatch` takes a `platforms` input** if you want a quick amd64-only build. A dispatch
+  off the default branch builds and packages everything, and pushes the image under the branch's
+  own tag, but never publishes a release — that would hand it to every installed app.
 
 ### Cutting a release
+
+Every push to the default branch is already a release, tagged `v<major>.<minor>.<run number>`. Tag
+one yourself only to set a version deliberately:
 
 ```bash
 git tag v1.0.0 && git push origin v1.0.0
 ```
 
-That publishes `1.0.0`, `1.0`, `1` and `sha-<commit>` — `latest` continues to follow the default
-branch.
+That releases `1.0.0` exactly — image tags `1.0.0`, `1.0`, `1` and `sha-<commit>`, installers on
+every channel — and lifts the base, so the builds after it are `1.0.<run number>` rather than
+dropping back underneath it. `latest` continues to follow the default branch.
 
 ### First publish: making the package public
 
@@ -704,4 +717,4 @@ docker-compose.yml   the supported way to run it
 ## Licence
 
 No licence file yet — add one before publishing the repository, and update the
-`org.opencontainers.image.licenses` label in `.github/workflows/docker-publish.yml` to match.
+`org.opencontainers.image.licenses` label in `.github/workflows/ci.yml` to match.
