@@ -1,0 +1,33 @@
+services:
+  orchestrator:
+    build: .
+    image: ai-shop-orchestrator
+    container_name: ai-shop
+    restart: unless-stopped
+    ports:
+      - "7080:7080"
+      # Only needed for the Codex "Browser sign-in" method, which redirects to a local callback.
+      # Device code and token sign-in do not use it.
+      - "1455:1455"
+    volumes:
+      # State, cloned repos, worktrees and project files.
+      - ai-shop-data:/data
+      # CLI credentials: log in once through the web UI and they persist here.
+      - ai-shop-home:/home/orchestrator
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Orchestrator__MaxConcurrentSessions: "6"
+      Orchestrator__TurnTimeoutMinutes: "60"
+      Orchestrator__SchedulerTickSeconds: "20"
+      # Uncomment to delete each session's worktree when it finishes.
+      # Orchestrator__PruneEphemeralWorktrees: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  ai-shop-data:
+  ai-shop-home:

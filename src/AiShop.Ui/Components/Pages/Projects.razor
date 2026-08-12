@@ -1,0 +1,438 @@
+@page "/projects"
+@inject IEntityStore<Project> ProjectStore
+@inject IEntityStore<GitRepository> RepositoryStore
+@inject IEntityStore<ProviderAccount> AccountStore
+@inject IEntityStore<CliProvider> CliProviderStore
+@inject ISourceControlRegistry Forges
+@inject IGitService Git
+@inject ISessionManager Sessions
+@inject NavigationManager Nav
+
+<PageTitle>Projects · AI Shop</PageTitle>
+
+<div class="btn-row" style="margin-bottom:1.2rem">
+    <button class="btn btn-primary" @onclick="() => Edit(new Project())">New project</button>
+    <span class="mono-dim">Instructions and files here reach every agent working in the project.</span>
+</div>
+
+<div class="grid grid-auto">
+    @foreach (var project in _projects.Where(p => !p.Archived))
+    {
+        <div class="card interactive">
+            <div class="card-head">
+                <h3>@project.Name</h3>
+                <div class="spacer"></div>
+                <span class="pill">@project.Files.Count files</span>
+            </div>
+            <p class="small">@(string.IsNullOrWhiteSpace(project.Description) ? "No description." : project.Description)</p>
+            <div class="mono-dim" style="margin-bottom:0.7rem">
+                @(_sessionCounts.TryGetValue(project.Id, out var count) ? count : 0) sessions
+                @if (project.RepositoryId is not null)
+                {
+                    <span> · @RepositoryName(project.RepositoryId)</span>
+                }
+            </div>
+            <div class="btn-row" style="margin-bottom:0.7rem">
+                @if (AccountName(project.ClaudeAccountId) is { } claude)
+                {
+                    <span class="pill pill-cyan"><span class="dot"></span>claude: @claude</span>
+                }
+                @if (AccountName(project.CodexAccountId) is { } codex)
+                {
+                    <span class="pill pill-magenta"><span class="dot"></span>codex: @codex</span>
+                }
+                @if (!project.InheritGlobalInstructions)
+                {
+                    <span class="pill pill-amber"><span class="dot"></span>no global standards</span>
+                }
+                @if (project.Provider is { } pinned)
+                {
+                    <span class="pill pill-cyan"><span class="dot"></span>@(pinned == AiProvider.Custom ? CliName(project.CliProviderId) : pinned.ToString())</span>
+                }
+                <span class="pill">@project.SourceControl</span>
+                @if (project.SummariseAfterTurns > 0)
+                {
+                    <span class="pill pill-amber"><span class="dot"></span>summarise every @project.SummariseAfterTurns</span>
+                }
+            </div>
+            <div class="btn-row">
+                <a class="btn btn-sm btn-primary" href="/projects/@project.Id">Open</a>
+                <button class="btn btn-sm" @onclick="() => Edit(project)">Edit</button>
+                <button class="btn btn-sm btn-ghost" @onclick="() => ArchiveAsync(project)">Archive</button>
+            </div>
+        </div>
+    }
+</div>
+
+@if (_projects.All(p => p.Archived))
+{
+    <div class="empty">
+        <div class="big">▣</div>
+        No projects yet. A project bundles instructions, files and a working folder.
+    </div>
+}
+
+@if (_projects.Any(p => p.Archived))
+{
+    <div class="divider"></div>
+    <div class="section-tag">Archived</div>
+    <div class="btn-row">
+        @foreach (var project in _projects.Where(p => p.Archived))
+        {
+            <button class="btn btn-sm btn-ghost" @onclick="() => RestoreAsync(project)">@project.Name ↩</button>
+        }
+    </div>
+}
+
+@if (_editing is not null)
+{
+    <div class="modal-backdrop" @onclick="() => _editing = null">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>@(_isNew ? "New project" : _editing.Name)</h2>
+
+            <div class="field">
+                <label>Name</label>
+                <input type="text" @bind="_editing.Name" />
+            </div>
+            <div class="field">
+                <label>Description</label>
+                <input type="text" @bind="_editing.Description" />
+            </div>
+            <div class="field">
+                <label>Instructions for every agent</label>
+                <textarea @bind="_editing.Instructions" rows="7"
+                          placeholder="Standing context: the domain, conventions, what to avoid."></textarea>
+            </div>
+            <div class="check">
+                <input type="checkbox" id="inherit" @bind="_editing.InheritGlobalInstructions" />
+                <label for="inherit" style="text-transform:none;letter-spacing:0">
+                    Apply the global standards and files here
+                </label>
+            </div>
+
+            <div class="divider"></div>
+            <div class="section-tag">Providers</div>
+            <p class="small">
+                A project runs on one AI provider and draws its repositories from one forge. Agents
+                assigned here follow the project's choice, so a project never ends up split across two
+                CLIs. Several repositories from that forge are fine.
+            </p>
+
+            <div class="form-grid">
+                <div class="field">
+                    <label>AI provider</label>
+                    <select value="@ProviderValue" @onchange="e => SetProvider(e.Value?.ToString())">
+                        <option value="">Each agent decides</option>
+                        <option value="@AiProvider.Claude">Claude Code</option>
+                        <option value="@AiProvider.Codex">OpenAI Codex</option>
+                        @foreach (var cli in _cliProviders.Where(c => c.Enabled))
+                        {
+                            <option value="custom:@cli.Id">@cli.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Source control</label>
+                    <select @bind="_editing.SourceControl">
+                        @foreach (var forge in Forges.All)
+                        {
+                            <option value="@forge.Provider">@forge.DisplayName</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <div class="divider"></div>
+            <div class="section-tag">Accounts</div>
+            <p class="small">
+                Which login each CLI uses for this project — a personal Claude here, a work Claude there.
+            </p>
+            <div class="form-grid">
+                <div class="field">
+                    <label>Claude account</label>
+                    <select @bind="_editing.ClaudeAccountId">
+                        <option value="">Default account</option>
+                        @foreach (var account in _accounts.Where(a => a.Provider == AiProvider.Claude))
+                        {
+                            <option value="@account.Id">@account.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Codex account</label>
+                    <select @bind="_editing.CodexAccountId">
+                        <option value="">Default account</option>
+                        @foreach (var account in _accounts.Where(a => a.Provider == AiProvider.Codex))
+                        {
+                            <option value="@account.Id">@account.Name</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            @foreach (var cli in _cliProviders.Where(c => c.Enabled))
+            {
+                <div class="field">
+                    <label>@cli.Name account</label>
+                    <select value="@CliAccountFor(cli.Id)" @onchange="e => SetCliAccount(cli.Id, e.Value?.ToString())">
+                        <option value="">Default account</option>
+                        @foreach (var account in _accounts.Where(a => a.CliProviderId == cli.Id))
+                        {
+                            <option value="@account.Id">@account.Name</option>
+                        }
+                    </select>
+                </div>
+            }
+
+            <div class="divider"></div>
+            <div class="section-tag">Summarisation</div>
+            <p class="small">
+                Long sessions carry their whole history into every turn. Rolling them up keeps them fast
+                and keeps the important context from falling off the end.
+            </p>
+            <div class="form-grid">
+                <div class="field">
+                    <label>Summarise after N turns</label>
+                    <input type="number" min="0" @bind="_editing.SummariseAfterTurns" />
+                    <span class="hint">0 turns it off.</span>
+                </div>
+                <div class="field">
+                    <label>&nbsp;</label>
+                    <div class="check">
+                        <input type="checkbox" id="compact" @bind="_editing.CompactAfterSummary" />
+                        <label for="compact" style="text-transform:none;letter-spacing:0">
+                            Restart the conversation from the summary
+                        </label>
+                    </div>
+                    <span class="hint">Off records the summary but keeps the full history.</span>
+                </div>
+            </div>
+            <div class="field">
+                <label>Summary instruction (optional)</label>
+                <textarea rows="3" @bind="_editing.SummaryPrompt"
+                          placeholder="Leave empty to use the built-in instruction."></textarea>
+            </div>
+
+            <div class="divider"></div>
+            <div class="form-grid">
+                <div class="field">
+                    <label>Repository</label>
+                    <select value="@(_editing.RepositoryId ?? string.Empty)"
+                            @onchange="e => SelectRepositoryAsync(e.Value?.ToString())">
+                        <option value="">None</option>
+                        @foreach (var repository in _repositories.Where(r => r.SourceControl == _editing.SourceControl))
+                        {
+                            <option value="@repository.Id">@repository.Name</option>
+                        }
+                    </select>
+                    <span class="hint">Only @_editing.SourceControl repositories are listed.</span>
+                </div>
+                <div class="field">
+                    <label>Base branch</label>
+                    @if (_branches.Count > 0)
+                    {
+                        <select value="@(_editing.BaseBranch ?? string.Empty)"
+                                @onchange="e => _editing.BaseBranch = Blank(e.Value?.ToString())">
+                            <option value="">Repository default</option>
+                            @foreach (var branch in _branches)
+                            {
+                                <option value="@branch">@branch</option>
+                            }
+                        </select>
+                    }
+                    else
+                    {
+                        <input type="text" @bind="_editing.BaseBranch"
+                               placeholder="@BranchPlaceholder"
+                               disabled="@(_editing.RepositoryId is null)" />
+                    }
+                </div>
+            </div>
+
+            <div class="btn-row">
+                <button class="btn btn-primary" @onclick="SaveAsync">Save project</button>
+                <button class="btn btn-ghost" @onclick="() => _editing = null">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private IReadOnlyList<Project> _projects = [];
+    private IReadOnlyList<GitRepository> _repositories = [];
+    private IReadOnlyList<ProviderAccount> _accounts = [];
+    private IReadOnlyList<CliProvider> _cliProviders = [];
+    private Dictionary<string, int> _sessionCounts = [];
+    private Project? _editing;
+    private bool _isNew;
+    private IReadOnlyList<string> _branches = [];
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader("Projects", "Shared instructions, files and working folders");
+    }
+
+    private async Task ReloadAsync()
+    {
+        _projects = await ProjectStore.GetAllAsync();
+        _repositories = await RepositoryStore.GetAllAsync();
+        _accounts = await AccountStore.GetAllAsync();
+        _cliProviders = await CliProviderStore.GetAllAsync();
+
+        var sessions = await Sessions.GetAllAsync();
+        _sessionCounts = sessions
+            .Where(s => s.ProjectId is not null)
+            .GroupBy(s => s.ProjectId!)
+            .ToDictionary(g => g.Key, g => g.Count());
+    }
+
+    private void Edit(Project project)
+    {
+        _isNew = _projects.All(p => p.Id != project.Id);
+        _editing = _isNew ? project : Clone(project);
+        _ = LoadBranchesAsync();
+    }
+
+    private string BranchPlaceholder =>
+        _editing?.RepositoryId is null ? "pick a repository first" : "loading branches...";
+
+    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private async Task SelectRepositoryAsync(string? repositoryId)
+    {
+        _editing!.RepositoryId = Blank(repositoryId);
+        _editing.BaseBranch = null;
+        await LoadBranchesAsync();
+    }
+
+    private async Task LoadBranchesAsync()
+    {
+        _branches = [];
+
+        var repository = _repositories.FirstOrDefault(r => r.Id == _editing?.RepositoryId);
+        if (repository is null)
+            return;
+
+        try
+        {
+            _branches = await Git.ListBranchesAsync(repository);
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify($"Could not list branches: {ex.Message}", "err");
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_editing is null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(_editing.Name))
+        {
+            Layout.Notify("A project needs a name.", "err");
+            return;
+        }
+
+        _editing.RepositoryId = string.IsNullOrWhiteSpace(_editing.RepositoryId) ? null : _editing.RepositoryId;
+        _editing.BaseBranch = string.IsNullOrWhiteSpace(_editing.BaseBranch) ? null : _editing.BaseBranch;
+        _editing.ClaudeAccountId = string.IsNullOrWhiteSpace(_editing.ClaudeAccountId) ? null : _editing.ClaudeAccountId;
+        _editing.CodexAccountId = string.IsNullOrWhiteSpace(_editing.CodexAccountId) ? null : _editing.CodexAccountId;
+        _editing.SummariseAfterTurns = Math.Max(0, _editing.SummariseAfterTurns);
+
+        await ProjectStore.UpsertAsync(_editing);
+        _editing = null;
+        await ReloadAsync();
+        Layout.Notify("Project saved.", "ok");
+    }
+
+    private async Task ArchiveAsync(Project project)
+    {
+        project.Archived = true;
+        await ProjectStore.UpsertAsync(project);
+        await ReloadAsync();
+    }
+
+    private async Task RestoreAsync(Project project)
+    {
+        project.Archived = false;
+        await ProjectStore.UpsertAsync(project);
+        await ReloadAsync();
+    }
+
+    private string RepositoryName(string? id) =>
+        _repositories.FirstOrDefault(r => r.Id == id)?.Name ?? "—";
+
+    /// <summary>Encodes the pinned provider for the select, with custom CLIs prefixed.</summary>
+    private string ProviderValue => _editing!.Provider switch
+    {
+        null => string.Empty,
+        AiProvider.Custom => $"custom:{_editing.CliProviderId}",
+        var provider => provider.ToString(),
+    };
+
+    private void SetProvider(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            _editing!.Provider = null;
+            _editing.CliProviderId = null;
+        }
+        else if (value.StartsWith("custom:", StringComparison.Ordinal))
+        {
+            _editing!.Provider = AiProvider.Custom;
+            _editing.CliProviderId = value["custom:".Length..];
+        }
+        else if (Enum.TryParse<AiProvider>(value, out var provider))
+        {
+            _editing!.Provider = provider;
+            _editing.CliProviderId = null;
+        }
+    }
+
+    private string CliAccountFor(string cliProviderId) =>
+        _editing!.CliAccountIds.TryGetValue(cliProviderId, out var accountId) ? accountId : string.Empty;
+
+    private void SetCliAccount(string cliProviderId, string? accountId)
+    {
+        if (string.IsNullOrWhiteSpace(accountId))
+            _editing!.CliAccountIds.Remove(cliProviderId);
+        else
+            _editing!.CliAccountIds[cliProviderId] = accountId;
+    }
+
+    private string CliName(string? id) =>
+        _cliProviders.FirstOrDefault(c => c.Id == id)?.Name ?? "custom CLI";
+
+    private string? AccountName(string? id) =>
+        id is null ? null : _accounts.FirstOrDefault(a => a.Id == id)?.Name;
+
+    private static Project Clone(Project project) => new()
+    {
+        Id = project.Id,
+        CreatedAt = project.CreatedAt,
+        Name = project.Name,
+        Description = project.Description,
+        Instructions = project.Instructions,
+        Provider = project.Provider,
+        CliProviderId = project.CliProviderId,
+        SourceControl = project.SourceControl,
+        ClaudeAccountId = project.ClaudeAccountId,
+        CodexAccountId = project.CodexAccountId,
+        CliAccountIds = new Dictionary<string, string>(project.CliAccountIds),
+        SummariseAfterTurns = project.SummariseAfterTurns,
+        CompactAfterSummary = project.CompactAfterSummary,
+        SummaryPrompt = project.SummaryPrompt,
+        RepositoryId = project.RepositoryId,
+        BaseBranch = project.BaseBranch,
+        Files = [.. project.Files],
+        InheritGlobalInstructions = project.InheritGlobalInstructions,
+        Accent = project.Accent,
+        Archived = project.Archived,
+    };
+}

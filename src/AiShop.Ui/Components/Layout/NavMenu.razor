@@ -1,0 +1,77 @@
+<nav class="sidebar @(Open ? "open" : "")">
+    <a class="brand" href="/">
+        <span class="brand-mark">&gt;_</span>
+        <span class="brand-name">
+            AI SHOP
+            <span>orchestrator</span>
+        </span>
+    </a>
+
+    <div class="nav-group">
+        <div class="nav-heading">Run</div>
+        <NavLink class="nav-link" href="/" Match="NavLinkMatch.All" @onclick="OnNavigate">
+            <span class="ico">◈</span> Dashboard
+        </NavLink>
+        <NavLink class="nav-link" href="/quick-chat" @onclick="OnNavigate">
+            <span class="ico">💬</span> Quick chat
+        </NavLink>
+        <NavLink class="nav-link" href="/sessions" @onclick="OnNavigate">
+            <span class="ico">▤</span> Sessions
+            @if (LiveCount > 0)
+            {
+                <span class="count">@LiveCount</span>
+            }
+        </NavLink>
+        <NavLink class="nav-link" href="/projects" @onclick="OnNavigate">
+            <span class="ico">▣</span> Projects
+        </NavLink>
+    </div>
+
+    <div class="nav-group">
+        <div class="nav-heading">Build</div>
+        <NavLink class="nav-link" href="/agents" @onclick="OnNavigate">
+            <span class="ico">✦</span> Agents
+        </NavLink>
+        <NavLink class="nav-link" href="/workflows" @onclick="OnNavigate">
+            <span class="ico">⇶</span> Workflows
+        </NavLink>
+        <NavLink class="nav-link" href="/schedules" @onclick="OnNavigate">
+            <span class="ico">⏱</span> Schedules
+        </NavLink>
+        <NavLink class="nav-link" href="/skills" @onclick="OnNavigate">
+            <span class="ico">◆</span> Skills
+        </NavLink>
+        <NavLink class="nav-link" href="/standards" @onclick="OnNavigate">
+            <span class="ico">§</span> Standards
+        </NavLink>
+    </div>
+
+    <div class="nav-group">
+        <div class="nav-heading">Connect</div>
+        <NavLink class="nav-link" href="/repositories" @onclick="OnNavigate">
+            <span class="ico">⑂</span> Repositories
+        </NavLink>
+        <NavLink class="nav-link" href="/cli-providers" @onclick="OnNavigate">
+            <span class="ico">⌘</span> CLI providers
+        </NavLink>
+        <NavLink class="nav-link" href="/mcp-servers" @onclick="OnNavigate">
+            <span class="ico">⚯</span> MCP servers
+        </NavLink>
+        <NavLink class="nav-link" href="/providers" @onclick="OnNavigate">
+            <span class="ico">⚿</span> Logins
+        </NavLink>
+    </div>
+
+    <div style="margin-top:auto" class="mono-dim">
+        v@(Version)
+    </div>
+</nav>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public int LiveCount { get; set; }
+    [Parameter] public EventCallback OnNavigate { get; set; }
+
+    private static string Version =>
+        typeof(NavMenu).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
+}

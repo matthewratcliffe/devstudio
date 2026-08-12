@@ -1,0 +1,51 @@
+@* Renders a session, run or auth status as a coloured pill. *@
+
+<span class="pill @Css @(Live ? "pill-live" : "")">
+    <span class="dot"></span>@Label
+</span>
+
+@code {
+    [Parameter] public SessionStatus? Session { get; set; }
+    [Parameter] public RunStatus? Run { get; set; }
+    [Parameter] public ProviderAuthState? Auth { get; set; }
+    [Parameter] public string? Text { get; set; }
+    [Parameter] public string? Tone { get; set; }
+
+    private bool Live => Session is SessionStatus.Running or SessionStatus.Starting || Run == RunStatus.Running;
+
+    private string Label => Text
+        ?? Session?.ToString()
+        ?? Run?.ToString()
+        ?? Auth switch
+        {
+            ProviderAuthState.LoggedIn => "Logged in",
+            ProviderAuthState.LoggedOut => "Logged out",
+            ProviderAuthState.Unknown => "Not installed",
+            _ => "Unknown",
+        };
+
+    private string Css => Tone is not null
+        ? $"pill-{Tone}"
+        : Session switch
+        {
+            SessionStatus.Running or SessionStatus.Starting => "pill-cyan",
+            SessionStatus.AwaitingInput => "pill-amber",
+            SessionStatus.Completed => "pill-lime",
+            SessionStatus.Failed => "pill-red",
+            SessionStatus.Cancelled => "",
+            _ => Run switch
+            {
+                RunStatus.Running => "pill-cyan",
+                RunStatus.Succeeded => "pill-lime",
+                RunStatus.Failed => "pill-red",
+                RunStatus.Cancelled => "",
+                _ => Auth switch
+                {
+                    ProviderAuthState.LoggedIn => "pill-lime",
+                    ProviderAuthState.LoggedOut => "pill-amber",
+                    ProviderAuthState.Unknown => "pill-red",
+                    _ => "",
+                },
+            },
+        };
+}

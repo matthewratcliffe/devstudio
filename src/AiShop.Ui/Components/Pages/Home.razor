@@ -1,0 +1,292 @@
+@page "/"
+@implements IDisposable
+@inject ISessionManager Sessions
+@inject IEntityStore<Agent> AgentStore
+@inject IEntityStore<Project> ProjectStore
+@inject IEntityStore<Schedule> ScheduleStore
+@inject IWorkflowEngine Workflows
+@inject NavigationManager Nav
+
+<PageTitle>Dashboard · AI Shop</PageTitle>
+
+<div class="stat-row">
+    <div class="stat">
+        <div class="value text-gradient">@_live.Count</div>
+        <div class="label">Live sessions</div>
+    </div>
+    <div class="stat">
+        <div class="value">@_agents.Count(a => a.Enabled)</div>
+        <div class="label">Agents ready</div>
+    </div>
+    <div class="stat">
+        <div class="value">@_projects.Count</div>
+        <div class="label">Projects</div>
+    </div>
+    <div class="stat">
+        <div class="value">@_schedules.Count(s => s.Enabled && s.Kind != ScheduleKind.Manual)</div>
+        <div class="label">Armed schedules</div>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom:1.4rem">
+    <div class="section-tag">Launch</div>
+    <div class="form-grid">
+        <div class="field">
+            <label for="agent">Agent</label>
+            <select id="agent" @bind="_launchAgentId">
+                @foreach (var agent in _agents.Where(a => a.Enabled))
+                {
+                    <option value="@agent.Id">@agent.Name — @agent.Provider</option>
+                }
+            </select>
+        </div>
+        <div class="field">
+            <label for="project">Project</label>
+            <select id="project" @bind="_launchProjectId">
+                <option value="">No project</option>
+                @foreach (var project in _projects.Where(p => !p.Archived))
+                {
+                    <option value="@project.Id">@project.Name</option>
+                }
+            </select>
+        </div>
+    </div>
+    <div class="field">
+        <label for="prompt">Prompt</label>
+        <textarea id="prompt" @bind="_launchPrompt" @bind:event="oninput"
+                  placeholder="What should the agent do? Ctrl+Enter to launch."
+                  @onkeydown="OnPromptKeyDown"></textarea>
+    </div>
+    <div class="btn-row">
+        <button class="btn btn-primary" disabled="@(_launching || string.IsNullOrWhiteSpace(_launchPrompt) || _launchAgentId is null)"
+                @onclick="LaunchAsync">
+            @(_launching ? "Starting…" : "Launch session")
+        </button>
+        <span class="mono-dim">Runs concurrently with everything else.</span>
+    </div>
+</div>
+
+<div class="section-tag">Running now</div>
+@if (_live.Count == 0)
+{
+    <div class="empty">
+        <div class="big">◌</div>
+        Nothing running. Launch an agent above, or let a schedule pick it up.
+    </div>
+}
+else
+{
+    <div class="grid grid-auto" style="margin-bottom:1.4rem">
+        @foreach (var session in _live)
+        {
+            <a class="card interactive" href="/chat/@session.Id" style="text-decoration:none;color:inherit">
+                <div class="card-head">
+                    <h3>@session.Title</h3>
+                    <div class="spacer"></div>
+                    <StatusPill Session="session.Status" />
+                </div>
+                <div class="mono-dim">@session.AgentName · @session.Provider · @session.PermissionMode</div>
+                <div class="mono-dim">@session.WorkingDirectory</div>
+                @if (LastLine(session) is { Length: > 0 } line)
+                {
+                    <p class="small" style="margin-top:0.6rem;margin-bottom:0">@line</p>
+                }
+            </a>
+        }
+    </div>
+}
+
+<div class="grid grid-2">
+    <div>
+        <div class="section-tag">Recent sessions</div>
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>Session</th>
+                    <th>Agent</th>
+                    <th>Status</th>
+                    <th>Started</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var session in _recent)
+                {
+                    <tr @onclick='() => Open($"/chat/{session.Id}")' style="cursor:pointer">
+                        <td>@session.Title</td>
+                        <td class="mono-dim">@session.AgentName</td>
+                        <td><StatusPill Session="session.Status" /></td>
+                        <td class="mono-dim">@Ago(session.CreatedAt)</td>
+                    </tr>
+                }
+                @if (_recent.Count == 0)
+                {
+                    <tr><td colspan="4" class="mono-dim">No sessions yet.</td></tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div>
+        <div class="section-tag">Next up</div>
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                <tr>
+                    <th>Schedule</th>
+                    <th>Trigger</th>
+                    <th>Next run</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var schedule in _schedules.Where(s => s.Enabled).OrderBy(s => s.NextRunAt ?? DateTimeOffset.MaxValue).Take(6))
+                {
+                    <tr @onclick='() => Open("/schedules")' style="cursor:pointer">
+                        <td>@schedule.Name</td>
+                        <td class="mono-dim">
+                            @(schedule.Kind == ScheduleKind.Cron
+                                ? schedule.CronExpression
+                                : schedule.Kind == ScheduleKind.Interval
+                                    ? $"every {schedule.IntervalMinutes}m"
+                                    : "manual")
+                        </td>
+                        <td class="mono-dim">@(schedule.NextRunAt?.ToLocalTime().ToString("ddd HH:mm") ?? "—")</td>
+                    </tr>
+                }
+                @if (_schedules.Count == 0)
+                {
+                    <tr><td colspan="3" class="mono-dim">No schedules yet.</td></tr>
+                }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section-tag" style="margin-top:1.4rem">Workflow runs</div>
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                <tr><th>Workflow</th><th>Status</th><th>Started</th></tr>
+                </thead>
+                <tbody>
+                @foreach (var run in _runs.Take(6))
+                {
+                    <tr @onclick='() => Open($"/workflows/runs/{run.Id}")' style="cursor:pointer">
+                        <td>@run.WorkflowName</td>
+                        <td><StatusPill Run="run.Status" /></td>
+                        <td class="mono-dim">@Ago(run.CreatedAt)</td>
+                    </tr>
+                }
+                @if (_runs.Count == 0)
+                {
+                    <tr><td colspan="3" class="mono-dim">No runs yet.</td></tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private IReadOnlyList<Agent> _agents = [];
+    private IReadOnlyList<Project> _projects = [];
+    private IReadOnlyList<Schedule> _schedules = [];
+    private IReadOnlyList<WorkflowRun> _runs = [];
+    private List<ChatSession> _live = [];
+    private List<ChatSession> _recent = [];
+
+    private string? _launchAgentId;
+    private string _launchProjectId = string.Empty;
+    private string _launchPrompt = string.Empty;
+    private bool _launching;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Sessions.SessionUpdated += OnSessionUpdated;
+        await ReloadAsync();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader("Dashboard", "Everything running, everything queued");
+    }
+
+    private async Task ReloadAsync()
+    {
+        _agents = (await AgentStore.GetAllAsync()).Where(a => !a.IsQuickChat).ToList();
+        _projects = await ProjectStore.GetAllAsync();
+        _schedules = await ScheduleStore.GetAllAsync();
+        _runs = await Workflows.GetRunsAsync();
+        _launchAgentId ??= _agents.FirstOrDefault(a => a.Enabled)?.Id;
+
+        var all = await Sessions.GetAllAsync();
+        _live = all.Where(s => s.IsLive).ToList();
+        _recent = all.Where(s => !s.IsArchived).Take(8).ToList();
+    }
+
+    private void Open(string url) => Nav.NavigateTo(url);
+
+    private async Task LaunchAsync()
+    {
+        if (_launchAgentId is null || string.IsNullOrWhiteSpace(_launchPrompt))
+            return;
+
+        _launching = true;
+        try
+        {
+            var session = await Sessions.StartAsync(new StartSessionRequest
+            {
+                AgentId = _launchAgentId,
+                Prompt = _launchPrompt.Trim(),
+                ProjectId = string.IsNullOrWhiteSpace(_launchProjectId) ? null : _launchProjectId,
+            });
+
+            _launchPrompt = string.Empty;
+            Nav.NavigateTo($"/chat/{session.Id}");
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify(ex.Message, "err");
+        }
+        finally
+        {
+            _launching = false;
+        }
+    }
+
+    private async Task OnPromptKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && (args.CtrlKey || args.MetaKey))
+            await LaunchAsync();
+    }
+
+    private void OnSessionUpdated(ChatSession session) => InvokeAsync(async () =>
+    {
+        var all = await Sessions.GetAllAsync();
+        _live = all.Where(s => s.IsLive).ToList();
+        _recent = all.Where(s => !s.IsArchived).Take(8).ToList();
+        StateHasChanged();
+    });
+
+    private static string? LastLine(ChatSession session) =>
+        session.Messages.LastOrDefault(m => m.Role == MessageRole.Agent && !string.IsNullOrWhiteSpace(m.Content))?.Content is { } text
+            ? (text.Length <= 140 ? text : text[..137] + "...")
+            : null;
+
+    private static string Ago(DateTimeOffset when)
+    {
+        var delta = DateTimeOffset.UtcNow - when;
+        return delta switch
+        {
+            { TotalSeconds: < 60 } => "just now",
+            { TotalMinutes: < 60 } => $"{(int)delta.TotalMinutes}m ago",
+            { TotalHours: < 24 } => $"{(int)delta.TotalHours}h ago",
+            _ => when.ToLocalTime().ToString("dd MMM"),
+        };
+    }
+
+    public void Dispose() => Sessions.SessionUpdated -= OnSessionUpdated;
+}

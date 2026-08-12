@@ -1,0 +1,97 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject ISessionManager Sessions
+@inject NavigationManager Nav
+
+<div class="shell">
+    <NavMenu Open="_navOpen" LiveCount="_liveCount" OnNavigate="CloseNav" />
+
+    <div class="main">
+        <header class="topbar">
+            <button class="btn btn-ghost btn-icon nav-toggle" @onclick="ToggleNav" aria-label="Toggle navigation">☰</button>
+            <div>
+                <h1>@Title</h1>
+                @if (!string.IsNullOrWhiteSpace(Subtitle))
+                {
+                    <div class="crumb">@Subtitle</div>
+                }
+            </div>
+            <div class="spacer"></div>
+            <span class="pill @(_liveCount > 0 ? "pill-lime pill-live" : "")">
+                <span class="dot"></span>@_liveCount live
+            </span>
+            <a class="btn btn-sm btn-ghost" href="/providers">Logins</a>
+        </header>
+
+        <div class="content @(Flush ? "flush" : "")">
+            <CascadingValue Value="this">
+                @Body
+            </CascadingValue>
+        </div>
+    </div>
+</div>
+
+<div class="toast-stack">
+    @foreach (var toast in _toasts)
+    {
+        <div class="toast @toast.Kind">@toast.Message</div>
+    }
+</div>
+
+@code {
+    private sealed record Toast(string Message, string Kind, Guid Id);
+
+    private readonly List<Toast> _toasts = [];
+    private bool _navOpen;
+    private int _liveCount;
+
+    /// <summary>Set by pages so the top bar reads like a breadcrumb.</summary>
+    public string Title { get; private set; } = "Orchestrator";
+    public string? Subtitle { get; private set; }
+
+    /// <summary>Chat needs the content area to fill the viewport without page padding.</summary>
+    public bool Flush { get; private set; }
+
+    protected override void OnInitialized()
+    {
+        Sessions.SessionUpdated += OnSessionUpdated;
+        _liveCount = Sessions.Live.Count(s => s.IsLive);
+    }
+
+    public void SetHeader(string title, string? subtitle = null, bool flush = false)
+    {
+        Title = title;
+        Subtitle = subtitle;
+        Flush = flush;
+        StateHasChanged();
+    }
+
+    public void Notify(string message, string kind = "info")
+    {
+        var toast = new Toast(message, kind, Guid.NewGuid());
+        _toasts.Add(toast);
+        StateHasChanged();
+
+        _ = Task.Delay(kind == "err" ? 8000 : 4000).ContinueWith(_ =>
+        {
+            _toasts.Remove(toast);
+            InvokeAsync(StateHasChanged);
+        });
+    }
+
+    private void ToggleNav() => _navOpen = !_navOpen;
+
+    private void CloseNav() => _navOpen = false;
+
+    private void OnSessionUpdated(ChatSession session)
+    {
+        var live = Sessions.Live.Count(s => s.IsLive);
+        if (live == _liveCount)
+            return;
+
+        _liveCount = live;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => Sessions.SessionUpdated -= OnSessionUpdated;
+}

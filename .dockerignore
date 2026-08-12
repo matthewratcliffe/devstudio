@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+.aishop/
+.git/
+.github/
+.vs/
+.idea/
+*.user
+data/
+README.md
