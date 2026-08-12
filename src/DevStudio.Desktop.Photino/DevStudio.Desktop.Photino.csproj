@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DevStudio.Desktop.Photino</RootNamespace>
+    <AssemblyName>devstudio</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The window icon. PNG rather than the Windows .ico, which neither GTK nor Cocoa reads. -->
+    <Content Include="app.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DevStudio.Desktop.Core\DevStudio.Desktop.Core.csproj" />
+    <ProjectReference Include="..\DevStudio.Ui\DevStudio.Ui.csproj" ReferenceOutputAssembly="false" ExcludeAssets="all" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Photino.NET" Version="4.0.16" />
+    <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
+
+</Project>

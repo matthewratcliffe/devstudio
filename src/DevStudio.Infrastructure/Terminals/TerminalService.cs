@@ -101,9 +101,15 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
 
         /// <summary>Secrets sent so far, kept only to scrub the pty's echo out of the transcript.</summary>
         private readonly List<string> _secrets = [];
-        private readonly Process _process;
         private readonly ILogger _logger;
         private readonly object _gate = new();
+
+        private readonly string _fileName;
+        private readonly IReadOnlyList<string> _arguments;
+        private readonly string _workingDirectory;
+        private readonly IReadOnlyDictionary<string, string> _environment;
+
+        private ITerminalChannel? _channel;
 
         public TerminalSession(
             string fileName,
@@ -116,45 +122,15 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
             Id = Guid.NewGuid().ToString("n");
             Command = $"{fileName} {string.Join(' ', arguments)}".Trim();
 
-            var info = new ProcessStartInfo
-            {
-                WorkingDirectory = workingDirectory,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-            };
-
-            if (OperatingSystem.IsWindows())
-            {
-                // No pty here; enough for development, and the container is where logins really happen.
-                info.FileName = fileName;
-                foreach (var argument in arguments)
-                    info.ArgumentList.Add(argument);
-            }
-            else
-            {
-                // script -q -e -c "<command>" /dev/null gives the child a pty and preserves its exit code.
-                info.FileName = "script";
-                info.ArgumentList.Add("-q");
-                info.ArgumentList.Add("-e");
-                info.ArgumentList.Add("-c");
-                info.ArgumentList.Add(BuildShellCommand(fileName, arguments));
-                info.ArgumentList.Add("/dev/null");
-            }
-
-            foreach (var pair in environment)
-                info.Environment[pair.Key] = pair.Value;
-
-            _process = new Process { StartInfo = info, EnableRaisingEvents = true };
+            _fileName = fileName;
+            _arguments = arguments;
+            _workingDirectory = workingDirectory;
+            _environment = environment;
         }
 
         public string Id { get; }
         public string Command { get; }
-        public bool IsRunning => !_process.HasExited;
+        public bool IsRunning => _channel is { IsRunning: true };
         public int? ExitCode { get; private set; }
 
         public string Buffer
@@ -176,27 +152,50 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
 
         public void Start()
         {
-            _process.Exited += (_, _) =>
-            {
-                ExitCode = SafeExitCode();
-                Append($"\n[process exited with code {ExitCode}]\n");
-            };
-
             try
             {
-                _process.Start();
+                _channel = OpenChannel();
+                _channel.Exited += () =>
+                {
+                    ExitCode = _channel?.ExitCode;
+                    Append($"\n[process exited with code {ExitCode}]\n");
+                };
 
                 // Read characters rather than lines. Every one of these CLIs ends its login flow on a
                 // prompt with no trailing newline ("Paste code here >"), which a line reader never
-                // surfaces — that is what left the terminal window blank.
-                _ = Task.Run(() => PumpAsync(_process.StandardOutput));
-                _ = Task.Run(() => PumpAsync(_process.StandardError));
+                // surfaces - that is what left the terminal window blank.
+                foreach (var reader in _channel.Readers)
+                    _ = Task.Run(() => PumpAsync(reader));
             }
             catch (Exception ex)
             {
-                Append($"Could not start '{Command}': {ex.Message}\n");
+                Append($"Could not start {Command}: {ex.Message}\n");
                 _logger.LogWarning(ex, "Terminal session failed to start");
             }
+        }
+
+        /// <summary>
+        /// A real terminal where the platform has one. ConPTY is the Windows answer and needs
+        /// Windows 10 1809; where it is missing this falls back to pipes rather than failing, and any
+        /// CLI that insists on a terminal says so itself.
+        /// </summary>
+        private ITerminalChannel OpenChannel()
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                var pty = ConPtyTerminalChannel.TryStart(_fileName, _arguments, _workingDirectory, _environment, Columns, Rows);
+
+                if (pty is not null)
+                    return pty;
+
+                _logger.LogWarning(
+                    "ConPTY was not available, so terminal {Id} is running on pipes. Interactive logins may not work.",
+                    Id);
+            }
+
+            var channel = new ProcessTerminalChannel(_fileName, _arguments, _workingDirectory, _environment);
+            channel.Start();
+            return channel;
         }
 
         private async Task PumpAsync(StreamReader reader)
@@ -227,11 +226,7 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
 
             try
             {
-                await _process.StandardInput.WriteAsync(input.AsMemory(), ct);
-                if (appendNewline)
-                    await _process.StandardInput.WriteAsync("\n".AsMemory(), ct);
-
-                await _process.StandardInput.FlushAsync(ct);
+                await _channel!.WriteAsync(appendNewline ? input + "\n" : input, ct);
             }
             catch (Exception ex)
             {
@@ -252,12 +247,12 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
 
             // Every token flow here - glab --stdin, gh --with-token, codex --with-api-key - reads
             // stdin to the end, so a token followed by a newline leaves the CLI waiting forever.
-            // Under the pty an EOT ends that read without tearing the session down; on Windows there
-            // is no pty, so closing the stream is what the child sees as the end of its input.
-            if (OperatingSystem.IsWindows())
-                CloseStandardInput();
-            else
+            // On a terminal an EOT ends that read without tearing the session down; on plain pipes
+            // there is nothing to send, so closing the stream is what the child sees as the end.
+            if (_channel is { IsPseudoTerminal: true })
                 await SendAsync(EndOfTransmission, appendNewline: false, ct);
+            else
+                CloseStandardInput();
 
             Append($"[sent {secret.Length} characters]{Environment.NewLine}");
         }
@@ -266,7 +261,7 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
         {
             try
             {
-                _process.StandardInput.Close();
+                _channel?.CloseInput();
             }
             catch (Exception ex)
             {
@@ -370,30 +365,11 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
             Updated?.Invoke();
         }
 
-        private static string BuildShellCommand(string fileName, IReadOnlyList<string> arguments)
-        {
-            var parts = new List<string> { Quote(fileName) };
-            parts.AddRange(arguments.Select(Quote));
-            return string.Join(' ', parts);
-        }
-
-        private static string Quote(string value) =>
-            value.Length > 0 && value.All(c => char.IsLetterOrDigit(c) || c is '-' or '_' or '/' or '.' or '=')
-                ? value
-                : "'" + value.Replace("'", "'\\''") + "'";
-
-        private int? SafeExitCode()
-        {
-            try { return _process.ExitCode; }
-            catch { return null; }
-        }
-
         private void TryKill()
         {
             try
             {
-                if (!_process.HasExited)
-                    _process.Kill(entireProcessTree: true);
+                _channel?.Kill();
             }
             catch
             {
@@ -404,7 +380,7 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
         public ValueTask DisposeAsync()
         {
             TryKill();
-            _process.Dispose();
+            _channel?.Dispose();
             return ValueTask.CompletedTask;
         }
 

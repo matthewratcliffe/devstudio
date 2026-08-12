@@ -17,6 +17,21 @@ public sealed class OrchestratorOptions
     /// <summary>Where per-session worktrees are cut.</summary>
     public string WorktreesPath { get; set; } = "/data/worktrees";
 
+    /// <summary>
+    /// Host directories mounted into the container that may be registered as repositories and
+    /// browsed from the UI. This is what lets an agent work in the same checkout an IDE on the host
+    /// has open: bind mount the folder, list it here, and attach the repo from the Repositories
+    /// page. Empty means the feature is off — nothing outside the data volume is reachable.
+    /// </summary>
+    public List<string> LocalRepositoryRoots { get; set; } = [];
+
+    /// <summary>
+    /// Folder, created beside a host-mounted repository, that worktrees for it are cut into. They
+    /// have to stay on the mount or the IDE cannot see them; beside the repo rather than inside it
+    /// so nothing shows up as untracked in the checkout being edited.
+    /// </summary>
+    public string LocalWorktreesFolderName { get; set; } = ".devstudio-worktrees";
+
     /// <summary>Workspace used by agents that are not bound to a repository.</summary>
     public string ScratchPath { get; set; } = "/data/scratch";
 
@@ -96,6 +111,17 @@ public sealed class OrchestratorOptions
 
     /// <summary>How often the scheduler wakes up to look for due schedules.</summary>
     public int SchedulerTickSeconds { get; set; } = 20;
+
+    /// <summary>
+    /// Whether to ask GitHub, every six hours, whether a newer release exists — and say so in the
+    /// UI. A container cannot update itself, so this only ever tells somebody; pulling the new image
+    /// stays the operator's decision. The desktop builds turn it off, because they update themselves.
+    /// Set false for an install that should not be reaching the internet on its own.
+    /// </summary>
+    public bool UpdateCheckEnabled { get; set; } = true;
+
+    /// <summary>Repository the update check reads releases from, as <c>owner/name</c>.</summary>
+    public string UpdateRepository { get; set; } = "matthewratcliffe/devstudio";
 
     /// <summary>Delete ephemeral worktrees when their session finishes.</summary>
     public bool PruneEphemeralWorktrees { get; set; } = false;

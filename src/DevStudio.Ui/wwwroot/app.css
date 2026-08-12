@@ -573,3 +573,18 @@ select option { background: var(--bg-1); }
     border-style: dashed;
 }
 .msg-summary .who { color: var(--blue); }
+
+/* Sidebar footer: the build, and a word when a newer one exists. Quiet until it is looked at —
+   it is provenance, not a call to action. */
+.nav-foot {
+    margin-top: auto; padding: 0.9rem 0.2rem 0.2rem;
+    display: flex; flex-direction: column; gap: 0.25rem;
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.04em;
+}
+.nav-foot .build { color: var(--text-2); opacity: 0.5; transition: opacity 0.15s ease; }
+.nav-foot:hover .build { opacity: 0.9; }
+.nav-foot .build-update {
+    color: var(--cyan); opacity: 0.8; text-decoration: none;
+}
+.nav-foot .build-update::before { content: "↑ "; }
+.nav-foot .build-update:hover { opacity: 1; text-decoration: underline; }

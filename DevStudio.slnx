@@ -1,6 +1,9 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/DevStudio.Application/DevStudio.Application.csproj" />
+    <Project Path="src/DevStudio.Desktop/DevStudio.Desktop.csproj" />
+    <Project Path="src/DevStudio.Desktop.Core/DevStudio.Desktop.Core.csproj" />
+    <Project Path="src/DevStudio.Desktop.Photino/DevStudio.Desktop.Photino.csproj" />
     <Project Path="src/DevStudio.Domain/DevStudio.Domain.csproj" />
     <Project Path="src/DevStudio.Infrastructure/DevStudio.Infrastructure.csproj" />
     <Project Path="src/DevStudio.Ui/DevStudio.Ui.csproj" />

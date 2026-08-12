@@ -1,0 +1,69 @@
+namespace DevStudio.Desktop;
+
+/// <summary>
+/// Where the desktop build keeps its state, and the environment the server child is started with.
+///
+/// Nothing lives beside the executable: an update installs a new copy of the application and removes
+/// the old one, so anything kept there would be thrown away with it.
+/// </summary>
+public static class DesktopPaths
+{
+    /// <summary>
+    /// State root, per platform. On Windows this is deliberately a sibling of the install directory
+    /// (<c>%LOCALAPPDATA%\devStudio</c>) rather than a child of it; elsewhere the application is
+    /// installed outside the data directory anyway.
+    /// </summary>
+    public static string DataRoot { get; } = Environment.GetEnvironmentVariable("DEVSTUDIO_DATA")
+        ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            OperatingSystem.IsWindows() ? "devStudio-data" : "devStudio");
+
+    public static string WebViewProfile => Path.Combine(DataRoot, "webview");
+
+    public static string SettingsFile => Path.Combine(DataRoot, "desktop.json");
+
+    public static string LogFile => Path.Combine(DataRoot, "server.log");
+
+    /// <summary>Repository roots offered by the folder picker. The whole home directory, by default.</summary>
+    public static string DefaultRepositoryRoot =>
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    /// <summary>
+    /// Configuration for the server child. Every value mirrors a key the container sets through
+    /// compose; the difference is that a desktop install has no volumes and no container boundary.
+    /// </summary>
+    public static Dictionary<string, string> ServerEnvironment(int port)
+    {
+        var data = Path.Combine(DataRoot, "data");
+
+        return new Dictionary<string, string>
+        {
+            ["ASPNETCORE_ENVIRONMENT"] = "Production",
+            ["ASPNETCORE_URLS"] = $"http://127.0.0.1:{port}",
+
+            // The built-in MCP server advertises its own URL to agents, so it has to know the port
+            // that was actually free, not the default one.
+            ["Orchestrator__HttpPort"] = port.ToString(),
+
+            ["Orchestrator__DataPath"] = data,
+            ["Orchestrator__RepositoriesPath"] = Path.Combine(data, "repos"),
+            ["Orchestrator__WorktreesPath"] = Path.Combine(data, "worktrees"),
+            ["Orchestrator__ScratchPath"] = Path.Combine(data, "scratch"),
+
+            // Empty means the real home: the desktop build shares the CLI logins already sitting in
+            // ~/.claude and ~/.codex instead of keeping a second set.
+            ["Orchestrator__HomePath"] = string.Empty,
+
+            // There is no container here, so the CLIs keep their own sandboxes: codex runs
+            // workspace-write instead of danger-full-access, and claude leaves its bash sandbox on.
+            ["Orchestrator__ContainerIsTheSandbox"] = "false",
+
+            // The shell has Velopack and installs updates itself, so the web UI does not also need
+            // to nag about them.
+            ["Orchestrator__UpdateCheckEnabled"] = "false",
+
+            // No bind mounts to declare — every repository under the user's home is attachable.
+            ["Orchestrator__LocalRepositoryRoots__0"] = DefaultRepositoryRoot,
+        };
+    }
+}

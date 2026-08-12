@@ -9,6 +9,7 @@ using DevStudio.Domain.Sessions;
 using DevStudio.Domain.Skills;
 using DevStudio.Domain.Workflows;
 using DevStudio.Infrastructure.Git;
+using DevStudio.Infrastructure.Updates;
 using DevStudio.Infrastructure.Images;
 using DevStudio.Infrastructure.Mcp;
 using DevStudio.Infrastructure.SourceControl;
@@ -77,6 +78,15 @@ public static class DependencyInjection
         services.AddSingleton<IImageGenerator, CloudflareImageGenerator>();
         services.AddSingleton<IImageGenerator, GeminiImageGenerator>();
         services.AddSingleton<IImageGenerationService, ImageGenerationService>();
+
+        // Named client so the GitHub API sees a User-Agent, which it requires and rejects requests
+        // without.
+        services.AddHttpClient<IReleaseChecker, GitHubReleaseChecker>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("devStudio");
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+        });
 
         services.AddSingleton<IGitService, GitService>();
         services.AddSingleton<ISourceControlHosts, SourceControlHosts>();

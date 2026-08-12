@@ -16,11 +16,19 @@ services:
       - devstudio-data:/data
       # CLI credentials: log in once through the web UI and they persist here.
       - devstudio-home:/home/orchestrator
+      # Uncomment to let agents work on a checkout your IDE has open. Bind mount the folder, list
+      # the mount point in Orchestrator__LocalRepositoryRoots below, then attach the repo from
+      # Repositories → Attach local folder. Forward slashes on Windows.
+      # - D:/repos:/host/repos
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       Orchestrator__MaxConcurrentSessions: "6"
       Orchestrator__TurnTimeoutMinutes: "60"
       Orchestrator__SchedulerTickSeconds: "20"
+      # Host directories that may be browsed and attached as repositories. This is an allow-list:
+      # nothing outside it is reachable from the UI's folder picker. Only useful with the matching
+      # bind mount above.
+      # Orchestrator__LocalRepositoryRoots__0: "/host/repos"
       # Agents run their own commands. The container is the boundary, so the CLIs are told not to
       # build a second sandbox inside it: both use bubblewrap, which needs unprivileged user
       # namespaces, and Docker's default seccomp profile blocks them — bwrap then fails and every

@@ -69,6 +69,17 @@ jobs:
         id: image
         run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
+      # Only a tag is a version. Anything else stays 0.0.0, which the in-app update check treats as
+      # an unversioned build and says nothing about.
+      - name: Derive version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=0.0.0" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -106,6 +117,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          build-args: |
+            VERSION=${{ steps.version.outputs.value }}
           platforms: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

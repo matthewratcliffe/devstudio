@@ -150,6 +150,14 @@ public class SystemPromptLayeringTests : IDisposable
             CancellationToken ct = default) =>
             throw new NotSupportedException();
 
+        public IReadOnlyList<string> LocalRepositoryRoots => [];
+
+        public Task<LocalBrowseResult> BrowseLocalAsync(string? path, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<GitRepository> AttachLocalAsync(string path, string? name, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
         public Task<GitCommandOutcome> FetchAsync(GitRepository repository, CancellationToken ct = default) =>
             throw new NotSupportedException();
 

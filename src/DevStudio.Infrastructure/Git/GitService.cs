@@ -1,5 +1,6 @@
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
+using DevStudio.Application.Repositories;
 using DevStudio.Domain.Providers;
 using DevStudio.Domain.Repositories;
 using Microsoft.Extensions.Logging;
@@ -15,6 +16,7 @@ public sealed class GitService : IGitService
 {
     private readonly IProcessRunner _runner;
     private readonly ISourceControlRegistry _forges;
+    private readonly ISourceControlHosts _hosts;
     private readonly IEntityStore<GitRepository> _repositories;
     private readonly OrchestratorOptions _options;
     private readonly ILogger<GitService> _logger;
@@ -22,16 +24,21 @@ public sealed class GitService : IGitService
     public GitService(
         IProcessRunner runner,
         ISourceControlRegistry forges,
+        ISourceControlHosts hosts,
         IEntityStore<GitRepository> repositories,
         IOptions<OrchestratorOptions> options,
         ILogger<GitService> logger)
     {
         _runner = runner;
         _forges = forges;
+        _hosts = hosts;
         _repositories = repositories;
         _options = options.Value;
         _logger = logger;
+        LocalRepositoryRoots = LocalRepositoryPaths.NormaliseRoots(_options.LocalRepositoryRoots);
     }
+
+    public IReadOnlyList<string> LocalRepositoryRoots { get; }
 
     public async Task<GitRepository> CloneAsync(
         string remoteUrl,
@@ -84,6 +91,95 @@ public sealed class GitService : IGitService
         return await _repositories.UpsertAsync(repository, ct);
     }
 
+    public async Task<LocalBrowseResult> BrowseLocalAsync(string? path, CancellationToken ct = default)
+    {
+        var registered = (await _repositories.GetAllAsync(ct)).Select(r => r.LocalPath).ToList();
+        bool IsRegistered(string candidate) =>
+            registered.Any(p => string.Equals(p, candidate, LocalRepositoryPaths.Comparison));
+
+        // The top level is the configured roots themselves — there is nothing above them to browse.
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            var roots = LocalRepositoryRoots
+                .Where(Directory.Exists)
+                .Select(r => new LocalDirectoryEntry(r, r, LocalRepositoryPaths.IsGitRepository(r), IsRegistered(r)))
+                .ToList();
+
+            return new LocalBrowseResult(null, null, roots);
+        }
+
+        if (!LocalRepositoryPaths.TryResolveWithinRoots(path, LocalRepositoryRoots, out var resolved))
+            throw new InvalidOperationException("That path is not inside a configured local repository root.");
+
+        if (!Directory.Exists(resolved))
+            throw new InvalidOperationException($"'{resolved}' does not exist inside the container. Is the bind mount still there?");
+
+        var children = new List<LocalDirectoryEntry>();
+
+        try
+        {
+            foreach (var child in Directory.EnumerateDirectories(resolved).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+            {
+                var name = Path.GetFileName(child);
+
+                // Dot directories are .git and the worktrees folder — noise in a repository picker.
+                if (name.StartsWith('.'))
+                    continue;
+
+                children.Add(new LocalDirectoryEntry(name, child, LocalRepositoryPaths.IsGitRepository(child), IsRegistered(child)));
+
+                // A mount with thousands of folders would otherwise render as thousands of rows.
+                if (children.Count >= 500)
+                    break;
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException($"'{resolved}' is not readable by the container user.");
+        }
+
+        // Root entries have no parent, which is what stops the picker walking out of the allow-list.
+        var isRoot = LocalRepositoryRoots.Any(r => string.Equals(r, resolved, LocalRepositoryPaths.Comparison));
+        var parent = isRoot ? null : Path.GetDirectoryName(resolved);
+
+        return new LocalBrowseResult(resolved, parent, children);
+    }
+
+    public async Task<GitRepository> AttachLocalAsync(string path, string? name, CancellationToken ct = default)
+    {
+        if (LocalRepositoryRoots.Count == 0)
+            throw new InvalidOperationException("No local repository roots are configured, so nothing can be attached.");
+
+        if (!LocalRepositoryPaths.TryResolveWithinRoots(path, LocalRepositoryRoots, out var resolved))
+            throw new InvalidOperationException("That path is not inside a configured local repository root.");
+
+        if (!Directory.Exists(resolved))
+            throw new InvalidOperationException($"'{resolved}' does not exist inside the container.");
+
+        if (!LocalRepositoryPaths.IsGitRepository(resolved))
+            throw new InvalidOperationException($"'{resolved}' is not a git repository — no .git there.");
+
+        var all = await _repositories.GetAllAsync(ct);
+        if (all.FirstOrDefault(r => string.Equals(r.LocalPath, resolved, LocalRepositoryPaths.Comparison)) is { } already)
+            return already;
+
+        var remote = await RunGitAsync(resolved, ["remote", "get-url", "origin"], 60, ct);
+        var remoteUrl = remote.Succeeded ? remote.Output.Trim() : string.Empty;
+
+        var repository = new GitRepository
+        {
+            Name = UniqueName(string.IsNullOrWhiteSpace(name) ? Path.GetFileName(resolved) : name, all),
+            RemoteUrl = remoteUrl,
+            SourceControl = DetectForge(remoteUrl),
+            LocalPath = resolved,
+            DefaultBranch = await DetectLocalDefaultBranchAsync(resolved, ct),
+            IsLocal = true,
+        };
+
+        _logger.LogInformation("Attached host-mounted repository {Path} as {Name}", resolved, repository.Name);
+        return await _repositories.UpsertAsync(repository, ct);
+    }
+
     public async Task<GitCommandOutcome> FetchAsync(GitRepository repository, CancellationToken ct = default)
     {
         var result = await RunGitAsync(repository.LocalPath, ["fetch", "--all", "--prune"], 300, ct);
@@ -126,8 +222,16 @@ public sealed class GitService : IGitService
         bool ephemeral,
         CancellationToken ct = default)
     {
-        Directory.CreateDirectory(_options.WorktreesPath);
-        var path = Path.Combine(_options.WorktreesPath, $"{repository.Name}-{TemplateRenderer.Slugify(branch)}");
+        // A host-mounted repo puts its worktrees on the mount, so the IDE editing that checkout can
+        // see what the agent is doing; a volume clone keeps using the shared worktrees directory.
+        var worktreeRoot = LocalRepositoryPaths.WorktreeRoot(
+            repository.IsLocal,
+            repository.LocalPath,
+            _options.WorktreesPath,
+            _options.LocalWorktreesFolderName);
+
+        Directory.CreateDirectory(worktreeRoot);
+        var path = Path.Combine(worktreeRoot, $"{repository.Name}-{TemplateRenderer.Slugify(branch)}");
 
         if (Directory.Exists(path))
         {
@@ -208,6 +312,70 @@ public sealed class GitService : IGitService
     {
         var result = await RunGitAsync(path, ["rev-parse", "--abbrev-ref", "HEAD"], 60, ct);
         return result.Succeeded && !string.IsNullOrWhiteSpace(result.Output) ? result.Output.Trim() : "main";
+    }
+
+    /// <summary>
+    /// Prefers the remote's idea of the default branch. Whatever is checked out right now is the
+    /// wrong answer for a mounted repo, because that is the branch the person at the IDE is on.
+    /// </summary>
+    private async Task<string> DetectLocalDefaultBranchAsync(string path, CancellationToken ct)
+    {
+        var head = await RunGitAsync(path, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], 60, ct);
+
+        // The output is "origin/main"; the branch name is what is wanted.
+        if (head.Succeeded && head.Output.Trim() is { Length: > 0 } reference)
+            return reference.StartsWith("origin/", StringComparison.Ordinal) ? reference["origin/".Length..] : reference;
+
+        return await DetectDefaultBranchAsync(path, ct);
+    }
+
+    /// <summary>Picks the forge from the remote's host, so a self-managed instance resolves too.</summary>
+    private SourceControlProvider DetectForge(string remoteUrl)
+    {
+        if (string.IsNullOrWhiteSpace(remoteUrl))
+            return SourceControlProvider.GitHub;
+
+        var host = RemoteHost(remoteUrl);
+
+        foreach (var provider in Enum.GetValues<SourceControlProvider>())
+        {
+            if (host.Equals(_hosts.Get(provider), StringComparison.OrdinalIgnoreCase))
+                return provider;
+        }
+
+        // An unconfigured host is still more likely to be the one whose name is in the URL.
+        return host.Contains("gitlab", StringComparison.OrdinalIgnoreCase)
+            ? SourceControlProvider.GitLab
+            : SourceControlProvider.GitHub;
+    }
+
+    /// <summary>Handles both URL remotes and the scp-like <c>git@host:owner/repo.git</c> form.</summary>
+    private static string RemoteHost(string remoteUrl)
+    {
+        var trimmed = remoteUrl.Trim();
+
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.Host))
+            return uri.Host;
+
+        var at = trimmed.IndexOf('@');
+        var colon = trimmed.IndexOf(':', at + 1);
+        return at >= 0 && colon > at ? trimmed[(at + 1)..colon] : string.Empty;
+    }
+
+    /// <summary>Names end up in worktree directory names, so two repositories cannot share one.</summary>
+    private static string UniqueName(string requested, IReadOnlyList<GitRepository> existing)
+    {
+        var slug = TemplateRenderer.Slugify(requested);
+        if (string.IsNullOrWhiteSpace(slug))
+            slug = "repo";
+
+        var candidate = slug;
+        var suffix = 2;
+
+        while (existing.Any(r => string.Equals(r.Name, candidate, StringComparison.OrdinalIgnoreCase)))
+            candidate = $"{slug}-{suffix++}";
+
+        return candidate;
     }
 
     private static string DeriveName(string remoteUrl)
