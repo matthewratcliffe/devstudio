@@ -10,7 +10,7 @@
 @inject ILoopbackCallbackForwarder Callbacks
 @inject IJSRuntime Js
 
-<PageTitle>Logins · DevStudio</PageTitle>
+<PageTitle>Logins · devStudio</PageTitle>
 
 <div class="card" style="margin-bottom:1.2rem">
     <div class="section-tag">How this works</div>
@@ -300,6 +300,11 @@
         {
             _forgeState[forge.Provider] = await forge.GetAuthStateAsync();
             _forgeDetail[forge.Provider] = FirstLine(await forge.GetAuthStatusTextAsync());
+
+            // A fresh login is the moment to teach git how to reach that host, so an agent that
+            // pushes on its own does not stop at a username prompt it has no way to answer.
+            if (_forgeState[forge.Provider] == ProviderAuthState.LoggedIn)
+                await forge.ConfigureGitCredentialsAsync();
         }
     }
 

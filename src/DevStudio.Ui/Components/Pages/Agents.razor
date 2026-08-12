@@ -11,7 +11,7 @@
 @inject NavigationManager Nav
 @inject Microsoft.Extensions.Options.IOptions<OrchestratorOptions> Options
 
-<PageTitle>Agents · DevStudio</PageTitle>
+<PageTitle>Agents · devStudio</PageTitle>
 
 <div class="btn-row" style="margin-bottom:1.2rem">
     <button class="btn btn-primary" @onclick="() => Edit(new Agent())">New agent</button>
@@ -103,6 +103,13 @@
                 <textarea @bind="_editing.SystemPrompt" rows="4"
                           placeholder="Standing instructions applied to every turn."></textarea>
                 <span class="hint">Project instructions are layered on top of this when the agent runs in a project.</span>
+            </div>
+
+            <div class="field">
+                <label>Default first prompt</label>
+                <textarea @bind="_editing.DefaultPrompt" rows="3"
+                          placeholder="Sent as the opening turn when a session starts without a prompt."></textarea>
+                <span class="hint">Fills the first prompt on a new session, and is what scheduled runs send when they carry no prompt of their own.</span>
             </div>
 
             <div class="form-grid">
@@ -494,6 +501,7 @@
         Model = agent.Model,
         Effort = agent.Effort,
         SystemPrompt = agent.SystemPrompt,
+        DefaultPrompt = agent.DefaultPrompt,
         PermissionMode = agent.PermissionMode,
         ProjectId = agent.ProjectId,
         AccountId = agent.AccountId,

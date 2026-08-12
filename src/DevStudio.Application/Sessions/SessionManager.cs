@@ -85,9 +85,13 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         var projectId = request.ProjectId ?? agent.ProjectId;
         agent = await ApplyProjectProviderAsync(agent, projectId, ct);
 
+        // Nothing typed in falls back to the agent's own opening prompt, so a schedule or a
+        // one-click start still has something to work from.
+        var prompt = string.IsNullOrWhiteSpace(request.Prompt) ? agent.DefaultPrompt : request.Prompt;
+
         var session = new ChatSession
         {
-            Title = string.IsNullOrWhiteSpace(request.Title) ? BuildTitle(request.Prompt) : request.Title!,
+            Title = string.IsNullOrWhiteSpace(request.Title) ? BuildTitle(prompt) : request.Title!,
             AgentId = agent.Id,
             AgentName = agent.Name,
             Provider = agent.Provider,
@@ -134,7 +138,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         _live[session.Id] = live;
 
         Interlocked.Increment(ref live.QueuedTurns);
-        await live.Turns.Writer.WriteAsync(request.Prompt, CancellationToken.None);
+        await live.Turns.Writer.WriteAsync(prompt, CancellationToken.None);
         live.Pump = Task.Run(() => PumpAsync(live), CancellationToken.None);
 
         Notify(session);
@@ -183,6 +187,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             Model = agent.Model,
             Effort = agent.Effort,
             SystemPrompt = agent.SystemPrompt,
+            DefaultPrompt = agent.DefaultPrompt,
             PermissionMode = agent.PermissionMode,
             ProjectId = agent.ProjectId,
             AccountId = agent.AccountId,

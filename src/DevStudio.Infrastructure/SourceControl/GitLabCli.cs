@@ -61,7 +61,9 @@ public sealed class GitLabCli : ISourceControlCli
     public async Task<IReadOnlyList<RemoteRepoSummary>> ListRepositoriesAsync(int limit = 50, CancellationToken ct = default)
     {
         var result = await RunRawAsync(
-            ["repo", "list", "--per-page", limit.ToString(), "--output", "json"],
+            // --member is what widens this past the projects the account owns: without it glab asks
+            // for owned projects only, so everything reached through a group is missing.
+            ["repo", "list", "--member", "--per-page", limit.ToString(), "--output", "json"],
             null,
             ct);
 
@@ -108,6 +110,27 @@ public sealed class GitLabCli : ISourceControlCli
             // --stdin takes the token directly instead of walking the interactive prompt.
             ? (Executable, (IReadOnlyList<string>)["auth", "login", "--hostname", Host, "--stdin"])
             : (Executable, (IReadOnlyList<string>)["auth", "login", "--hostname", Host, "--web"]);
+
+    public async Task<GitCommandOutcome> ConfigureGitCredentialsAsync(CancellationToken ct = default)
+    {
+        // glab has no setup-git equivalent, so the helper is written straight into the container's
+        // .gitconfig. The leading ! is how git is told to run a command rather than look for a
+        // git-credential-* binary, and --replace-all keeps repeat logins from stacking up entries.
+        var result = await _runner.RunAsync(
+            new ProcessRequest(
+                _options.GitExecutable,
+                [
+                    "config", "--global", "--replace-all",
+                    $"credential.https://{Host}.helper",
+                    $"!{Executable} auth git-credential",
+                ],
+                null,
+                new Dictionary<string, string> { ["HOME"] = _options.HomePath },
+                TimeoutSeconds: 30),
+            ct);
+
+        return new GitCommandOutcome(result.Succeeded, result.Text);
+    }
 
     private Task<ProcessResult> RunRawAsync(IReadOnlyList<string> arguments, string? workingDirectory, CancellationToken ct) =>
         _runner.RunAsync(

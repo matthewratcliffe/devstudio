@@ -92,9 +92,15 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
         private const int Columns = 120;
         private const int Rows = 34;
 
+        /// <summary>Ctrl-D. Ends a read on the pty the way pressing it in a real terminal would.</summary>
+        private static readonly string EndOfTransmission = ((char)4).ToString();
+
         private readonly StringBuilder _buffer = new();
         private readonly List<string> _urls = [];
         private readonly List<string> _codes = [];
+
+        /// <summary>Secrets sent so far, kept only to scrub the pty's echo out of the transcript.</summary>
+        private readonly List<string> _secrets = [];
         private readonly Process _process;
         private readonly ILogger _logger;
         private readonly object _gate = new();
@@ -239,8 +245,33 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
                 return;
 
             // The value goes to the process, never to the transcript everyone can read.
+            lock (_gate)
+                _secrets.Add(secret);
+
             await SendAsync(secret, appendNewline: true, ct);
+
+            // Every token flow here - glab --stdin, gh --with-token, codex --with-api-key - reads
+            // stdin to the end, so a token followed by a newline leaves the CLI waiting forever.
+            // Under the pty an EOT ends that read without tearing the session down; on Windows there
+            // is no pty, so closing the stream is what the child sees as the end of its input.
+            if (OperatingSystem.IsWindows())
+                CloseStandardInput();
+            else
+                await SendAsync(EndOfTransmission, appendNewline: false, ct);
+
             Append($"[sent {secret.Length} characters]{Environment.NewLine}");
+        }
+
+        private void CloseStandardInput()
+        {
+            try
+            {
+                _process.StandardInput.Close();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not close stdin for terminal {Id}", Id);
+            }
         }
 
         public Task SendControlAsync(char letter, CancellationToken ct = default)
@@ -305,6 +336,11 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
 
             lock (_gate)
             {
+                // A pty echoes whatever is written to it, and the token flows print no prompt that
+                // turns echo off, so the secret comes straight back out on stdout. Scrub it here.
+                foreach (var secret in _secrets)
+                    clean = clean.Replace(secret, "[redacted]", StringComparison.Ordinal);
+
                 _buffer.Append(clean);
                 if (_buffer.Length > MaxBufferChars)
                     _buffer.Remove(0, _buffer.Length - MaxBufferChars);

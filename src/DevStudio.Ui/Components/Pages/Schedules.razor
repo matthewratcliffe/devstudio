@@ -5,7 +5,7 @@
 @inject IEntityStore<Project> ProjectStore
 @inject SchedulerHostedService Scheduler
 
-<PageTitle>Schedules · DevStudio</PageTitle>
+<PageTitle>Schedules · devStudio</PageTitle>
 
 <div class="btn-row" style="margin-bottom:1.2rem">
     <button class="btn btn-primary" @onclick="() => Edit(new Schedule())">New schedule</button>
@@ -126,6 +126,7 @@
                     <label>Prompt</label>
                     <textarea rows="4" @bind="_editing.Prompt"
                               placeholder="What the agent should do each time it fires."></textarea>
+                    <span class="hint">Leave this empty to send the agent's own default first prompt.</span>
                 </div>
             }
             else

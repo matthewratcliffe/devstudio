@@ -4,7 +4,7 @@
 @inject ISessionManager Sessions
 @inject NavigationManager Nav
 
-<PageTitle>New session · DevStudio</PageTitle>
+<PageTitle>New session · devStudio</PageTitle>
 
 @if (_agent is null)
 {
@@ -68,6 +68,11 @@ else
     {
         _agent = await AgentStore.GetAsync(AgentId);
         _projects = await ProjectStore.GetAllAsync();
+
+        // Pre-filled rather than sent behind the scenes: the agent's usual opening is still worth
+        // reading and editing before it goes.
+        if (_agent is not null && string.IsNullOrWhiteSpace(_prompt))
+            _prompt = _agent.DefaultPrompt;
     }
 
     protected override void OnAfterRender(bool firstRender)

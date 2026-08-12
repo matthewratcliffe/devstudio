@@ -90,6 +90,13 @@ public sealed class GitHubCli : ISourceControlCli
             : (Executable,
                 (IReadOnlyList<string>)["auth", "login", "--hostname", Host, "--git-protocol", "https", "--web", "--skip-ssh-key"]);
 
+    public async Task<GitCommandOutcome> ConfigureGitCredentialsAsync(CancellationToken ct = default)
+    {
+        // gh ships its own wiring for this; it writes the helper into the container's .gitconfig.
+        var result = await RunRawAsync(["auth", "setup-git", "--hostname", Host], null, ct);
+        return new GitCommandOutcome(result.Succeeded, result.Text);
+    }
+
     private Task<ProcessResult> RunRawAsync(IReadOnlyList<string> arguments, string? workingDirectory, CancellationToken ct) =>
         _runner.RunAsync(
             new ProcessRequest(

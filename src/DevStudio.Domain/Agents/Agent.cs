@@ -38,6 +38,13 @@ public sealed class Agent : Entity
     /// <summary>Prepended to the first prompt of every session this agent starts.</summary>
     public string SystemPrompt { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The first prompt to send when a session starts without one of its own. Unlike the system
+    /// prompt this is an ordinary turn the agent answers, which is what lets an agent with a fixed
+    /// job — a nightly triage, a standing review — run with nothing typed in.
+    /// </summary>
+    public string DefaultPrompt { get; set; } = string.Empty;
+
     public PermissionMode PermissionMode { get; set; } = PermissionMode.AcceptEdits;
 
     /// <summary>Project the agent belongs to. Its instructions and files travel with every session.</summary>

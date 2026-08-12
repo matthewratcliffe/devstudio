@@ -14,17 +14,20 @@ namespace DevStudio.Infrastructure.Git;
 public sealed class GitService : IGitService
 {
     private readonly IProcessRunner _runner;
+    private readonly ISourceControlRegistry _forges;
     private readonly IEntityStore<GitRepository> _repositories;
     private readonly OrchestratorOptions _options;
     private readonly ILogger<GitService> _logger;
 
     public GitService(
         IProcessRunner runner,
+        ISourceControlRegistry forges,
         IEntityStore<GitRepository> repositories,
         IOptions<OrchestratorOptions> options,
         ILogger<GitService> logger)
     {
         _runner = runner;
+        _forges = forges;
         _repositories = repositories;
         _options = options.Value;
         _logger = logger;
@@ -55,7 +58,13 @@ public sealed class GitService : IGitService
         if (Directory.Exists(target))
             throw new InvalidOperationException($"'{folder}' already exists on disk but is not registered. Rename it or pick another name.");
 
-        // gh is on PATH inside the container, so private clones work off the gh credential helper.
+        // Terminal prompts are off, so git has to already know how to authenticate. Wiring the
+        // forge CLI in as the credential helper here means a private clone works off the login
+        // whether or not the login flow got round to setting it up.
+        var credentials = await _forges.Get(sourceControl).ConfigureGitCredentialsAsync(ct);
+        if (!credentials.Succeeded)
+            _logger.LogWarning("Could not configure git credentials for {Forge}: {Output}", sourceControl, credentials.Output);
+
         var clone = await RunGitAsync(_options.RepositoriesPath, ["clone", remoteUrl, folder], 600, ct);
         if (!clone.Succeeded)
             throw new InvalidOperationException($"Clone failed: {clone.Output}");

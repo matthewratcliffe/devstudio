@@ -33,6 +33,12 @@ public interface ISourceControlCli
     IReadOnlyList<LoginMethod> SupportedLoginMethods { get; }
 
     (string FileName, IReadOnlyList<string> Arguments) BuildLoginCommand(LoginMethod method = LoginMethod.DeviceCode);
+
+    /// <summary>
+    /// Points git's credential helper at this CLI for its host, so plain <c>git clone</c> and
+    /// <c>git push</c> reuse the login instead of stopping to ask for a username. Safe to repeat.
+    /// </summary>
+    Task<GitCommandOutcome> ConfigureGitCredentialsAsync(CancellationToken ct = default);
 }
 
 /// <summary>Resolves the CLI for a forge.</summary>

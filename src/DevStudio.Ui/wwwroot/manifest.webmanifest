@@ -1,6 +1,6 @@
 {
-  "name": "DevStudio",
-  "short_name": "DevStudio",
+  "name": "devStudio",
+  "short_name": "devStudio",
   "description": "Run and schedule Claude and Codex CLI agents from one console.",
   "start_url": "/",
   "scope": "/",
