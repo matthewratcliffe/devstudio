@@ -66,17 +66,19 @@ jobs:
             shell-project: src/DevStudio.Desktop.Photino/DevStudio.Desktop.Photino.csproj
             main-exe: devstudio
             channel: osx-arm64
-            icon: src/DevStudio.Desktop.Photino/app.png
-            extra-pack-args: --packAppId com.matthewratcliffe.devstudio
+            icon: artifacts/app.icns
+            extra-pack-args: --bundleId com.matthewratcliffe.devstudio
 
+          # macos-13 was retired in December 2025; macos-15-intel is the last x86_64 image
+          # Actions will offer, and it goes away in Fall 2027 with the architecture.
           - name: macOS (Intel)
-            os: macos-13
+            os: macos-15-intel
             rid: osx-x64
             shell-project: src/DevStudio.Desktop.Photino/DevStudio.Desktop.Photino.csproj
             main-exe: devstudio
             channel: osx-x64
-            icon: src/DevStudio.Desktop.Photino/app.png
-            extra-pack-args: --packAppId com.matthewratcliffe.devstudio
+            icon: artifacts/app.icns
+            extra-pack-args: --bundleId com.matthewratcliffe.devstudio
 
           - name: Linux (x64)
             os: ubuntu-latest
@@ -132,6 +134,21 @@ jobs:
       - name: Install Linux packaging dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libfuse2
+
+      # vpk only accepts .icns on macOS, and the shell ships a single square png, so build the
+      # iconset on the runner rather than checking a second copy of the same icon into the repo.
+      - name: Build the macOS icon
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          iconset=$(mktemp -d)/app.iconset
+          mkdir -p "$iconset"
+          for size in 16 32 128 256 512; do
+            sips -z $size $size src/DevStudio.Desktop.Photino/app.png --out "$iconset/icon_${size}x${size}.png" >/dev/null
+            sips -z $((size * 2)) $((size * 2)) src/DevStudio.Desktop.Photino/app.png --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+          done
+          mkdir -p artifacts
+          iconutil --convert icns "$iconset" --output artifacts/app.icns
 
       - name: Install Velopack
         shell: bash
