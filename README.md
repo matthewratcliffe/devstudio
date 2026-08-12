@@ -179,9 +179,12 @@ vpk pack --packId devStudio --packVersion 1.0.0 --packDir artifacts/publish \
 # macOS and Linux — same two publishes, the Photino shell, and the platform's own channel
 dotnet publish src/DevStudio.Desktop.Photino -c Release -r osx-arm64 --self-contained -o artifacts/publish
 dotnet publish src/DevStudio.Ui              -c Release -r osx-arm64 --self-contained -o artifacts/publish/server
+# macOS wants an .icns; Linux takes the png as it is
+mkdir icon.iconset && sips -z 512 512 src/DevStudio.Desktop.Photino/app.png --out icon.iconset/icon_512x512.png
+iconutil --convert icns icon.iconset --output app.icns
 vpk pack --packId devStudio --packVersion 1.0.0 --packDir artifacts/publish \
-         --mainExe devstudio --icon src/DevStudio.Desktop.Photino/app.png \
-         --channel osx-arm64 --packAppId com.matthewratcliffe.devstudio --outputDir artifacts/releases
+         --mainExe devstudio --icon app.icns \
+         --channel osx-arm64 --bundleId com.matthewratcliffe.devstudio --outputDir artifacts/releases
 ```
 
 Two self-contained publishes, the server nested in `server/` where the shell looks for it, so the
