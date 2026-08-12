@@ -1,19 +1,38 @@
 name: CI
 
+# One pipeline for everything built from this repository: the tests, the container image, and the
+# four desktop installers. They share a single version and a single run, so a commit that ships is
+# a commit where all of it built.
 on:
   push:
     branches: ["**"]
-    tags-ignore: ["**"]
+    tags: ["v*.*.*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: Platforms to build the image for
+        required: false
+        default: linux/amd64,linux/arm64
+        type: choice
+        options:
+          - linux/amd64,linux/arm64
+          - linux/amd64
+          - linux/arm64
+
+env:
+  REGISTRY: ghcr.io
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A superseded pull request is worth cancelling. A superseded default-branch run is not: it may be
+  # partway through publishing a release, and half a release is worse than a slow queue.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build-test:
-    name: Build and test
+  # The only job a pull request runs.
+  test:
+    name: Unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -49,3 +68,350 @@ jobs:
           name: test-results
           path: "**/TestResults/*.trx"
           if-no-files-found: ignore
+
+  # Everything below runs for the default branch, a tag, or a deliberate dispatch — a pull request
+  # and an ordinary branch push get the tests and stop there. Skipping this job skips the three
+  # that need it. One version is derived here and stamped into the image, the installers and the
+  # release, so all three agree about what this build is.
+  version:
+    name: Version
+    needs: test
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.ref_type == 'tag'
+      || github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.derive.outputs.value }}
+      release: ${{ steps.derive.outputs.release }}
+    steps:
+      # Tags are read to derive the version, so the whole history is needed.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # A tag is released as itself. Every other build on the default branch is released too, as
+      # <major>.<minor> of the newest tag with the run number as the patch — the run number only
+      # ever climbs, so each build outranks the last, and tagging v1.2.0 lifts the base so the
+      # builds after it stay ahead of it rather than dropping back underneath.
+      - id: derive
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            base=$(git tag --list 'v*.*.*' | sed 's/^v//' | sort -V | tail -1)
+            version="${base:-0.0.0}"
+            version="${version%.*}.$GITHUB_RUN_NUMBER"
+
+            # A tag patched above the run number (v1.2.99 against run 42) would send the version
+            # backwards and the update feed with it. Step the minor so it still climbs.
+            if [ "$version" = "$base" ] || [ "$( { echo "$base"; echo "$version"; } | sort -V | tail -1 )" != "$version" ]; then
+              IFS=. read -r major minor _ <<< "$base"
+              version="$major.$((minor + 1)).$GITHUB_RUN_NUMBER"
+            fi
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+          # A branch build (a dispatch on a topic branch) is packaged but never published: it is not
+          # something an installed app should be updating itself to.
+          if [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_REF" == "refs/heads/${{ github.event.repository.default_branch }}" ]]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  image:
+    name: Container image
+    needs: [test, version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ghcr.io rejects an uppercase path, and GitHub org/user names are not lowercase by rule.
+      - name: Compute image name
+        id: image
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          # The raw version is what makes an untagged default-branch build addressable by the same
+          # number the release and the installers carry.
+          tags: |
+            type=raw,value=${{ needs.version.outputs.value }}
+            type=ref,event=branch
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=DevStudio
+            org.opencontainers.image.description=Self-hosted console for running Claude Code and OpenAI Codex agents side by side
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          build-args: |
+            VERSION=${{ needs.version.outputs.value }}
+          platforms: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # The .NET build stage runs natively and cross-compiles, so arm64 costs
+          # a publish rather than a fully emulated SDK run.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published image"
+            echo
+            echo "${{ steps.meta.outputs.tags }}"
+            echo
+            echo "Digest: ${{ steps.build.outputs.digest }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  installers:
+    name: ${{ matrix.name }}
+    needs: [test, version]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+
+    strategy:
+      # One platform failing should not hide whether the others packaged.
+      fail-fast: false
+      matrix:
+        include:
+          # Windows gets the WinForms shell — WebView2, and a tray icon. macOS and Linux get the
+          # Photino shell, which wraps WKWebView and WebKitGTK.
+          - name: Windows (x64)
+            os: windows-latest
+            rid: win-x64
+            shell-project: src/DevStudio.Desktop/DevStudio.Desktop.csproj
+            main-exe: DevStudio.Desktop.exe
+            channel: win-x64
+            icon: src/DevStudio.Desktop/app.ico
+            extra-pack-args: --framework webview2
+
+          - name: macOS (Apple silicon)
+            os: macos-latest
+            rid: osx-arm64
+            shell-project: src/DevStudio.Desktop.Photino/DevStudio.Desktop.Photino.csproj
+            main-exe: devstudio
+            channel: osx-arm64
+            icon: artifacts/app.icns
+            extra-pack-args: --bundleId com.matthewratcliffe.devstudio
+
+          # macos-13 was retired in December 2025; macos-15-intel is the last x86_64 image
+          # Actions will offer, and it goes away in Fall 2027 with the architecture.
+          - name: macOS (Intel)
+            os: macos-15-intel
+            rid: osx-x64
+            shell-project: src/DevStudio.Desktop.Photino/DevStudio.Desktop.Photino.csproj
+            main-exe: devstudio
+            channel: osx-x64
+            icon: artifacts/app.icns
+            extra-pack-args: --bundleId com.matthewratcliffe.devstudio
+
+          - name: Linux (x64)
+            os: ubuntu-latest
+            rid: linux-x64
+            shell-project: src/DevStudio.Desktop.Photino/DevStudio.Desktop.Photino.csproj
+            main-exe: devstudio
+            channel: linux-x64
+            icon: src/DevStudio.Desktop.Photino/app.png
+            extra-pack-args: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      # Two self-contained publishes: the shell, and the same web app the container runs, nested in
+      # ./server where the shell looks for it. Neither needs .NET installed on the target machine.
+      - name: Publish the shell
+        run: >
+          dotnet publish ${{ matrix.shell-project }}
+          -c Release -r ${{ matrix.rid }} --self-contained
+          -p:Version=${{ needs.version.outputs.value }}
+          -o artifacts/publish
+
+      - name: Publish the server
+        run: >
+          dotnet publish src/DevStudio.Ui/DevStudio.Ui.csproj
+          -c Release -r ${{ matrix.rid }} --self-contained
+          -p:Version=${{ needs.version.outputs.value }}
+          -o artifacts/publish/server
+
+      # The publish is worthless if the UI came out inert, and that failure is silent at runtime.
+      - name: Verify the published output
+        shell: bash
+        run: |
+          for file in "artifacts/publish/${{ matrix.main-exe }}" \
+                      "artifacts/publish/server/wwwroot/_framework/blazor.web.js"; do
+            [ -f "$file" ] || { echo "FATAL: $file missing from the publish output"; exit 1; }
+          done
+
+      # The AppImage vpk builds mounts itself through FUSE.
+      - name: Install Linux packaging dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfuse2
+
+      # vpk only accepts .icns on macOS, and the shell ships a single square png, so build the
+      # iconset on the runner rather than checking a second copy of the same icon into the repo.
+      - name: Build the macOS icon
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          iconset=$(mktemp -d)/app.iconset
+          mkdir -p "$iconset"
+          for size in 16 32 128 256 512; do
+            sips -z $size $size src/DevStudio.Desktop.Photino/app.png --out "$iconset/icon_${size}x${size}.png" >/dev/null
+            sips -z $((size * 2)) $((size * 2)) src/DevStudio.Desktop.Photino/app.png --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+          done
+          mkdir -p artifacts
+          iconutil --convert icns "$iconset" --output artifacts/app.icns
+
+      - name: Install Velopack
+        shell: bash
+        run: |
+          dotnet tool install -g vpk
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Build installer and update packages
+        shell: bash
+        run: >
+          vpk pack
+          --packId devStudio
+          --packVersion ${{ needs.version.outputs.value }}
+          --packTitle devStudio
+          --packAuthors "Matthew Ratcliffe"
+          --packDir artifacts/publish
+          --mainExe ${{ matrix.main-exe }}
+          --icon ${{ matrix.icon }}
+          --channel ${{ matrix.channel }}
+          --outputDir artifacts/releases
+          ${{ matrix.extra-pack-args }}
+
+      # The whole output directory, not just the installer: the release job uploads it verbatim, and
+      # the update packages and the channel index beside them are what make the feed a feed.
+      - name: Upload the packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: devstudio-${{ matrix.channel }}
+          path: artifacts/releases
+          if-no-files-found: error
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "### ${{ matrix.name }} — devStudio ${{ needs.version.outputs.value }}" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          ls -lh artifacts/releases | awk 'NR>1 {print "- " $9 " (" $5 ")"}' >> "$GITHUB_STEP_SUMMARY"
+
+  # One job, one channel at a time. The release assets are also the update feed — an installed app
+  # reads its channel's index and packages straight off this release — and publishing them from the
+  # four platform jobs would have four runners racing to create the same release.
+  release:
+    name: Publish the release
+    needs: [version, installers]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install Velopack
+        run: |
+          dotnet tool install -g vpk
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Download the packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: devstudio-*
+          path: packages
+
+      # vpk creates the tag and the release on the first channel; --merge attaches the rest to it.
+      - name: Publish each channel
+        run: |
+          shopt -s nullglob
+          published=""
+          for dir in packages/devstudio-*/; do
+            channel=$(basename "$dir")
+            channel="${channel#devstudio-}"
+            echo "::group::$channel"
+            vpk upload github \
+              --outputDir "$dir" \
+              --repoUrl "${{ github.server_url }}/${{ github.repository }}" \
+              --token "${{ secrets.GITHUB_TOKEN }}" \
+              --channel "$channel" \
+              --tag "v${{ needs.version.outputs.value }}" \
+              --releaseName "devStudio ${{ needs.version.outputs.value }}" \
+              --merge \
+              --publish
+            echo "::endgroup::"
+            published="$published $channel"
+          done
+
+          # A platform can fail without failing the matrix, and a release missing the channel a user
+          # is on is a silent dead end for them, so name the ones that made it.
+          echo "### devStudio ${{ needs.version.outputs.value }}" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "Published channels:$published" >> "$GITHUB_STEP_SUMMARY"
+          [ -n "$published" ] || { echo "FATAL: no packages to publish"; exit 1; }
