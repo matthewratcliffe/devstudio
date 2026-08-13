@@ -13,7 +13,7 @@ internal static class Program
     {
         // Velopack's hooks run during install, update and uninstall, and it expects them before
         // anything else happens — a window drawn first is a window the installer has to fight.
-        VelopackApp.Build().Run();
+        VelopackApp.Build().SetLogger(UpdateLog.Instance).Run();
 
         using var instance = new Mutex(true, InstanceMutex, out var isOnlyInstance);
 

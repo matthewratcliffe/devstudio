@@ -90,18 +90,26 @@ jobs:
         with:
           fetch-depth: 0
 
-      # A tag is released as itself. Every other build on the default branch is released too, as
-      # <major>.<minor> of the newest tag with the run number as the patch — the run number only
-      # ever climbs, so each build outranks the last, and tagging v1.2.0 lifts the base so the
-      # builds after it stay ahead of it rather than dropping back underneath.
+      # A tag is released as itself. Every other build on the default branch is 1.0.<run number>:
+      # the run number only ever climbs, so each build outranks the last. A tag lifts the
+      # <major>.<minor> ahead of that — tagging v1.2.0 makes the builds after it 1.2.<run number>
+      # rather than dropping back underneath — but nothing can pull it below 1.0.
       - id: derive
         run: |
+          floor="1.0.0"
+
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             version="${GITHUB_REF#refs/tags/v}"
           else
             base=$(git tag --list 'v*.*.*' | sed 's/^v//' | sort -V | tail -1)
-            version="${base:-0.0.0}"
-            version="${version%.*}.$GITHUB_RUN_NUMBER"
+
+            # Tags below the floor are history — the 0.0.x builds this scheme replaced — and must
+            # not drag the version back down with them.
+            if [ -z "$base" ] || [ "$( { echo "$base"; echo "$floor"; } | sort -V | tail -1 )" = "$floor" ]; then
+              base="$floor"
+            fi
+
+            version="${base%.*}.$GITHUB_RUN_NUMBER"
 
             # A tag patched above the run number (v1.2.99 against run 42) would send the version
             # backwards and the update feed with it. Step the minor so it still climbs.
@@ -325,6 +333,18 @@ jobs:
         run: |
           dotnet tool install -g vpk
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      # Seeds the output directory with the packages already published for this channel, which is
+      # what makes vpk emit a delta alongside the full package. Without it every build ships a
+      # ~100 MB full package and an installed app has to pull the whole thing down in the background
+      # before it can update — a download that rarely survives to the end of a session. There is
+      # nothing to fetch for the first release on a channel, and that is not a failure.
+      - name: Fetch the published packages for delta generation
+        shell: bash
+        continue-on-error: true
+        run: |
+          mkdir -p artifacts/releases
+          vpk download github             --repoUrl "${{ github.server_url }}/${{ github.repository }}"             --token "${{ secrets.GITHUB_TOKEN }}"             --channel ${{ matrix.channel }}             --outputDir artifacts/releases             || echo "Nothing published for ${{ matrix.channel }} yet; this build ships a full package only."
 
       - name: Build installer and update packages
         shell: bash
