@@ -24,6 +24,17 @@ public sealed class UpdateWatcher : IDisposable
     // between answers, not between a dropped connection and trying again.
     private static readonly TimeSpan AfterFailure = TimeSpan.FromMinutes(15);
 
+    // Quitting gets one last look, because a session shorter than the first check would otherwise
+    // never see an update at all. Somebody is waiting on this, so both halves are on a short leash
+    // and the whole thing is abandoned rather than allowed to hold the window open.
+    private static readonly TimeSpan ExitCheck = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ExitDownload = TimeSpan.FromSeconds(20);
+
+    // Deltas are a few hundred kilobytes and arrive inside the budget. A full package is ~100 MB and
+    // does not, so it is left to the background loop on a later session rather than started here and
+    // thrown away half-finished.
+    private const long LargestExitDownload = 25 * 1024 * 1024;
+
     private readonly CancellationTokenSource _stopping = new();
     private readonly UpdateManager? _manager;
 
@@ -134,6 +145,66 @@ public sealed class UpdateWatcher : IDisposable
             return null;
         }
     }
+
+    /// <summary>
+    /// One bounded check on the way out, for the session that ends before the background loop has
+    /// had a chance to say anything. Only a delta is worth fetching while somebody waits to quit;
+    /// anything larger, slower or failed is abandoned and the app closes as if this never ran.
+    /// </summary>
+    /// <returns>True when something is now downloaded and ready for <see cref="ApplyWhenClosed"/>.</returns>
+    public async Task<bool> PrepareForExitAsync()
+    {
+        if (_manager is not { IsInstalled: true })
+            return false;
+
+        // Already downloaded by the background loop; the handover is all that is left to do.
+        if (_downloaded is not null)
+            return true;
+
+        try
+        {
+            // CheckForUpdatesAsync takes no token, so the wait is bounded rather than the call. The
+            // process is exiting either way — an orphaned check costs nothing.
+            using var checking = new CancellationTokenSource(ExitCheck);
+            var update = await _manager.CheckForUpdatesAsync().WaitAsync(checking.Token);
+
+            if (update is null)
+                return false;
+
+            var size = update.DeltasToTarget.Sum(asset => asset.Size);
+
+            if (update.DeltasToTarget.Length == 0 || size > LargestExitDownload)
+            {
+                UpdateLog.Instance.Write(
+                    $"{update.TargetFullRelease.Version} needs a full package; leaving it for a later session.");
+
+                return false;
+            }
+
+            UpdateLog.Instance.Write($"Downloading {update.TargetFullRelease.Version} before closing.");
+
+            using var downloading = new CancellationTokenSource(ExitDownload);
+            await _manager.DownloadUpdatesAsync(update, cancelToken: downloading.Token);
+
+            _downloaded = update;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // Out of time, offline, or the download did not finish. Quitting must not wait on any of
+            // it, and the background loop picks the same update up on the next launch.
+            UpdateLog.Instance.Write($"No update prepared on the way out: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Blocking form of <see cref="PrepareForExitAsync"/> for the window-closing path, which cannot
+    /// await. Runs off the UI thread so nothing inside it can post a continuation back to the thread
+    /// this is blocking, and gives up rather than holding a quit open on a call that never returns.
+    /// </summary>
+    public void PrepareForExit() =>
+        Task.Run(PrepareForExitAsync).Wait(ExitCheck + ExitDownload + TimeSpan.FromSeconds(5));
 
     /// <summary>
     /// Hands the downloaded version to the updater, which waits for this process to exit and then

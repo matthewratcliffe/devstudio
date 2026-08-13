@@ -128,6 +128,17 @@ internal sealed class MainForm : Form
         }
 
         _tray.Visible = false;
+
+        // Every real exit lands here — the tray's Quit, a Windows shutdown, a sign-out, the task
+        // manager. The handover belongs on this path rather than on Quit alone: an update handed
+        // over nowhere is an update that re-downloads itself every launch and never installs.
+        //
+        // A session can easily end before the background loop has looked even once, so closing gets
+        // its own bounded check first. It is capped at a delta and half a minute; the window is
+        // already going away, and the wait cursor is the only sign anything happened.
+        UseWaitCursor = true;
+        _updates.PrepareForExit();
+        _updates.ApplyWhenClosed();
         _updates.Dispose();
         base.OnFormClosing(e);
     }
@@ -155,9 +166,8 @@ internal sealed class MainForm : Form
         _quitting = true;
 
         // Anything already downloaded is installed after this process exits, so the next launch is
-        // the new version and no running agent was interrupted to get there.
-        _updates.ApplyWhenClosed();
-
+        // the new version and no running agent was interrupted to get there. OnFormClosing does the
+        // handover, so it happens whether or not the exit came through here.
         Close();
         Application.Exit();
     }
