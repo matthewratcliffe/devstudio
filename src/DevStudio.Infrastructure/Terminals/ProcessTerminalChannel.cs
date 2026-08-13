@@ -11,13 +11,17 @@ namespace DevStudio.Infrastructure.Terminals;
 internal sealed class ProcessTerminalChannel : ITerminalChannel
 {
     private readonly Process _process;
+    private readonly bool _usePseudoTerminal;
 
     public ProcessTerminalChannel(
         string fileName,
         IReadOnlyList<string> arguments,
         string workingDirectory,
-        IReadOnlyDictionary<string, string> environment)
+        IReadOnlyDictionary<string, string> environment,
+        bool usePseudoTerminal = true)
     {
+        _usePseudoTerminal = usePseudoTerminal && !OperatingSystem.IsWindows();
+
         var info = new ProcessStartInfo
         {
             WorkingDirectory = workingDirectory,
@@ -30,7 +34,7 @@ internal sealed class ProcessTerminalChannel : ITerminalChannel
             StandardErrorEncoding = Encoding.UTF8,
         };
 
-        if (OperatingSystem.IsWindows())
+        if (!_usePseudoTerminal)
         {
             info.FileName = fileName;
 
@@ -55,8 +59,11 @@ internal sealed class ProcessTerminalChannel : ITerminalChannel
         _process.Exited += (_, _) => Exited?.Invoke();
     }
 
-    /// <summary>Unix gets a pty from <c>script</c>; Windows here does not, which is the whole reason ConPTY exists.</summary>
-    public bool IsPseudoTerminal => !OperatingSystem.IsWindows();
+    /// <summary>
+    /// Unix gets a pty from <c>script</c>; Windows here does not, which is the whole reason ConPTY
+    /// exists. A caller that asked for pipes gets pipes on both.
+    /// </summary>
+    public bool IsPseudoTerminal => _usePseudoTerminal;
 
     public IReadOnlyList<StreamReader> Readers => [_process.StandardOutput, _process.StandardError];
 

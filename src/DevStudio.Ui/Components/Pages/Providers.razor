@@ -602,7 +602,14 @@
                 ["CODEX_HOME"] = Path.Combine(home, ".codex"),
             };
 
-        _session = await Terminals.StartAsync(fileName, arguments, home, environment);
+        // A token flow is not interactive: the CLI reads standard input to the end and needs to see
+        // it close, which a pseudo-terminal cannot do. Everything else wants the terminal.
+        _session = await Terminals.StartAsync(
+            fileName,
+            arguments,
+            home,
+            environment,
+            preferPseudoTerminal: !method.NeedsSecret());
         _terminalAccount = account;
         _terminalMethod = method;
         _secret = string.Empty;
