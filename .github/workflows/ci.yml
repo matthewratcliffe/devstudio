@@ -179,6 +179,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=DevStudio
             org.opencontainers.image.description=Self-hosted console for running Claude Code and OpenAI Codex agents side by side
+            org.opencontainers.image.licenses=MIT
 
       - name: Build and push
         id: build

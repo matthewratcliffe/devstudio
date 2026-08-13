@@ -2,7 +2,7 @@
 
 > A self-hosted console that runs coding CLIs — Claude Code, OpenAI Codex, and any other CLI already installed and signed in — as configurable agents. Concurrent sessions, a git worktree each, schedules and workflows. There is no API integration: every agent runs the real CLI as a child process, so the only credential involved is the login completed in the web UI.
 
-devStudio is a personal project published by Matt Ratcliffe, with the full source on GitHub. It runs either as a container
+devStudio is free and open source under the MIT licence, published by Matt Ratcliffe. It runs either as a container
 (`ghcr.io/matthewratcliffe/devstudio`) or as an installed desktop app on Windows, macOS and Linux.
 State is JSON on a volume — there is no database, and no account to create.
 
@@ -39,3 +39,4 @@ typed by hand. The orchestrator arranges the work and keeps the transcript; the 
 
 - [Source and full documentation](https://github.com/matthewratcliffe/devstudio): the README covers configuration, instruction layering, team settings sync, the MCP surface and what changes when running without a container.
 - [Contributing](https://matthewratcliffe.github.io/devstudio/#contribute): issues, pull requests and forks are all welcome; adding a CLI provider is a form rather than a patch.
+- [Licence](https://github.com/matthewratcliffe/devstudio/blob/main/LICENSE): MIT.

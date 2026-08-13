@@ -766,5 +766,5 @@ docker-compose.yml   the supported way to run it
 
 ## Licence
 
-No licence file yet — add one before publishing the repository, and update the
-`org.opencontainers.image.licenses` label in `.github/workflows/ci.yml` to match.
+[MIT](LICENSE). Use it, fork it, ship it — the only condition is that the copyright
+notice travels with it.
