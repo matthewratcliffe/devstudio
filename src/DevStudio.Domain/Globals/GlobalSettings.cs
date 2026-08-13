@@ -19,6 +19,13 @@ public sealed class GlobalSettings : Entity
     public string Instructions { get; set; } = string.Empty;
 
     /// <summary>
+    /// Standards imported from the team settings repository, applied above <see cref="Instructions"/>
+    /// so the local ones read as the narrower rule. Rewritten by every sync, which is why they are
+    /// kept apart rather than merged into the field somebody edits by hand.
+    /// </summary>
+    public string TeamInstructions { get; set; } = string.Empty;
+
+    /// <summary>
     /// Reference material staged into every workspace as <c>./global-files</c>: a setup guide, a
     /// coding standards document, an architecture note.
     /// </summary>

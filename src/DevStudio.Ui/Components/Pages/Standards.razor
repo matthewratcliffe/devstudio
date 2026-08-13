@@ -21,6 +21,19 @@
     }
 </div>
 
+@if (!string.IsNullOrWhiteSpace(_settings.TeamInstructions))
+{
+    <div class="card" style="margin-bottom:1.2rem">
+        <div class="section-tag">From the team settings repository</div>
+        <p class="small">
+            Applied above your own instructions in every session, so what you write below reads as the
+            narrower rule. Edit these in the repository — the next sync writes this copy back over.
+            <a href="/team-settings">Team settings</a>
+        </p>
+        <pre class="small" style="white-space:pre-wrap">@_settings.TeamInstructions</pre>
+    </div>
+}
+
 <div class="grid grid-2">
     <div class="card">
         <div class="section-tag">Standing instructions</div>

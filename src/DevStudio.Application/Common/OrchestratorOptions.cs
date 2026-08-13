@@ -26,6 +26,15 @@ public sealed class OrchestratorOptions
     public List<string> LocalRepositoryRoots { get; set; } = [];
 
     /// <summary>
+    /// Offers every drive on the machine — <c>C:\</c>, <c>D:\</c>, and so on — in the folder picker,
+    /// on top of <see cref="LocalRepositoryRoots"/>. Right for the desktop build, which is running as
+    /// the user and has no container boundary to protect: the repository they want to attach is as
+    /// likely to be on another drive as under their home directory. Left false for the container,
+    /// where the only reachable paths should be the bind mounts the operator chose to declare.
+    /// </summary>
+    public bool AllowAllLocalDrives { get; set; }
+
+    /// <summary>
     /// Folder, created beside a host-mounted repository, that worktrees for it are cut into. They
     /// have to stay on the mount or the IDE cannot see them; beside the repo rather than inside it
     /// so nothing shows up as untracked in the checkout being edited.

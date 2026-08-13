@@ -1,5 +1,6 @@
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
+using DevStudio.Application.Teams;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Mcp;
 using DevStudio.Domain.Projects;
@@ -20,6 +21,7 @@ using DevStudio.Infrastructure.Providers.Acp;
 using DevStudio.Infrastructure.Providers.OpenAi;
 using DevStudio.Infrastructure.Scheduling;
 using DevStudio.Infrastructure.Seed;
+using DevStudio.Infrastructure.Teams;
 using DevStudio.Infrastructure.Terminals;
 using DevStudio.Infrastructure.Workspaces;
 using Microsoft.Extensions.Configuration;
@@ -97,6 +99,10 @@ public static class DependencyInjection
         services.AddSingleton<IWorkspaceService, WorkspaceService>();
         services.AddSingleton<IFileLibraryService, FileLibraryService>();
         services.AddSingleton<IWorkspaceFileService, WorkspaceFileService>();
+
+        // Shared definitions read out of a git repository, and the catch-up import on start.
+        services.AddSingleton<ITeamSettingsService, TeamSettingsService>();
+        services.AddHostedService<TeamSyncHostedService>();
 
         services.AddSingleton<SchedulerHostedService>();
         services.AddHostedService(sp => sp.GetRequiredService<SchedulerHostedService>());

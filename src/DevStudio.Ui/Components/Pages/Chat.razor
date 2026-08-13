@@ -6,6 +6,11 @@
 @inject IEntityStore<McpServer> McpStore
 @inject IEntityStore<GitRepository> RepositoryStore
 @inject IWorkspaceFileService WorkspaceFiles
+@inject IEntityStore<Agent> AgentStore
+@inject IEntityStore<CliProvider> CliProviderStore
+@inject IProviderCliRegistry Clis
+@inject IQuickChatService QuickChats
+@inject Microsoft.Extensions.Options.IOptions<OrchestratorOptions> Options
 @inject IJSRuntime Js
 @inject NavigationManager Nav
 
@@ -161,7 +166,27 @@ else
             <div class="section-tag">Session</div>
             <dl class="kv">
                 <dt>Agent</dt><dd>@_session.AgentName</dd>
-                <dt>Provider</dt><dd>@_session.Provider</dd>
+                <dt>Provider</dt>
+                <dd>
+                    @if (_agent?.IsQuickChat == true)
+                    {
+                        <select value="@_selectedCli" @onchange="SwitchProviderAsync">
+                            @foreach (var cli in _clis)
+                            {
+                                <option value="@Key(cli)">@cli.DisplayName</option>
+                            }
+                        </select>
+                        <span class="hint">
+                            A new CLI cannot resume the conversation the old one was holding, so it picks
+                            the work up from the rolling summary rather than that history.
+                        </span>
+                    }
+                    else
+                    {
+                        <text>@(_session.CliProviderName ?? _session.Provider.ToString())</text>
+                        <span class="hint">Fixed by the agent. A quick chat can change CLI mid-conversation.</span>
+                    }
+                </dd>
                 <dt>Permissions</dt>
                 <dd>
                     <select value="@_session.PermissionMode" @onchange="SetPermissionModeAsync">
@@ -173,6 +198,7 @@ else
                     <span class="hint">Applies from your next message.</span>
                 </dd>
                 <dt>Account</dt><dd>@(_session.AccountName ?? "default")</dd>
+                <dt>Model</dt><dd>@(_session.ModelInUse ?? _session.Model ?? _agent?.Model ?? "CLI default")</dd>
                 <dt>Turns</dt><dd>@_session.TurnCount</dd>
                 <dt>Trigger</dt><dd>@_session.Trigger</dd>
                 <dt>Directory</dt><dd>@_session.WorkingDirectory</dd>
@@ -183,6 +209,21 @@ else
             {
                 <div class="toast err" style="margin-top:0.8rem">@_session.LastError</div>
             }
+
+            <div class="divider"></div>
+            <div class="section-tag">Model</div>
+            <ModelPicker Value="_model" ValueChanged="SetModelAsync" Models="_models" Efforts="_efforts"
+                         DefaultLabel="Agent default" />
+            <div class="mono-dim">
+                Applies from your next message.
+                @if (OpeningTurns > 0)
+                {
+                    <text>
+                        @_session.TurnCount turn@(_session.TurnCount == 1 ? "" : "s") done, so the opening
+                        model @(HandoverPending ? "still covers the next one" : "has already handed over").
+                    </text>
+                }
+            </div>
 
             @if (!string.IsNullOrWhiteSpace(_session.Summary))
             {
@@ -331,6 +372,13 @@ else
     private IReadOnlyList<McpServer> _mcpServers = [];
     private IReadOnlyList<WorkspaceFile> _files = [];
     private IReadOnlyList<GitRepository> _repositories = [];
+    private IReadOnlyList<IProviderCli> _clis = [];
+    private IReadOnlyList<CliProvider> _cliProviders = [];
+    private IReadOnlyList<string> _models = [];
+    private IReadOnlyList<string> _efforts = [];
+    private Agent? _agent;
+    private SessionModelSettings _model = new();
+    private string _selectedCli = string.Empty;
     private bool _showAllFiles;
     private bool _shouldScroll;
     private bool _forceScroll;
@@ -353,8 +401,27 @@ else
     {
         _mcpServers = (await McpStore.GetAllAsync()).Where(s => s.Enabled).ToList();
         _repositories = await RepositoryStore.GetAllAsync();
+        _clis = await Clis.GetAllAsync();
+        _cliProviders = await CliProviderStore.GetAllAsync();
         _session = await Sessions.GetAsync(SessionId);
         _notes = _session?.Notes ?? string.Empty;
+
+        if (_session is not null)
+        {
+            // The agent decides what this panel may offer: only a quick chat can change CLI, and the
+            // model fields fall back to whatever the agent itself chose.
+            _agent = await AgentStore.GetAsync(_session.AgentId);
+            _selectedCli = KeyOf(_session);
+            _model = new SessionModelSettings(
+                _session.Model,
+                _session.Effort,
+                _session.OpeningModel,
+                _session.OpeningEffort,
+                _session.OpeningTurns);
+
+            LoadModelChoices();
+        }
+
         await RefreshFilesAsync();
         _shouldScroll = true;
 
@@ -543,6 +610,85 @@ else
 
         await Sessions.ResolveApprovalAsync(_session.Id, approval.Id, allow: false);
         Layout.Notify("Left that one blocked.", "ok");
+    }
+
+    /// <summary>Built-ins are keyed by provider; custom CLIs by their definition id.</summary>
+    private static string Key(IProviderCli cli) =>
+        cli.DefinitionId is { Length: > 0 } id ? $"custom:{id}" : cli.Provider.ToString();
+
+    private static string KeyOf(ChatSession session) =>
+        session.CliProviderId is { Length: > 0 } id ? $"custom:{id}" : session.Provider.ToString();
+
+    private void LoadModelChoices()
+    {
+        if (_session is null)
+            return;
+
+        _models = ProviderModels.Models(_session.Provider, _session.CliProviderId, Options.Value, _cliProviders);
+        _efforts = ProviderModels.Efforts(_session.Provider, _session.CliProviderId, Options.Value, _cliProviders);
+    }
+
+    private int OpeningTurns => _model.OpeningTurns ?? _agent?.OpeningTurns ?? 0;
+
+    /// <summary>True while the opening model still covers the turn about to be sent.</summary>
+    private bool HandoverPending =>
+        _session is not null && _agent is not null && ModelSchedule.For(_agent, _session).IsOpening;
+
+    /// <summary>
+    /// Moves a quick chat onto another CLI from the next turn on. A session belonging to a configured
+    /// agent is refused by the service, which is where that rule belongs.
+    /// </summary>
+    private async Task SwitchProviderAsync(ChangeEventArgs args)
+    {
+        if (_session is null)
+            return;
+
+        var key = args.Value?.ToString() ?? string.Empty;
+        var (provider, cliProviderId) = key.StartsWith("custom:", StringComparison.Ordinal)
+            ? (AiProvider.Custom, key["custom:".Length..])
+            : (Enum.TryParse<AiProvider>(key, out var parsed) ? parsed : _session.Provider, (string?)null);
+
+        try
+        {
+            _session = await QuickChats.SwitchProviderAsync(_session.Id, provider, cliProviderId);
+            _agent = await AgentStore.GetAsync(_session.AgentId);
+            _selectedCli = KeyOf(_session);
+
+            // Another CLI offers other models, and a name from the one being left would be passed
+            // straight through and rejected.
+            LoadModelChoices();
+            await SetModelAsync(new SessionModelSettings(
+                Keep(_model.Model, _models),
+                Keep(_model.Effort, _efforts),
+                Keep(_model.OpeningModel, _models),
+                Keep(_model.OpeningEffort, _efforts),
+                _model.OpeningTurns));
+
+            Layout.Notify($"Now talking to {_session.CliProviderName ?? _session.Provider.ToString()} — from your next message.", "ok");
+        }
+        catch (Exception ex)
+        {
+            // Put the select back, so it is not showing a CLI the session is not using.
+            _selectedCli = KeyOf(_session);
+            Layout.Notify(ex.Message, "err");
+        }
+    }
+
+    private static string? Keep(string? value, IReadOnlyList<string> offered) =>
+        value is not null && offered.Contains(value) ? value : null;
+
+    /// <summary>
+    /// Records the model choices for this conversation. Saved as they are made, like the permission
+    /// mode beside them, and read at the start of the next turn.
+    /// </summary>
+    private async Task SetModelAsync(SessionModelSettings model)
+    {
+        if (_session is null)
+            return;
+
+        _model = model;
+        model.ApplyTo(_session);
+        await SessionStore.UpsertAsync(_session);
     }
 
     private async Task SaveNotesAsync()

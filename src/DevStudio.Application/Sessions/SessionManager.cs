@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using DevStudio.Application.Abstractions;
+using DevStudio.Application.Agents;
 using DevStudio.Application.Common;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Projects;
@@ -105,6 +106,10 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             Status = SessionStatus.Starting,
         };
 
+        // Applied before the first turn is queued, or an opening model chosen in the chat would miss
+        // the very turn it was chosen for.
+        request.Model?.ApplyTo(session);
+
         SessionWorkspace workspace;
         if (!string.IsNullOrWhiteSpace(request.WorkingDirectoryOverride))
         {
@@ -186,6 +191,9 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             CliProviderId = project.CliProviderId,
             Model = agent.Model,
             Effort = agent.Effort,
+            OpeningModel = agent.OpeningModel,
+            OpeningEffort = agent.OpeningEffort,
+            OpeningTurns = agent.OpeningTurns,
             SystemPrompt = agent.SystemPrompt,
             DefaultPrompt = agent.DefaultPrompt,
             PermissionMode = agent.PermissionMode,
@@ -557,13 +565,18 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             var account = await _accounts.ResolveAsync(agent, session.ProjectId, turnCts.Token);
             session.AccountId = account.AccountId;
             session.AccountName = account.Name;
+            // The opening turns of a session can run on a different model from the rest, so this is
+            // resolved per turn rather than once when the session started.
+            var choice = ModelSchedule.For(agent, session);
+            session.ModelInUse = choice.Model;
+
             var request = new TurnRequest
             {
                 Prompt = effectivePrompt,
                 WorkingDirectory = session.WorkingDirectory,
                 PermissionMode = session.PermissionMode,
-                Model = agent.Model,
-                Effort = agent.Effort,
+                Model = choice.Model,
+                Effort = choice.Effort,
                 SystemPrompt = systemPrompt,
                 ResumeSessionId = session.ProviderSessionId,
                 HomeDirectory = account.HomePath,
@@ -723,13 +736,17 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
 
             var summariser = await _clis.ResolveAsync(live.Agent.Provider, live.Agent.CliProviderId, cts.Token);
 
+            // Whatever the conversation is running on now, which after a handover is the cheaper
+            // model — right for a summary.
+            var choice = ModelSchedule.For(live.Agent, session);
+
             await foreach (var evt in summariser.RunTurnAsync(new TurnRequest
             {
                 Prompt = instruction,
                 WorkingDirectory = session.WorkingDirectory,
                 PermissionMode = PermissionMode.Plan,
-                Model = live.Agent.Model,
-                Effort = live.Agent.Effort,
+                Model = choice.Model,
+                Effort = choice.Effort,
                 ResumeSessionId = session.ProviderSessionId,
                 HomeDirectory = account.HomePath,
                 Environment = live.Agent.Environment,

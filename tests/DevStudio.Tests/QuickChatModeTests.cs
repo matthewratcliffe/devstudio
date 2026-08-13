@@ -1,4 +1,5 @@
 using DevStudio.Application.Abstractions;
+using DevStudio.Application.Agents;
 using DevStudio.Application.Common;
 using DevStudio.Application.Sessions;
 using DevStudio.Domain.Agents;
@@ -15,14 +16,19 @@ public class QuickChatModeTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "devstudio-quick-" + Guid.NewGuid().ToString("n"));
     private readonly RecordingSessions _sessions = new();
     private readonly QuickChatService _service;
+    private readonly IEntityStore<Agent> _agents;
 
     public QuickChatModeTests()
     {
-        var agents = new JsonEntityStore<Agent>(
+        _agents = new JsonEntityStore<Agent>(
             Options.Create(new OrchestratorOptions { DataPath = _root }),
             NullLogger<JsonEntityStore<Agent>>.Instance);
 
-        _service = new QuickChatService(agents, new StubRegistry(), _sessions);
+        var sessions = new JsonEntityStore<ChatSession>(
+            Options.Create(new OrchestratorOptions { DataPath = _root }),
+            NullLogger<JsonEntityStore<ChatSession>>.Instance);
+
+        _service = new QuickChatService(_agents, new StubRegistry(), _sessions, sessions);
     }
 
     [Fact]
@@ -57,9 +63,53 @@ public class QuickChatModeTests : IDisposable
         Assert.Null(_sessions.Last!.PermissionMode);
     }
 
+    [Fact]
+    public async Task The_model_schedule_chosen_in_the_chat_reaches_the_session()
+    {
+        await _service.StartAsync(
+            AiProvider.Claude, null, "hello", null, null,
+            new SessionModelSettings("sonnet", "low", "fable", "high", 2));
+
+        var model = _sessions.Last!.Model;
+
+        Assert.Equal("fable", model!.OpeningModel);
+        Assert.Equal(2, model.OpeningTurns);
+    }
+
+    [Fact]
+    public async Task Changing_cli_mid_chat_drops_the_resume_id_the_old_one_owned()
+    {
+        var started = await _service.StartAsync(AiProvider.Claude, null, "hello");
+        started.ProviderSessionId = "claude-side-id";
+        _sessions.Store(started);
+
+        var switched = await _service.SwitchProviderAsync(started.Id, AiProvider.Codex, null);
+
+        Assert.Equal(AiProvider.Codex, switched.Provider);
+        Assert.Null(switched.ProviderSessionId);
+    }
+
+    [Fact]
+    public async Task A_configured_agent_keeps_the_cli_it_was_built_around()
+    {
+        var agent = await _agents.UpsertAsync(new Agent { Name = "Reviewer", Provider = AiProvider.Codex });
+        var session = new ChatSession { Id = "session-1", AgentId = agent.Id, Provider = AiProvider.Codex };
+        _sessions.Store(session);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.SwitchProviderAsync(session.Id, AiProvider.Claude, null));
+
+        Assert.Contains("Reviewer", error.Message);
+    }
+
     private sealed class RecordingSessions : ISessionManager
     {
+        private readonly Dictionary<string, ChatSession> _stored = [];
+
         public StartSessionRequest? Last { get; private set; }
+
+        /// <summary>Stands in for a session the manager is already holding.</summary>
+        public void Store(ChatSession session) => _stored[session.Id] = session;
 
         public IReadOnlyList<ChatSession> Live => [];
 
@@ -69,6 +119,7 @@ public class QuickChatModeTests : IDisposable
         {
             Last = request;
             var session = new ChatSession { AgentId = request.AgentId };
+            Store(session);
             SessionUpdated?.Invoke(session);
             return Task.FromResult(session);
         }
@@ -91,7 +142,7 @@ public class QuickChatModeTests : IDisposable
         public Task CancelAsync(string sessionId) => Task.CompletedTask;
 
         public Task<ChatSession?> GetAsync(string sessionId, CancellationToken ct = default) =>
-            Task.FromResult<ChatSession?>(null);
+            Task.FromResult(_stored.TryGetValue(sessionId, out var session) ? session : null);
 
         public Task<IReadOnlyList<ChatSession>> GetAllAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<ChatSession>>([]);

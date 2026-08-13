@@ -13,6 +13,13 @@ public sealed class Workflow : Entity
     /// <summary>Default project for every step that does not name its own.</summary>
     public string? ProjectId { get; set; }
     public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Path, relative to the team settings repository, of the file this was imported from. Set means
+    /// the repository owns it: the next sync rewrites it, and deleting the file deletes it. Null is a
+    /// local definition, which no sync ever touches.
+    /// </summary>
+    public string? TeamSourcePath { get; set; }
 }
 
 public sealed class WorkflowInput

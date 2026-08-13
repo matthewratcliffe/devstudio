@@ -56,6 +56,16 @@ public class DesktopEnvironmentTests
     }
 
     [Fact]
+    public void Every_drive_is_browsable_because_checkouts_are_not_all_under_the_home_directory()
+    {
+        var environment = DesktopPaths.ServerEnvironment(7080);
+
+        // The container leaves this off: there, the only reachable paths should be the bind mounts the
+        // operator declared. A desktop install is already running as the user.
+        Assert.Equal("true", environment["Orchestrator__AllowAllLocalDrives"]);
+    }
+
+    [Fact]
     public void State_is_kept_out_of_the_install_directory()
     {
         // Every update installs a new copy of the application and deletes the old one. State kept

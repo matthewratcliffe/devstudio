@@ -17,6 +17,8 @@ only credential involved is the login you complete in the web UI.
 | **Agents** | Any number, each bound to `claude`, `codex` or a CLI you define yourself, with its own system prompt, model, permission mode, skills and MCP servers. |
 | **Bring your own CLI** | Describe any installed, already-signed-in CLI on the **CLI providers** page — executable, argument template, output format, sign-in command — and it becomes an agent provider. No code change, no API key. |
 | **Concurrent chats** | Sessions run in parallel up to a configurable cap. Each session queues its own turns, so you can keep typing while an agent is working. |
+| **Team settings** | One git repository holding the team's agents, workflows, skills, schedules and standards. Point every install at it and they all get the same definitions, reviewed and versioned like code instead of retyped on each machine. Anything you make in the UI stays local and is never touched by a sync ([how](#team-settings)). |
+| **Model handover** | An agent, or one chat, can open on a strong model and hand over to a cheaper one after N turns — `fable` at high effort to work the plan out, `sonnet` at low to carry it out. |
 | **Standards** | Global instructions and reference files — setup notes, coding standards — that every agent inherits, staged into each workspace as `./global-files`. |
 | **Projects** | Instructions plus uploaded files that reach every agent, session, workflow and schedule in the project. Files are staged into `./project-files` in the workspace. Also where you set the account and the summarisation policy. |
 | **Guidance** | Steer an agent that is already working, instead of queueing a turn behind it. Optionally interrupt the turn in flight so the steer lands now. |
@@ -25,9 +27,9 @@ only credential involved is the login you complete in the web UI.
 | **Workflows** | Ordered steps with a shared run context: every finished step publishes its output as `{{steps.step-name}}`, readable by *all* later steps. Steps sharing an order run at the same time. |
 | **Scheduler** | Cron expressions, plain timers, or manual-only saved runs — targeting an agent or a workflow, optionally inside a project folder. |
 | **Repositories** | Clone repos from the UI (or pick from `gh repo list`), and cut a fresh git worktree per session so parallel agents never collide. |
-| **Your own checkout** | Bind mount a folder from the host and attach it from the UI ([how](#working-on-the-code-your-ide-has-open)). Agents work in the same files your IDE has open, in worktrees cut beside the checkout so you can see them. |
+| **Your own checkout** | Bind mount a folder from the host and attach it from the UI ([how](#working-on-the-code-your-ide-has-open)); the desktop build browses every drive on the machine instead. Agents work in the same files your IDE has open, in worktrees cut beside the checkout so you can see them. |
 | **GitHub and GitLab** | `gh` and `glab` both ship in the image and share the container login, so agents can open pull or merge requests and read issues. A project picks one forge; it can still have several repositories from it. Set `Orchestrator__GitLabHost` (or `GitHubHost`) for a self-managed instance. |
-| **Quick chat** | A conversation with no project and no agent — pick a CLI and talk. Read-only, in a scratch directory. |
+| **New chat** | A conversation with no project and no agent: type and send. The CLI, permission mode, model and MCP servers sit on the right of the chat and stay changeable once it is running — including swapping CLI mid-conversation. Read-only by default, in a scratch directory. |
 | **Output files** | Everything an agent writes in its workspace is listed in the chat, with images previewed inline and every file downloadable. |
 | **Skills** | Reusable instruction files, written to `.claude/skills/<slug>/SKILL.md` (and mirrored to `AGENTS.orchestrator.md` for Codex) before a session starts. |
 | **MCP — both directions** | Register MCP servers and attach them to agents (`.mcp.json` per workspace), **and** the orchestrator exposes its own MCP server at `/mcp` so agents can list sessions, read another agent's transcript, steer a run, leave notes, start sessions and run workflows. HTTP servers can authenticate with an OAuth client-credentials grant, refreshed automatically, or a pasted bearer token. **Test** connects like a CLI would and lists the tools the server actually offers. Servers attach to agents, and a chat — including a quick chat — can carry extra servers of its own, applied from its next turn. The built-in orchestrator entry cannot be deleted and is restored on start if it goes missing. |
@@ -132,7 +134,7 @@ devstudio --update        # install a waiting update now instead of on the next 
 
 | | Container | Desktop |
 | --- | --- | --- |
-| Reaching your code | A bind mount, attached from the UI | Every repository under your home directory is already attachable |
+| Reaching your code | A bind mount, attached from the UI | Every drive on the machine is browsable — `C:`, `D:`, network drives — opening on your home directory |
 | State | `devstudio-data` volume | `%LOCALAPPDATA%\devStudio-data`, `~/Library/Application Support/devStudio`, `~/.local/share/devStudio` |
 | CLI logins | The `devstudio-home` volume, separate from yours | Your real `~/.claude` and `~/.codex` — the logins you already have |
 | Sandbox | The container is the boundary, so the CLIs are told not to build their own | No container, so the CLIs keep their own: codex runs `workspace-write`, claude keeps its bash sandbox |
@@ -492,11 +494,58 @@ Model, thinking level and base branch are all dropdowns rather than free text:
 - **Base branch** is read live from the selected repository with `git for-each-ref`, and falls back
   to a text box if the repository cannot be listed.
 
+## Team settings
+
+A team's agents, workflows, skills, schedules and standards belong in review and in version control
+like the rest of the work. Put them in a repository, point every install at it on the **Team settings**
+page, and each one imports the same definitions.
+
+Clone or attach the repository on the **Repositories** page first, then pick it, name the folder inside
+it (`devstudio` by default, blank for the root), and press **Write starter files** to get a working
+example of each format:
+
+```
+devstudio/
+  standards.md                      standing instructions for every session
+  agents/builder.json               an agent; skills are named, not referenced by id
+  skills/conventional-commits.md    frontmatter name/description/tags, markdown body
+  workflows/build-then-review.json  steps naming the agent that runs them
+  schedules/weekday-triage.json     cron, naming the agent or workflow it fires
+```
+
+Nothing in a file refers to an id, because a GUID this install happened to assign means nothing on
+anyone else's machine. Files name things — an agent by name, a skill by slug — and the import resolves
+them, reporting in the sync log anything it could not find.
+
+What a sync does, and deliberately does not do:
+
+- **Yours stay yours.** A definition made in the UI is local to that install and is never rewritten,
+  reordered or removed. The two sets sit side by side, and team ones carry a `team` pill.
+- **A second sync updates.** Every imported record remembers the file it came from, so re-importing
+  edits it in place instead of leaving a second copy.
+- **Deleting a file removes what it defined**, everywhere — that is the point of one repository owning
+  it. Local definitions are untouched by that pass.
+- **A schedule arrives paused** unless its file says `"enabled": true`, and turning one off here
+  survives every later sync. A repository should not be able to start work overnight on a machine
+  whose owner stopped it.
+- **A broken file loses only itself.** Malformed JSON is reported in the log and the rest of the commit
+  still imports.
+- **A schedule with no target here is refused** rather than imported looking healthy and firing at
+  nothing.
+
+**Pull before reading** fast-forwards the checkout first; if that fails — no network, local commits —
+the checkout is imported as it stands and the log says so. **Sync on start** runs the import in the
+background when the app boots, so a machine that has been switched off catches up by itself.
+
 ## Instruction layering
 
-Three layers reach an agent's system prompt, least specific first:
+Four layers reach an agent's system prompt, least specific first:
 
-    Standards (global)  →  Project instructions  →  Agent instructions
+    Team standards  →  Standards (global)  →  Project instructions  →  Agent instructions
+
+**Team standards** are the `standards.md` of the [team settings repository](#team-settings), shared by
+everyone pointed at it and rewritten by every sync — which is why they sit apart from the ones you
+edit here rather than being merged into them.
 
 **Standards** is the page for house rules that never change per project: how code should be written,
 how to commit, what to avoid. Files uploaded there are staged into `./global-files` in every
@@ -552,6 +601,7 @@ Everything is under the `Orchestrator` configuration section, overridable with
 | `WorktreesPath` | `/data/worktrees` | Per-session worktrees. |
 | `ScratchPath` | `/data/scratch` | Workspace for agents with no repo or project. |
 | `LocalRepositoryRoots` | *(empty)* | Host directories, bind mounted into the container, that may be browsed and attached as repositories. Empty turns the feature off. One indexed env var per root: `Orchestrator__LocalRepositoryRoots__0`, `__1`, … See [Working on the code your IDE has open](#working-on-the-code-your-ide-has-open). |
+| `AllowAllLocalDrives` | `false` | Offer every drive on the machine in the folder picker, on top of `LocalRepositoryRoots`. The desktop build sets this true: it runs as you and has no container boundary to protect. Left false in the container, where the only reachable paths should be the mounts somebody declared. |
 | `LocalWorktreesFolderName` | `.devstudio-worktrees` | Folder created beside an attached repo that its worktrees are cut into. |
 | `HomePath` | `/home/orchestrator` | The default account's home: `~/.claude`, `~/.codex` and the `gh` login. Extra accounts live under `<DataPath>/accounts/`. Empty means the real user home. |
 | `MaxConcurrentSessions` | `6` | Cap on agent turns running at once. |

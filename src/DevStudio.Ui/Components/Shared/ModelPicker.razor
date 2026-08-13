@@ -1,0 +1,131 @@
+@* Model choices for one conversation, including a handover from an opening model to a cheaper one. *@
+
+<div class="field">
+    <label>Model</label>
+    <select value="@(Value.Model ?? string.Empty)"
+            @onchange="e => EmitAsync(Value with { Model = Blank(e.Value?.ToString()) })">
+        <option value="">@DefaultLabel</option>
+        @foreach (var model in Models)
+        {
+            <option value="@model">@model</option>
+        }
+    </select>
+</div>
+
+<div class="field">
+    <label>Thinking level</label>
+    <select value="@(Value.Effort ?? string.Empty)"
+            @onchange="e => EmitAsync(Value with { Effort = Blank(e.Value?.ToString()) })">
+        <option value="">@DefaultLabel</option>
+        @foreach (var effort in Efforts)
+        {
+            <option value="@effort">@effort</option>
+        }
+    </select>
+</div>
+
+<label class="check">
+    <input type="checkbox" checked="@_handover" @onchange="ToggleAsync" />
+    <span>Open on a different model</span>
+</label>
+
+@if (_handover)
+{
+    <div class="field">
+        <label>Opening model</label>
+        <select value="@(Value.OpeningModel ?? string.Empty)"
+                @onchange="e => EmitAsync(Value with { OpeningModel = Blank(e.Value?.ToString()) })">
+            <option value="">Same as above</option>
+            @foreach (var model in Models)
+            {
+                <option value="@model">@model</option>
+            }
+        </select>
+    </div>
+
+    <div class="field">
+        <label>Opening thinking level</label>
+        <select value="@(Value.OpeningEffort ?? string.Empty)"
+                @onchange="e => EmitAsync(Value with { OpeningEffort = Blank(e.Value?.ToString()) })">
+            <option value="">Same as above</option>
+            @foreach (var effort in Efforts)
+            {
+                <option value="@effort">@effort</option>
+            }
+        </select>
+    </div>
+
+    <div class="field">
+        <label>Opening turns</label>
+        <input type="number" min="1" max="99" value="@(Value.OpeningTurns ?? 2)"
+               @onchange="e => EmitAsync(Value with { OpeningTurns = Turns(e.Value?.ToString()) })" />
+    </div>
+
+    <div class="mono-dim">@Summary</div>
+}
+
+@code {
+    /// <summary>The settings being edited. Null fields mean "whatever the agent says".</summary>
+    [Parameter] public SessionModelSettings Value { get; set; } = new();
+
+    [Parameter] public EventCallback<SessionModelSettings> ValueChanged { get; set; }
+
+    [Parameter] public IReadOnlyList<string> Models { get; set; } = [];
+    [Parameter] public IReadOnlyList<string> Efforts { get; set; } = [];
+
+    /// <summary>What the empty option falls back to — the CLI's own default, or the agent's choice.</summary>
+    [Parameter] public string DefaultLabel { get; set; } = "CLI default";
+
+    private bool _handover;
+
+    /// <summary>
+    /// Opened by settings that already have a handover, and left open once the box is ticked so the
+    /// fields do not vanish while they are being filled in.
+    /// </summary>
+    protected override void OnParametersSet() => _handover |= Value.OpeningTurns is > 0;
+
+    /// <summary>Two model fields and a turn count do not read as one rule, so it is spelled out.</summary>
+    private string Summary
+    {
+        get
+        {
+            var turns = Math.Max(1, Value.OpeningTurns ?? 0);
+            var opening = Describe(Value.OpeningModel ?? Value.Model, Value.OpeningEffort ?? Value.Effort);
+            var rest = Describe(Value.Model, Value.Effort);
+
+            return $"Turn{(turns == 1 ? "" : "s")} 1{(turns == 1 ? "" : $"–{turns}")} on {opening}, everything after on {rest}.";
+        }
+    }
+
+    private string Describe(string? model, string? effort)
+    {
+        var name = Blank(model) ?? DefaultLabel.ToLowerInvariant();
+        var level = Blank(effort);
+
+        return level is null ? name : $"{name} at {level}";
+    }
+
+    /// <summary>
+    /// Unticking clears the whole rule rather than leaving an opening model nothing reads, so what is
+    /// stored always matches what is on screen.
+    /// </summary>
+    private Task ToggleAsync(ChangeEventArgs args)
+    {
+        _handover = args.Value is true;
+
+        return _handover
+            ? EmitAsync(Value with { OpeningTurns = Value.OpeningTurns is > 0 ? Value.OpeningTurns : 2 })
+            : EmitAsync(Value with { OpeningModel = null, OpeningEffort = null, OpeningTurns = null });
+    }
+
+    private async Task EmitAsync(SessionModelSettings value)
+    {
+        Value = value;
+        await ValueChanged.InvokeAsync(value);
+    }
+
+    private static int? Turns(string? value) =>
+        int.TryParse(value, out var turns) && turns > 0 ? Math.Min(turns, 99) : null;
+
+    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+}

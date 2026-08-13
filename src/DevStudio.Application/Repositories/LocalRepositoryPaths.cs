@@ -53,8 +53,11 @@ public static class LocalRepositoryPaths
 
         foreach (var root in normalisedRoots)
         {
-            if (string.Equals(candidate, root, Comparison) ||
-                candidate.StartsWith(root + Path.DirectorySeparatorChar, Comparison))
+            // A filesystem root keeps its trailing separator, so appending another one would look for
+            // "C:\\" and match nothing.
+            var prefix = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
+
+            if (string.Equals(candidate, root, Comparison) || candidate.StartsWith(prefix, Comparison))
             {
                 resolved = candidate;
                 return true;
@@ -62,6 +65,47 @@ public static class LocalRepositoryPaths
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Every drive that is currently mounted and readable: <c>C:\</c>, <c>D:\</c> and any attached
+    /// removable or network drive on Windows, and the filesystem root elsewhere. Used as the root set
+    /// when <c>AllowAllLocalDrives</c> is on, so the picker can reach a repository wherever it sits.
+    /// Recomputed on each call rather than cached — drives come and go while the app is running.
+    /// </summary>
+    public static IReadOnlyList<string> DriveRoots()
+    {
+        var roots = new List<string>();
+
+        foreach (var drive in SafeDrives())
+        {
+            // An unformatted card reader or a disconnected network drive is listed by the OS but
+            // throws the moment anything looks inside it.
+            try
+            {
+                if (!drive.IsReady)
+                    continue;
+
+                roots.Add(Normalise(drive.RootDirectory.FullName));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+
+        return roots;
+    }
+
+    private static DriveInfo[] SafeDrives()
+    {
+        try
+        {
+            return DriveInfo.GetDrives();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
     }
 
     /// <summary>True for a work tree or a bare clone. `.git` is a file inside a worktree, not a directory.</summary>
