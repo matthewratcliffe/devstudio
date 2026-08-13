@@ -120,6 +120,20 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 
 /* -- Shell ---------------------------------------------------------------- */
 
+/* -- Booting -------------------------------------------------------------- */
+/* Covers the prerendered page while the circuit connects. It sits above everything and takes the
+   clicks, because underneath is a page that looks ready and cannot answer yet. */
+.booting {
+    position: fixed; inset: 0; z-index: 2000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.9rem;
+    background: var(--bg-0);
+}
+.booting-mark {
+    font-family: var(--font-mono); font-size: 1.4rem; letter-spacing: 0.04em;
+    background: var(--gradient); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.booting-note { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-2); }
+
 .shell { display: flex; min-height: 100vh; }
 
 .sidebar {

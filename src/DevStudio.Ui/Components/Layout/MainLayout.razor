@@ -3,6 +3,19 @@
 @inject ISessionManager Sessions
 @inject NavigationManager Nav
 
+@* Prerendering paints the real page before the circuit that carries every click exists, so for a
+   moment the UI looks finished and does nothing. RendererInfo.IsInteractive is false on that
+   prerender and true on the first render over the live circuit, which is exactly the window to
+   cover: hold the loading state until the app can actually answer. *@
+@if (!RendererInfo.IsInteractive)
+{
+    <div class="booting" role="status" aria-live="polite">
+        <div class="booting-mark">devStudio</div>
+        <div class="typing" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="booting-note">Connecting to the orchestrator</div>
+    </div>
+}
+
 <div class="shell">
     <NavMenu Open="_navOpen" LiveCount="_liveCount" OnNavigate="CloseNav" />
 
