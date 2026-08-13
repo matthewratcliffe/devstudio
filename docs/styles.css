@@ -53,6 +53,16 @@
     --mono: 'JetBrains Mono', 'Cascadia Code', ui-monospace, monospace;
     --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, serif;
 
+    /* Two faces, six sizes. Everything below body size picks one of these rather
+       than a number of its own — a page of 0.88s, 0.9s and 0.92s reads as several
+       typefaces even when it is only ever these two. */
+    --t-micro: 0.68rem;   /* eyebrow labels, tracked and uppercase */
+    --t-data:  0.72rem;   /* dense mono data — the session panes */
+    --t-ui:    0.78rem;   /* mono chrome: nav, buttons, commands, code blocks */
+    --t-label: 0.85rem;   /* mono row labels beside prose */
+    --t-small: 0.9rem;    /* small serif prose inside panels */
+    --t-card:  0.95rem;   /* mono card titles */
+
     --gutter: clamp(1.25rem, 5vw, 4.5rem);
     --measure: 62ch;
 }
@@ -94,7 +104,7 @@ code, kbd, .mono { font-family: var(--mono); }
 
 .tag {
     font-family: var(--mono);
-    font-size: 0.68rem;
+    font-size: var(--t-micro);
     font-weight: 500;
     letter-spacing: 0.18em;
     text-transform: uppercase;
@@ -129,7 +139,7 @@ code, kbd, .mono { font-family: var(--mono); }
     display: flex;
     gap: 1.25rem;
     font-family: var(--mono);
-    font-size: 0.8rem;
+    font-size: var(--t-ui);
 }
 
 .masthead nav a { color: var(--text-1); }
@@ -181,7 +191,7 @@ h1 .rule {
     border-radius: 10px;
     padding: 0.7rem 0.85rem;
     font-family: var(--mono);
-    font-size: 0.82rem;
+    font-size: var(--t-ui);
 }
 
 .command .prompt { color: var(--lime); flex: none; }
@@ -211,13 +221,21 @@ h1 .rule {
 
 .command button:hover { color: var(--cyan); border-color: var(--cyan); }
 
+/* The second way to run it, kept subordinate to the docker line above it. */
+.hero-alt {
+    margin: 0.9rem 0 0;
+    font-size: var(--t-small);
+    color: var(--text-2);
+    max-width: var(--measure);
+}
+
 .hero-links {
     display: flex;
     flex-wrap: wrap;
     gap: 1.1rem;
     margin-top: 1.1rem;
     font-family: var(--mono);
-    font-size: 0.8rem;
+    font-size: var(--t-ui);
 }
 
 /* -- the wall: concurrent sessions, which is what this thing is for --------- */
@@ -234,7 +252,7 @@ h1 .rule {
     border-radius: 12px;
     padding: 0.8rem 0.85rem 0.9rem;
     font-family: var(--mono);
-    font-size: 0.72rem;
+    font-size: var(--t-data);
     line-height: 1.5;
     min-height: 12.5rem;
     display: flex;
@@ -251,7 +269,7 @@ h1 .rule {
 }
 
 .pane-agent { color: var(--text-0); font-weight: 500; }
-.pane-provider { color: var(--text-2); font-size: 0.68rem; }
+.pane-provider { color: var(--text-2); font-size: var(--t-micro); }
 
 .dot {
     width: 7px;
@@ -317,7 +335,7 @@ h2 {
 
 h3 {
     font-family: var(--mono);
-    font-size: 0.92rem;
+    font-size: var(--t-card);
     font-weight: 700;
     letter-spacing: -0.01em;
     margin: 0 0 0.4rem;
@@ -354,13 +372,13 @@ p { max-width: var(--measure); color: var(--text-1); }
 }
 
 .item { background: var(--bg-1); padding: 1.15rem 1.25rem 1.35rem; }
-.item p { font-size: 0.92rem; margin: 0; }
+.item p { font-size: var(--t-small); margin: 0; }
 
 /* -- isolation diagram ----------------------------------------------------- */
 
 .nest {
     font-family: var(--mono);
-    font-size: 0.78rem;
+    font-size: var(--t-ui);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 0.85rem;
@@ -394,8 +412,183 @@ p { max-width: var(--measure); color: var(--text-1); }
 }
 
 .provider:first-child { border-top: 0; }
-.provider .who { font-family: var(--mono); font-size: 0.85rem; color: var(--text-0); }
-.provider .what { color: var(--text-1); font-size: 0.95rem; }
+.provider .who { font-family: var(--mono); font-size: var(--t-label); color: var(--text-0); }
+.provider .what { color: var(--text-1); font-size: var(--t-small); }
+
+/* -- desktop --------------------------------------------------------------- */
+
+/* A download is a decision, not a link in a paragraph: each one states the
+   platform, the file that will land, and the one caveat worth knowing first. */
+/* Three platforms. The tile is a panel, not a link — the buttons inside it are
+   the only things that do anything, so nothing looks clickable that is not. */
+.downloads {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--border-soft);
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 2rem 0 1.1rem;
+}
+
+@media (max-width: 54rem) { .downloads { grid-template-columns: 1fr; } }
+
+.dl {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-1);
+    padding: 1.35rem 1.35rem 1.45rem;
+}
+
+/* Monochrome and drawn inline: the page makes no external requests, and a
+   platform mark that shares the card's ink stays part of the type. */
+.glyph {
+    width: 1.75rem;
+    height: 1.75rem;
+    display: block;
+    margin-bottom: 0.8rem;
+    fill: var(--text-2);
+}
+
+.glyph .hole { fill: var(--bg-1); }
+.glyph .beak { fill: var(--amber); }
+
+.dl .os {
+    display: block;
+    font-family: var(--mono);
+    font-size: var(--t-card);
+    color: var(--text-0);
+}
+
+.dl .os em { font-style: normal; color: var(--text-2); }
+
+.dl .note {
+    display: block;
+    font-size: var(--t-small);
+    color: var(--text-1);
+    margin: 0.5rem 0 0;
+}
+
+/* Pushed to the bottom so buttons line up across cards whose prose does not. */
+.dl-actions {
+    margin-top: auto;
+    padding-top: 1.15rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.dl-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    padding: 0.62rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--bg-2);
+    font-family: var(--mono);
+    font-size: var(--t-ui);
+    color: var(--text-0);
+    text-align: center;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.dl-btn svg {
+    width: 1.05rem;
+    height: 1.05rem;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.dl-btn:hover,
+.dl-btn:focus-visible {
+    color: var(--cyan);
+    border-color: var(--cyan);
+    background: #22e2ff14;
+}
+
+/* The first button on a card is the one most people want. */
+.dl-actions .dl-btn:first-child {
+    border-color: #22e2ff55;
+    color: var(--cyan);
+}
+
+.small-note { font-size: var(--t-small); color: var(--text-2); max-width: var(--measure); }
+
+/* Container on the left, desktop on the right — the same comparison the README
+   makes, without a table that a phone has to scroll sideways. */
+.trade {
+    margin-top: 2rem;
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.trade .row {
+    display: grid;
+    grid-template-columns: 9rem minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    padding: 0.85rem 1.1rem;
+    border-top: 1px solid var(--border-soft);
+    background: var(--bg-1);
+    font-size: var(--t-small);
+    color: var(--text-1);
+}
+
+.trade .row:first-child { border-top: 0; }
+.trade .row span:first-child { font-family: var(--mono); font-size: var(--t-ui); color: var(--text-0); }
+
+@media (max-width: 46rem) {
+    .trade .row { grid-template-columns: 1fr; gap: 0.35rem; }
+    .trade .row span:nth-child(2)::before,
+    .trade .row span:nth-child(3)::before {
+        font-family: var(--mono);
+        font-size: var(--t-micro);
+        color: var(--text-2);
+        display: block;
+    }
+    .trade .row span:nth-child(2)::before { content: 'container'; }
+    .trade .row span:nth-child(3)::before { content: 'desktop'; }
+}
+
+/* -- contributing ---------------------------------------------------------- */
+
+.ways {
+    display: grid;
+    gap: 1px;
+    background: var(--border-soft);
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.way {
+    display: block;
+    background: var(--bg-1);
+    padding: 1.05rem 1.2rem 1.15rem;
+    color: inherit;
+    transition: background 0.15s ease;
+}
+
+.way:hover,
+.way:focus-visible { background: var(--bg-2); color: inherit; }
+
+.way .what {
+    display: block;
+    font-family: var(--mono);
+    font-size: var(--t-label);
+    color: var(--cyan);
+}
+
+.way .what::after { content: ' →'; }
+
+.way .why { display: block; font-size: var(--t-small); color: var(--text-1); margin-top: 0.35rem; }
 
 /* -- install --------------------------------------------------------------- */
 
@@ -406,7 +599,7 @@ pre {
     padding: 1rem 1.1rem;
     overflow-x: auto;
     font-family: var(--mono);
-    font-size: 0.78rem;
+    font-size: var(--t-ui);
     line-height: 1.65;
     color: var(--text-1);
 }
@@ -418,7 +611,7 @@ footer {
     border-top: 1px solid var(--border-soft);
     padding: 2rem 0 3rem;
     font-family: var(--mono);
-    font-size: 0.75rem;
+    font-size: var(--t-ui);
     color: var(--text-2);
     display: flex;
     flex-wrap: wrap;

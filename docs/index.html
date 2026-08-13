@@ -4,13 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>devStudio — run your coding CLIs as a fleet</title>
-<meta name="description" content="A self-hosted console that runs Claude Code, Codex and any other coding CLI as agents: concurrent sessions, per-session git worktrees, schedules and workflows. No API keys — it drives the CLIs you are already signed in to.">
+<meta name="description" content="A self-hosted console that runs Claude Code, Codex and any other coding CLI as agents: concurrent sessions, per-session git worktrees, schedules and workflows. Run it as a container or install it on Windows, macOS and Linux. No API keys — it drives the CLIs you are already signed in to.">
 <meta name="theme-color" content="#05070f">
 <link rel="icon" href="favicon.png">
 <link rel="stylesheet" href="styles.css">
+<link rel="canonical" href="https://matthewratcliffe.github.io/devstudio/">
+<link rel="sitemap" type="application/xml" href="sitemap.xml">
 
 <meta property="og:title" content="devStudio — run your coding CLIs as a fleet">
-<meta property="og:description" content="A self-hosted console for Claude Code, Codex and any CLI you already pay for. Concurrent sessions, a git worktree each, schedules and workflows.">
+<meta property="og:description" content="A self-hosted console for Claude Code, Codex and any CLI you already pay for. Concurrent sessions, a git worktree each, schedules and workflows. Container or desktop app.">
 <meta property="og:type" content="website">
 </head>
 <body>
@@ -23,7 +25,9 @@
             <a href="#inventory">The parts</a>
             <a href="#isolation">Isolation</a>
             <a href="#providers">Providers</a>
+            <a href="#desktop">Desktop</a>
             <a href="#install">Install</a>
+            <a href="#contribute">Contribute</a>
         </nav>
     </header>
 
@@ -50,6 +54,11 @@
                 <code>docker run -d -p 7080:7080 -v devstudio-data:/data -v devstudio-home:/home/orchestrator ghcr.io/matthewratcliffe/devstudio:latest</code>
                 <button type="button" data-copy="docker run -d -p 7080:7080 -v devstudio-data:/data -v devstudio-home:/home/orchestrator ghcr.io/matthewratcliffe/devstudio:latest">copy</button>
             </div>
+
+            <p class="hero-alt">
+                Or install it — <a href="#desktop">Windows, macOS and Linux</a>, no container, using the
+                CLI logins already on your machine.
+            </p>
 
             <div class="hero-links">
                 <a href="https://github.com/matthewratcliffe/devstudio">Source on GitHub →</a>
@@ -125,6 +134,22 @@
                 <p>Cron expressions or plain timers, pointed at an agent or a workflow. Unattended runs need no one at the keyboard.</p>
             </div>
             <div class="item">
+                <h3>Standards</h3>
+                <p>Global instructions and reference files — setup notes, coding conventions — inherited by every agent and staged into each workspace.</p>
+            </div>
+            <div class="item">
+                <h3>Skills</h3>
+                <p>Reusable instruction files staged into the workspace — write your own, or search the public registry and pull one in with every file it references.</p>
+            </div>
+            <div class="item">
+                <h3>Team settings</h3>
+                <p>One git repository holding the team's agents, workflows, skills, schedules and standards. Every install imports the same definitions; what you made locally is never touched.</p>
+            </div>
+            <div class="item">
+                <h3>Model handover</h3>
+                <p>Open on a strong model and hand over to a cheaper one after a few turns — work the plan out at high effort, carry it out at low.</p>
+            </div>
+            <div class="item">
                 <h3>MCP, both ways</h3>
                 <p>Attach servers to agents, and let agents call back into the orchestrator to read another session, steer a run or start one.</p>
             </div>
@@ -198,6 +223,70 @@
     </div>
 </section>
 
+<section id="desktop">
+    <div class="wrap">
+        <p class="tag">Desktop</p>
+        <h2>Or no container at all</h2>
+        <p>
+            Docker is the answer on a server. On your own machine there is a second build: an installed
+            app with no volumes and no bind mounts to configure, because agents reach your files by
+            simply being you. It signs in with the <code>~/.claude</code> and <code>~/.codex</code>
+            logins already on the machine, browses every drive you have, and updates itself in the
+            background — the new version is waiting the next time you quit.
+        </p>
+
+        <div class="downloads">
+            <div class="dl">
+                <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 4.9l7.6-1v7.5H3zM12.1 3.7L21 2.5v8.9h-8.9zM3 12.9h7.6v7.4l-7.6-1zM12.1 12.9H21v8.9l-8.9-1.2z"/></svg>
+                <span class="os">Windows <em>x64</em></span>
+                <span class="note">Per-user, no administrator. Adds the WebView2 runtime if Windows lacks it, and a tray icon so closing the window leaves the agents running.</span>
+                <div class="dl-actions">
+                    <a class="dl-btn" href="https://github.com/matthewratcliffe/devstudio/releases/latest/download/devStudio-win-x64-Setup.exe" title="devStudio-win-x64-Setup.exe"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v10.2M12 15.5l-4.3-4.3M12 15.5l4.3-4.3"/><path d="M4.5 17.5v1.8c0 .9.7 1.7 1.7 1.7h11.6c1 0 1.7-.8 1.7-1.7v-1.8"/></svg><span>Download for Windows</span></a>
+                </div>
+            </div>
+
+            <div class="dl">
+                <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M16.9 12.7c0-2.4 2-3.5 2.1-3.6-1.1-1.7-2.9-1.9-3.6-1.9-1.5-.2-3 .9-3.8.9-.8 0-2-.9-3.2-.8-1.7 0-3.2.9-4 2.4-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.7 2.5 3 2.4 1.2 0 1.6-.8 3.1-.8 1.4 0 1.8.8 3.1.7 1.3 0 2.1-1.2 2.9-2.4.9-1.3 1.3-2.6 1.3-2.7-.1 0-2.4-.9-2.4-3.6z"/><path d="M14.5 5.6c.7-.8 1.1-2 1-3.1-1 0-2.2.7-2.9 1.5-.6.7-1.2 1.9-1 3 1.1.1 2.2-.6 2.9-1.4z"/></svg>
+                <span class="os">macOS</span>
+                <span class="note">WKWebView, and a universal build for each architecture. No tray — closing the window stops the server with it.</span>
+                <div class="dl-actions">
+                    <a class="dl-btn" href="https://github.com/matthewratcliffe/devstudio/releases/latest/download/devStudio-osx-arm64-Setup.pkg" title="devStudio-osx-arm64-Setup.pkg"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v10.2M12 15.5l-4.3-4.3M12 15.5l4.3-4.3"/><path d="M4.5 17.5v1.8c0 .9.7 1.7 1.7 1.7h11.6c1 0 1.7-.8 1.7-1.7v-1.8"/></svg><span>Download for Apple silicon</span></a>
+                    <a class="dl-btn" href="https://github.com/matthewratcliffe/devstudio/releases/latest/download/devStudio-osx-x64-Setup.pkg" title="devStudio-osx-x64-Setup.pkg"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v10.2M12 15.5l-4.3-4.3M12 15.5l4.3-4.3"/><path d="M4.5 17.5v1.8c0 .9.7 1.7 1.7 1.7h11.6c1 0 1.7-.8 1.7-1.7v-1.8"/></svg><span>Download for Intel</span></a>
+                </div>
+            </div>
+
+            <div class="dl">
+                <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 1.8c-2.6 0-4.2 2-4.2 4.5 0 1.4.2 2.1.2 2.8 0 1-.7 1.7-1.5 3.1-1.2 1.8-1.9 3.3-1.9 4.8 0 1.1.4 1.8 1.2 2.2-.2.5-.4 1-.4 1.5 0 1.4 1.1 2.3 2.8 2.3h7.6c1.7 0 2.8-.9 2.8-2.3 0-.5-.2-1-.4-1.5.8-.4 1.2-1.1 1.2-2.2 0-1.5-.7-3-1.9-4.8-.8-1.4-1.5-2.1-1.5-3.1 0-.7.2-1.4.2-2.8 0-2.5-1.6-4.5-4.2-4.5z"/><ellipse class="hole" cx="10.1" cy="6.1" rx="1.05" ry="1.45"/><ellipse class="hole" cx="13.9" cy="6.1" rx="1.05" ry="1.45"/><path class="beak" d="M12 6.9l1.9 1.6-1.9 1.3-1.9-1.3z"/></svg>
+                <span class="os">Linux <em>x64</em></span>
+                <span class="note">An AppImage — <code>chmod +x</code> and run. Needs WebKitGTK: <code>sudo apt install libwebkit2gtk-4.1-0</code> on Debian and Ubuntu.</span>
+                <div class="dl-actions">
+                    <a class="dl-btn" href="https://github.com/matthewratcliffe/devstudio/releases/latest/download/devStudio-linux-x64.AppImage" title="devStudio-linux-x64.AppImage"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v10.2M12 15.5l-4.3-4.3M12 15.5l4.3-4.3"/><path d="M4.5 17.5v1.8c0 .9.7 1.7 1.7 1.7h11.6c1 0 1.7-.8 1.7-1.7v-1.8"/></svg><span>Download for Linux</span></a>
+                </div>
+            </div>
+        </div>
+
+        <p class="small-note">
+            Every link is the latest release — <a href="https://github.com/matthewratcliffe/devstudio/releases/latest">all assets, including portable builds</a>.
+            It is the same application either way: a small shell starts the exact binary the container
+            runs on <code>127.0.0.1</code> and shows it in the system web view.
+        </p>
+
+        <div class="trade">
+            <div class="row"><span>Reaching your code</span><span>A bind mount, attached from the UI</span><span>Every drive on the machine, opening on your home directory</span></div>
+            <div class="row"><span>CLI logins</span><span>A volume of their own, separate from yours</span><span>The real <code>~/.claude</code> and <code>~/.codex</code> you already use</span></div>
+            <div class="row"><span>Tooling</span><span><code>git</code>, <code>node</code>, <code>gh</code>, <code>rg</code> baked into the image</span><span>Must be on your PATH — <b>Check tools…</b> says what is missing</span></div>
+            <div class="row"><span>Sandbox</span><span>The container is the boundary, so the CLIs are told not to build their own</span><span>No container, so the CLIs keep theirs — a weaker boundary, and permission modes matter more</span></div>
+            <div class="row"><span>Updates</span><span>You pull a new image; the UI says when there is one</span><span>Downloaded in the background, installed when you quit</span></div>
+        </div>
+
+        <p class="small-note">
+            The sandbox row is the one to read twice. In the container, an agent that runs something
+            reckless wrecks a container. On the desktop it is running as you, with your files and your
+            credentials.
+        </p>
+    </div>
+</section>
+
 <section id="install">
     <div class="wrap split">
         <div>
@@ -233,11 +322,50 @@
     </div>
 </section>
 
+<section id="contribute">
+    <div class="wrap split">
+        <div>
+            <p class="tag">Contributing</p>
+            <h2>Take it apart</h2>
+            <p>
+                This is one person's tool that turned out to be worth publishing. If it is nearly what
+                you want, the gap is probably small — and the parts most people need to change are the
+                ones deliberately left soft.
+            </p>
+            <p>
+                Adding a CLI is a form, not a patch. A skill registry, a source-control host and an agent
+                provider are each an interface with an implementation beside it to copy. And if you would
+                rather not wait for an opinion, fork it — it is
+                <a href="https://github.com/matthewratcliffe/devstudio/blob/main/LICENSE">MIT licensed</a>,
+                and nothing here expects to be the only copy.
+            </p>
+        </div>
+
+        <div>
+            <div class="ways">
+                <a class="way" href="https://github.com/matthewratcliffe/devstudio/issues/new">
+                    <span class="what">Report something</span>
+                    <span class="why">A bug, a CLI that does not fit the provider form, a workflow the scheduler cannot express. Failure cases are the useful ones.</span>
+                </a>
+                <a class="way" href="https://github.com/matthewratcliffe/devstudio/fork">
+                    <span class="what">Fork it</span>
+                    <span class="why">MIT, so use it however you like. Build, test and run it locally with the .NET 10 SDK and Docker; the README covers the layout and where each seam is.</span>
+                </a>
+                <a class="way" href="https://github.com/matthewratcliffe/devstudio/pulls">
+                    <span class="what">Open a pull request</span>
+                    <span class="why">CI runs the tests on every branch. Small and self-contained lands fastest; open an issue first if it is large.</span>
+                </a>
+            </div>
+        </div>
+    </div>
+</section>
+
 <footer class="wrap">
     <span>devStudio</span>
     <a href="https://github.com/matthewratcliffe/devstudio">GitHub</a>
     <a href="https://github.com/matthewratcliffe/devstudio/pkgs/container/devstudio">Container image</a>
-    <span class="spacer">Built by Matt Ratcliffe</span>
+    <a href="https://github.com/matthewratcliffe/devstudio/blob/main/LICENSE">MIT</a>
+    <span class="spacer">Built by <a href="https://www.matthewratcliffe.com.au">Matt Ratcliffe</a></span>
 </footer>
 
 <script src="wall.js"></script>
