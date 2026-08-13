@@ -1,0 +1,41 @@
+# devStudio
+
+> A self-hosted console that runs coding CLIs — Claude Code, OpenAI Codex, and any other CLI already installed and signed in — as configurable agents. Concurrent sessions, a git worktree each, schedules and workflows. There is no API integration: every agent runs the real CLI as a child process, so the only credential involved is the login completed in the web UI.
+
+devStudio is a personal project published by Matt Ratcliffe, with the full source on GitHub. It runs either as a container
+(`ghcr.io/matthewratcliffe/devstudio`) or as an installed desktop app on Windows, macOS and Linux.
+State is JSON on a volume — there is no database, and no account to create.
+
+The design constraint that explains most of the rest: nothing is reimplemented. When an agent works,
+it is `claude` or `codex` on a PATH, reading the same files it would read if the command had been
+typed by hand. The orchestrator arranges the work and keeps the transcript; the CLI does the thinking.
+
+## What it does
+
+- [Agents](https://matthewratcliffe.github.io/devstudio/#inventory): a CLI, a system prompt, a model, a permission mode, and the skills and MCP servers it should have.
+- [Sessions](https://matthewratcliffe.github.io/devstudio/#inventory): conversations running in parallel up to a configurable cap, each queueing its own turns, surviving a closed tab.
+- [Repositories and worktrees](https://matthewratcliffe.github.io/devstudio/#isolation): a fresh git worktree cut per session, which is what makes running several agents at once safe rather than merely fast.
+- [Workflows and schedules](https://matthewratcliffe.github.io/devstudio/#inventory): ordered steps sharing a run context, fired by cron expressions or plain timers at an agent or a workflow.
+- [Skills](https://matthewratcliffe.github.io/devstudio/#inventory): reusable instruction files staged into the workspace, written by hand or pulled from the public skills.sh registry with every file they reference.
+- [Team settings](https://matthewratcliffe.github.io/devstudio/#inventory): one git repository holding a team's agents, workflows, skills, schedules and standards, imported by every install; locally made definitions are never touched by a sync.
+- [Model handover](https://matthewratcliffe.github.io/devstudio/#inventory): open a session on a strong model and hand over to a cheaper one after a set number of turns.
+- [MCP, both directions](https://matthewratcliffe.github.io/devstudio/#inventory): attach servers to agents, and let agents call back into the orchestrator to read another session, steer a run or start one.
+
+## Providers
+
+- [Claude Code and OpenAI Codex](https://matthewratcliffe.github.io/devstudio/#providers): built in, streamed token by token with tool calls and durations in the transcript.
+- [Any installed CLI](https://matthewratcliffe.github.io/devstudio/#providers): described on a form — executable, argument template, output format — and it becomes an agent provider with no code change.
+- [ACP agents](https://matthewratcliffe.github.io/devstudio/#providers): Agent Client Protocol over stdio, where permission answers come from the session's permission mode.
+- [OpenAI-compatible endpoints](https://matthewratcliffe.github.io/devstudio/#providers): llama.cpp and similar. A bare model has no tools, so devStudio runs the loop itself.
+
+## Running it
+
+- [Container install](https://matthewratcliffe.github.io/devstudio/#install): one image, two volumes — one for state, one for the CLI logins. Published for amd64 and arm64.
+- [Desktop app](https://matthewratcliffe.github.io/devstudio/#desktop): Windows, macOS (Apple silicon and Intel) and Linux. No container and no bind mounts; it uses the `~/.claude` and `~/.codex` logins already on the machine and updates itself in the background.
+- [Latest release and all downloads](https://github.com/matthewratcliffe/devstudio/releases/latest)
+- [Container image on GHCR](https://github.com/matthewratcliffe/devstudio/pkgs/container/devstudio)
+
+## Optional
+
+- [Source and full documentation](https://github.com/matthewratcliffe/devstudio): the README covers configuration, instruction layering, team settings sync, the MCP surface and what changes when running without a container.
+- [Contributing](https://matthewratcliffe.github.io/devstudio/#contribute): issues, pull requests and forks are all welcome; adding a CLI provider is a form rather than a patch.
