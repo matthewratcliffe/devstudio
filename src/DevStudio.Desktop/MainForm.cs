@@ -69,9 +69,39 @@ internal sealed class MainForm : Form
     public void ShowWindow()
     {
         Show();
-        WindowState = FormWindowState.Normal;
+        BringForward();
+    }
+
+    /// <summary>
+    /// Raises the window, leaving a maximised one maximised.
+    /// </summary>
+    private void BringForward()
+    {
+        if (!Visible)
+            Show();
+
+        if (WindowState == FormWindowState.Minimized)
+            WindowState = FormWindowState.Normal;
+
         Activate();
         BringToFront();
+    }
+
+    /// <summary>
+    /// A message box the user can actually see, which is why nothing here calls MessageBox.Show
+    /// directly. Tray menu items run while some other window owns the foreground, and Windows will
+    /// not raise a background process above the active one: the box opens behind this window, and
+    /// because it is modal to this window, every click on the app then goes nowhere. An app that
+    /// stops responding after one menu item is this, every time.
+    /// </summary>
+    private DialogResult Say(
+        string text,
+        string caption,
+        MessageBoxButtons buttons = MessageBoxButtons.OK,
+        MessageBoxIcon icon = MessageBoxIcon.None)
+    {
+        BringForward();
+        return MessageBox.Show(this, text, caption, buttons, icon);
     }
 
     protected override async void OnLoad(EventArgs e)
@@ -190,8 +220,7 @@ internal sealed class MainForm : Form
     {
         if (_updates.ReadyVersion is { } ready)
         {
-            var answer = MessageBox.Show(
-                this,
+            var answer = Say(
                 $"devStudio {ready} is downloaded and will be installed when you quit." +
                 Environment.NewLine + Environment.NewLine +
                 "Restart now instead? Any agent mid-turn is stopped.",
@@ -207,8 +236,7 @@ internal sealed class MainForm : Form
 
         if (!_updates.CanUpdate)
         {
-            MessageBox.Show(
-                this,
+            Say(
                 "This copy was not installed by the devStudio installer, so it cannot update itself.",
                 "devStudio — updates",
                 MessageBoxButtons.OK,
@@ -221,8 +249,7 @@ internal sealed class MainForm : Form
 
         if (found is null)
         {
-            MessageBox.Show(
-                this,
+            Say(
                 $"devStudio {_updates.CurrentVersion} is up to date.",
                 "devStudio — updates",
                 MessageBoxButtons.OK,
@@ -258,17 +285,16 @@ internal sealed class MainForm : Form
     {
         var results = ToolPreflight.Check();
 
-        MessageBox.Show(
-            this,
+        Say(
             ToolPreflight.Describe(results),
             "devStudio — tools on this machine",
             MessageBoxButtons.OK,
             ToolPreflight.HasBlockingGap(results) ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
     }
 
-    private void ShowLog() => MessageBox.Show(this, _server.Tail(), "devStudio — server log");
+    private void ShowLog() => Say(_server.Tail(), "devStudio — server log");
 
-    private static void OpenInBrowser(string target)
+    private void OpenInBrowser(string target)
     {
         try
         {
@@ -276,7 +302,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Could not open {target}.{Environment.NewLine}{ex.Message}");
+            Say($"Could not open {target}.{Environment.NewLine}{ex.Message}", "devStudio");
         }
     }
 
