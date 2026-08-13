@@ -20,6 +20,7 @@ using DevStudio.Infrastructure.Providers;
 using DevStudio.Infrastructure.Providers.Acp;
 using DevStudio.Infrastructure.Providers.OpenAi;
 using DevStudio.Infrastructure.Scheduling;
+using DevStudio.Infrastructure.Skills;
 using DevStudio.Infrastructure.Seed;
 using DevStudio.Infrastructure.Teams;
 using DevStudio.Infrastructure.Terminals;
@@ -89,6 +90,17 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.UserAgent.ParseAdd("devStudio");
             client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         });
+
+        // The public skill registry the `npx skills` CLI installs from. Talking to its API directly
+        // keeps skill pulls off a Node runtime, and the import lands in the library rather than in
+        // whichever workspace happened to be open.
+        services.AddHttpClient<ISkillRegistry, SkillsShRegistry>(client =>
+        {
+            client.BaseAddress = new Uri("https://skills.sh/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("devStudio");
+        });
+        services.AddSingleton<ISkillImporter, SkillImporter>();
 
         services.AddSingleton<IGitService, GitService>();
         services.AddSingleton<ISourceControlHosts, SourceControlHosts>();
