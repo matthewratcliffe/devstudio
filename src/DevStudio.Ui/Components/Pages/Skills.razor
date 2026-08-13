@@ -1,11 +1,14 @@
 @page "/skills"
 @inject IEntityStore<Skill> SkillStore
 @inject IEntityStore<Agent> AgentStore
+@inject ISkillRegistry Registry
+@inject ISkillImporter Importer
 
 <PageTitle>Skills · devStudio</PageTitle>
 
 <div class="btn-row" style="margin-bottom:1.2rem">
     <button class="btn btn-primary" @onclick="() => Edit(new Skill())">New skill</button>
+    <button class="btn" @onclick="OpenBrowser">Browse @Registry.Name</button>
     <span class="mono-dim">
         Written to <code>.claude/skills/&lt;slug&gt;/SKILL.md</code> in the workspace before a session starts.
     </span>
@@ -22,6 +25,10 @@
                 {
                     <span class="pill" title="From the team settings repository: @source">team</span>
                 }
+                @if (skill.RegistrySource is { Length: > 0 } pulled)
+                {
+                    <span class="pill pill-cyan" title="Pulled from @Registry.Name: @pulled">@Registry.Name</span>
+                }
                 @if (!skill.Enabled)
                 {
                     <span class="pill pill-red">off</span>
@@ -35,9 +42,22 @@
                     <span class="pill">@tag</span>
                 }
                 <span class="pill">used by @UsageCount(skill.Id)</span>
+                @if (skill.BundleFileCount > 0)
+                {
+                    <span class="pill" title="Supporting files staged beside SKILL.md in the workspace">
+                        +@skill.BundleFileCount file@(skill.BundleFileCount == 1 ? "" : "s")
+                    </span>
+                }
             </div>
             <div class="btn-row">
                 <button class="btn btn-sm" @onclick="() => Edit(skill)">Edit</button>
+                @if (skill.RegistrySource is { Length: > 0 })
+                {
+                    <button class="btn btn-sm" disabled="@(_pulling is not null)"
+                            @onclick="() => UpdateAsync(skill)">
+                        @(_pulling == skill.RegistrySource ? "Checking…" : "Check for updates")
+                    </button>
+                }
                 <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(skill)">Delete</button>
             </div>
         </div>
@@ -99,6 +119,64 @@
     </div>
 }
 
+@if (_browsing)
+{
+    <div class="modal-backdrop" @onclick="CloseBrowser">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>Browse @Registry.Name</h2>
+            <p class="small">
+                The public registry the <code>skills</code> CLI installs from. Importing copies the skill
+                into this library — SKILL.md and every file it references — so agents get it without
+                reaching the internet again.
+            </p>
+
+            <div class="field">
+                <label>Search</label>
+                <input type="text" @bind="_query" @bind:event="oninput" @onkeydown="OnSearchKey"
+                       placeholder="react, testing, code review…" />
+            </div>
+
+            <div class="btn-row" style="margin-bottom:0.9rem">
+                <button class="btn btn-primary" disabled="@_searching" @onclick="SearchAsync">
+                    @(_searching ? "Searching…" : "Search")
+                </button>
+            </div>
+
+            @if (_results.Count > 0)
+            {
+                <div class="list">
+                    @foreach (var result in _results)
+                    {
+                        <div class="list-row">
+                            <div>
+                                <strong>@result.Name</strong>
+                                <div class="mono-dim small">@result.Source · @result.Installs.ToString("N0") installs</div>
+                            </div>
+                            <div class="spacer"></div>
+                            @if (Imported(result) is { } already)
+                            {
+                                <span class="pill" title="Already in the library as @already.Name">imported</span>
+                            }
+                            <button class="btn btn-sm" disabled="@(_pulling is not null)"
+                                    @onclick="() => ImportAsync(result)">
+                                @(_pulling == result.Id ? "Pulling…" : "Import")
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+            else if (_searched && !_searching)
+            {
+                <p class="small">Nothing matched “@_query”.</p>
+            }
+
+            <div class="btn-row">
+                <button class="btn btn-ghost" @onclick="CloseBrowser">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     [CascadingParameter] private MainLayout Layout { get; set; } = default!;
 
@@ -106,6 +184,14 @@
     private IReadOnlyList<Agent> _agents = [];
     private Skill? _editing;
     private bool _isNew;
+
+    private bool _browsing;
+    private bool _searching;
+    private bool _searched;
+    private string _query = string.Empty;
+    private IReadOnlyList<SkillSearchResult> _results = [];
+    /// <summary>owner/repo/slug currently being pulled, so one click cannot start two downloads.</summary>
+    private string? _pulling;
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 
@@ -150,8 +236,93 @@
     private async Task DeleteAsync(Skill skill)
     {
         await SkillStore.DeleteAsync(skill.Id);
+
+        // The entity is gone; without this its bundled files sit on the volume forever.
+        await Importer.DeleteBundleAsync(skill.Id);
         await ReloadAsync();
     }
+
+    private void OpenBrowser()
+    {
+        _browsing = true;
+        _searched = false;
+        _results = [];
+    }
+
+    private void CloseBrowser() => _browsing = false;
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_query))
+            return;
+
+        _searching = true;
+        try
+        {
+            _results = await Registry.SearchAsync(_query);
+            _searched = true;
+        }
+        finally
+        {
+            _searching = false;
+        }
+    }
+
+    private async Task ImportAsync(SkillSearchResult result)
+    {
+        _pulling = result.Id;
+        try
+        {
+            var import = await Importer.ImportAsync(result.Source, result.Slug);
+            await ReloadAsync();
+            Layout.Notify($"Imported {import.Skill.Name}.", "ok");
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify($"Could not import {result.Name}: {ex.Message}", "err");
+        }
+        finally
+        {
+            _pulling = null;
+        }
+    }
+
+    private async Task UpdateAsync(Skill skill)
+    {
+        var parts = skill.RegistrySource!.Split('/');
+        if (parts.Length != 3)
+        {
+            Layout.Notify($"{skill.Name} does not name a registry skill.", "err");
+            return;
+        }
+
+        _pulling = skill.RegistrySource;
+        try
+        {
+            var import = await Importer.ImportAsync($"{parts[0]}/{parts[1]}", parts[2]);
+            await ReloadAsync();
+            Layout.Notify(
+                import.Changed ? $"Updated {import.Skill.Name}." : $"{skill.Name} is already up to date.",
+                import.Changed ? "ok" : "info");
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify($"Could not update {skill.Name}: {ex.Message}", "err");
+        }
+        finally
+        {
+            _pulling = null;
+        }
+    }
+
+    private Skill? Imported(SkillSearchResult result) =>
+        _skills.FirstOrDefault(s => string.Equals(s.RegistrySource, result.Id, StringComparison.OrdinalIgnoreCase));
 
     private void SetTags(string? value) =>
         _editing!.Tags = (value ?? string.Empty)

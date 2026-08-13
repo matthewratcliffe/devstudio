@@ -10,6 +10,7 @@ using DevStudio.Domain.Projects;
 using DevStudio.Domain.Repositories;
 using DevStudio.Domain.Sessions;
 using DevStudio.Domain.Skills;
+using DevStudio.Infrastructure.Skills;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -168,12 +169,27 @@ public sealed class WorkspaceService : IWorkspaceService
 
             await File.WriteAllTextAsync(Path.Combine(directory, "SKILL.md"), frontmatter, ct);
 
+            // A pulled skill is usually a folder, not a file: SKILL.md reads its rules and
+            // references by relative path, so without these it arrives full of dead links.
+            if (skill.BundleFileCount > 0)
+                CopyTree(SkillBundle.PathFor(_options.DataPath, skill.Id), directory);
+
             agentsFile.AppendLine($"## Skill: {skill.Name}");
             agentsFile.AppendLine();
             agentsFile.AppendLine(skill.Description);
             agentsFile.AppendLine();
             agentsFile.AppendLine(skill.Content);
             agentsFile.AppendLine();
+
+            // Codex reads this file, not the skills folder, so the body above is all it gets. Point
+            // it at the supporting files rather than inlining a reference tree it did not ask for.
+            if (skill.BundleFileCount > 0)
+            {
+                agentsFile.AppendLine(
+                    $"Supporting files for this skill are in `.claude/skills/{slug}/`. "
+                    + "Read them from there when the instructions above reference a relative path.");
+                agentsFile.AppendLine();
+            }
         }
 
         if (agentsFile.Length > 0)
@@ -510,6 +526,31 @@ public sealed class WorkspaceService : IWorkspaceService
 
     /// <summary>Where the global library is stored.</summary>
     public string GlobalFilesPath() => Path.Combine(_options.DataPath, "global", "files");
+
+    /// <summary>
+    /// Recursive copy, for skill bundles — unlike the reference libraries a skill's files are a
+    /// tree, and its instructions name the subfolders.
+    /// </summary>
+    private void CopyTree(string source, string target)
+    {
+        if (!Directory.Exists(source))
+            return;
+
+        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var destination = Path.Combine(target, Path.GetRelativePath(source, file));
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(file, destination, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not stage skill file {File}", file);
+            }
+        }
+    }
 
     private static string EscapeYaml(string value) =>
         value.Contains(':') || value.Contains('#') ? $"\"{value.Replace("\"", "'")}\"" : value;

@@ -125,14 +125,35 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
    clicks, because underneath is a page that looks ready and cannot answer yet. */
 .booting {
     position: fixed; inset: 0; z-index: 2000;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.9rem;
-    background: var(--bg-0);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.1rem;
+    /* Translucent so the shell reads as "there, not ready" rather than absent, blurred so nothing
+       underneath looks like a control you could aim at. */
+    background: #05070fd9;
+    backdrop-filter: blur(10px) saturate(0.7);
+    -webkit-backdrop-filter: blur(10px) saturate(0.7);
+}
+/* Backdrop-filter is what makes the scrim translucent-but-unreadable; without it the page behind
+   stays sharp and legible, so fall back to an opaque cover. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .booting { background: var(--bg-0); }
+}
+.booting-spinner {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: conic-gradient(from 0deg, transparent 0deg, var(--cyan) 140deg, var(--magenta) 300deg, transparent 360deg);
+    /* Ring, not a disc: punch the middle out so the gradient reads as a sweep. */
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+    animation: booting-spin 0.9s linear infinite;
 }
 .booting-mark {
     font-family: var(--font-mono); font-size: 1.4rem; letter-spacing: 0.04em;
     background: var(--gradient); -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .booting-note { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-2); }
+@keyframes booting-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    .booting-spinner { animation-duration: 3s; }
+}
 
 .shell { display: flex; min-height: 100vh; }
 
@@ -556,6 +577,20 @@ select option { background: var(--bg-1); }
 .tab.active { color: var(--cyan); border-color: var(--border); background: var(--bg-1); }
 
 .list-reset { list-style: none; margin: 0; padding: 0; }
+
+/* Scrolling result list — search hits, pickers. Capped so a long result set cannot push a modal's
+   own buttons off the screen. */
+.list {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg-1); margin-bottom: 0.9rem;
+    max-height: 22rem; overflow-y: auto;
+}
+.list-row {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--border-soft);
+}
+.list-row:last-child { border-bottom: 0; }
+.list-row:hover { background: var(--bg-2); }
 
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.9rem; font-size: 0.78rem; }
 .kv dt { color: var(--text-2); }
