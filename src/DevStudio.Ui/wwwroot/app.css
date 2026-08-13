@@ -294,6 +294,22 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 }
 .md-download:hover { opacity: 1; }
 
+/* The named file is not there. A model can say it drew something and name a file it never made, and
+   a deleted image leaves its line behind in the transcript that mentioned it — both arrive here. */
+.md-figure.missing .md-image,
+.md-figure.missing .md-download { display: none; }
+
+.md-figure.missing::before {
+    content: "Image unavailable — it was never generated, or has since been deleted.";
+    display: block;
+    margin: 0.6rem 0;
+    padding: 0.7rem 0.9rem;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    font-size: 0.82rem;
+    color: var(--text-2);
+}
+
 /* -- Cards & grids -------------------------------------------------------- */
 
 .card {

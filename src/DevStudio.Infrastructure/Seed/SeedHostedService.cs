@@ -184,14 +184,15 @@ public sealed class SeedHostedService : IHostedService
             isDefault: false,
             ct);
 
-        // Attached everywhere, because an agent asked for a picture should be able to draw one. It is
-        // a separate server rather than a flag on the one above so that being able to draw does not
-        // also mean being able to start and steer other sessions.
+        // Present but not attached: most sessions are not drawing anything, and a tool nobody asked
+        // for still costs context and still tempts a model into claiming it made a picture. Tick it
+        // on the agent that needs it. It is a separate server rather than a flag on the one above so
+        // that being able to draw does not also mean being able to start and steer other sessions.
         await EnsureBuiltInMcpAsync(
             "images",
             "Generate an image from a description. Backed by whichever image service is configured on the Logins page.",
             "/mcp/images",
-            isDefault: true,
+            isDefault: false,
             ct);
     }
 
