@@ -162,10 +162,16 @@ public static partial class MarkdownLite
     /// <summary>
     /// The picture plus a way to keep it. Both are worth having in a transcript: the image answers
     /// "what did it draw", and the link answers "can I have it" without a right-click.
+    ///
+    /// A path here is only ever a claim — a model that says it drew something and names a file it
+    /// never generated writes the same line as one that did, and a deleted image leaves the same
+    /// line behind in an old transcript. Neither is worth a broken-image glyph, which reads as the
+    /// app failing to show a picture that exists. The onerror says which it was instead.
     /// </summary>
     private static string Figure(string url, string alt) =>
         $"""
-         <span class="md-figure"><img class="md-image" src="{url}" alt="{alt}" loading="lazy" />
+         <span class="md-figure"><img class="md-image" src="{url}" alt="{alt}" loading="lazy"
+         onerror="this.parentElement.classList.add('missing')" />
          <a class="md-download" href="{url}?download" download>Download</a></span>
          """;
 

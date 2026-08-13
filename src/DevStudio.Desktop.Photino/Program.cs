@@ -15,7 +15,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         // Velopack's hooks run during install, update and uninstall, and expect to go first.
-        VelopackApp.Build().Run();
+        VelopackApp.Build().SetLogger(UpdateLog.Instance).Run();
 
         if (args.Contains("--check-tools"))
         {

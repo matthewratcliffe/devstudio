@@ -142,6 +142,7 @@ internal sealed class MainForm : Form
         menu.Items.Add("Check tools…", null, (_, _) => ShowPreflight());
         menu.Items.Add("Open data folder", null, (_, _) => OpenInBrowser(DesktopPaths.DataRoot));
         menu.Items.Add("Show server log", null, (_, _) => ShowLog());
+        menu.Items.Add("Show update log", null, (_, _) => OpenInBrowser(UpdateLog.Path));
         _updateItem = menu.Items.Add("Check for updates…", null, async (_, _) => await CheckForUpdatesAsync());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => Quit());

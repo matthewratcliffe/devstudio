@@ -15,13 +15,20 @@ public sealed class UpdateWatcher : IDisposable
 {
     private const string Repository = "https://github.com/matthewratcliffe/devstudio";
 
-    private static readonly TimeSpan FirstCheck = TimeSpan.FromMinutes(2);
+    // The download is the slow part and it dies with the process, so the check goes early: a session
+    // short enough to miss this is a session too short to have finished the download anyway.
+    private static readonly TimeSpan FirstCheck = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan BetweenChecks = TimeSpan.FromHours(6);
+
+    // A check that failed says nothing about whether a version is waiting — six hours is the pause
+    // between answers, not between a dropped connection and trying again.
+    private static readonly TimeSpan AfterFailure = TimeSpan.FromMinutes(15);
 
     private readonly CancellationTokenSource _stopping = new();
     private readonly UpdateManager? _manager;
 
     private UpdateInfo? _downloaded;
+    private bool _lastCheckFailed;
 
     public UpdateWatcher()
     {
@@ -29,9 +36,10 @@ public sealed class UpdateWatcher : IDisposable
         {
             _manager = new UpdateManager(new GithubSource(Repository, null, prerelease: false));
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // No feed, no updates. Everything below turns into a no-op.
+            UpdateLog.Instance.Write($"No update manager: {ex.Message}");
             _manager = null;
         }
     }
@@ -51,7 +59,12 @@ public sealed class UpdateWatcher : IDisposable
     public void Start()
     {
         if (!CanUpdate)
+        {
+            UpdateLog.Instance.Write("Not an installed build; updates are off for this session.");
             return;
+        }
+
+        UpdateLog.Instance.Write($"Watching for updates. Running {CurrentVersion}.");
 
         _ = Task.Run(async () =>
         {
@@ -62,7 +75,7 @@ public sealed class UpdateWatcher : IDisposable
                 while (!_stopping.IsCancellationRequested)
                 {
                     await CheckAsync(_stopping.Token);
-                    await Task.Delay(BetweenChecks, _stopping.Token);
+                    await Task.Delay(_lastCheckFailed ? AfterFailure : BetweenChecks, _stopping.Token);
                 }
             }
             catch (OperationCanceledException)
@@ -85,22 +98,39 @@ public sealed class UpdateWatcher : IDisposable
         {
             var update = await _manager.CheckForUpdatesAsync();
 
+            _lastCheckFailed = false;
+
             if (update is null)
+            {
+                UpdateLog.Instance.Write($"Checked: {CurrentVersion} is the newest release.");
                 return null;
+            }
 
             // Already downloaded; nothing to announce twice.
             if (_downloaded?.TargetFullRelease.Version == update.TargetFullRelease.Version)
                 return ReadyVersion;
 
+            var target = update.TargetFullRelease.Version.ToString();
+            UpdateLog.Instance.Write($"Downloading {target}.");
+
             await _manager.DownloadUpdatesAsync(update, cancelToken: ct);
 
             _downloaded = update;
+            UpdateLog.Instance.Write($"{target} is downloaded and installs when devStudio next closes.");
             UpdateReady?.Invoke(ReadyVersion!);
             return ReadyVersion;
         }
-        catch (Exception)
+        catch (OperationCanceledException)
+        {
+            // Quitting mid-download. The next launch starts it again.
+            UpdateLog.Instance.Write("Download interrupted by shutdown; it starts again on the next launch.");
+            return null;
+        }
+        catch (Exception ex)
         {
             // Offline, rate-limited, or the release is half-uploaded. Try again on the next tick.
+            UpdateLog.Instance.Write($"Update check did not complete: {ex.Message}");
+            _lastCheckFailed = true;
             return null;
         }
     }
@@ -116,11 +146,13 @@ public sealed class UpdateWatcher : IDisposable
 
         try
         {
+            UpdateLog.Instance.Write($"Applying {ReadyVersion} after this process exits.");
             _manager.WaitExitThenApplyUpdates(_downloaded, silent: true, restart: false);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // A failed update must not stop the app from closing; the next check finds it again.
+            UpdateLog.Instance.Write($"Could not hand over to the updater: {ex.Message}");
         }
     }
 
@@ -130,6 +162,7 @@ public sealed class UpdateWatcher : IDisposable
         if (_manager is null || _downloaded is null)
             return;
 
+        UpdateLog.Instance.Write($"Applying {ReadyVersion} and restarting.");
         _manager.ApplyUpdatesAndRestart(_downloaded);
     }
 

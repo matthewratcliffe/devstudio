@@ -66,10 +66,14 @@
     @foreach (var image in _images)
     {
         <div class="card">
+            @* The record and the file can part company — a file deleted from the data folder by hand,
+               or a write that never landed — and a broken-image glyph reads as the app failing. *@
             <a href="@ImageService.UrlFor(image)" target="_blank" rel="noopener noreferrer">
                 <img src="@ImageService.UrlFor(image)" alt="@image.Prompt" loading="lazy"
-                     style="width:100%;border-radius:6px;display:block" />
+                     style="width:100%;border-radius:6px;display:block"
+                     onerror="this.hidden = true; this.closest('a').nextElementSibling.hidden = false" />
             </a>
+            <p class="small muted" hidden>This image's file is missing from the data folder.</p>
             <p class="small" style="margin-top:0.7rem">@image.Prompt</p>
             <div class="btn-row" style="margin-bottom:0.7rem">
                 <span class="pill">@image.Backend</span>
