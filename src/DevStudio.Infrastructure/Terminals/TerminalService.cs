@@ -33,9 +33,16 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
         IReadOnlyList<string> arguments,
         string? workingDirectory = null,
         IReadOnlyDictionary<string, string>? environment = null,
+        bool preferPseudoTerminal = true,
         CancellationToken ct = default)
     {
-        var session = new TerminalSession(fileName, arguments, workingDirectory ?? _options.HomePath, BuildEnvironment(environment), _logger);
+        var session = new TerminalSession(
+            fileName,
+            arguments,
+            workingDirectory ?? _options.HomePath,
+            BuildEnvironment(environment),
+            preferPseudoTerminal,
+            _logger);
         session.Start();
         _sessions[session.Id] = session;
         return Task.FromResult<ITerminalSession>(session);
@@ -108,6 +115,7 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
         private readonly IReadOnlyList<string> _arguments;
         private readonly string _workingDirectory;
         private readonly IReadOnlyDictionary<string, string> _environment;
+        private readonly bool _preferPseudoTerminal;
 
         private ITerminalChannel? _channel;
 
@@ -116,6 +124,7 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
             IReadOnlyList<string> arguments,
             string workingDirectory,
             IReadOnlyDictionary<string, string> environment,
+            bool preferPseudoTerminal,
             ILogger logger)
         {
             _logger = logger;
@@ -126,6 +135,7 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
             _arguments = arguments;
             _workingDirectory = workingDirectory;
             _environment = environment;
+            _preferPseudoTerminal = preferPseudoTerminal;
         }
 
         public string Id { get; }
@@ -181,6 +191,16 @@ public sealed partial class TerminalService : ITerminalService, IAsyncDisposable
         /// </summary>
         private ITerminalChannel OpenChannel()
         {
+            if (!_preferPseudoTerminal)
+            {
+                // Asked for pipes on purpose: this session exists to feed a token to a CLI that
+                // reads standard input to the end, and only a pipe can actually be closed. Ctrl-D
+                // does not end a read on a Windows console, which is what left these logins hanging.
+                var pipe = new ProcessTerminalChannel(_fileName, _arguments, _workingDirectory, _environment, usePseudoTerminal: false);
+                pipe.Start();
+                return pipe;
+            }
+
             if (OperatingSystem.IsWindows())
             {
                 var pty = ConPtyTerminalChannel.TryStart(_fileName, _arguments, _workingDirectory, _environment, Columns, Rows);

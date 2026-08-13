@@ -138,6 +138,40 @@ public class WindowsTerminalTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// The token flows — glab --stdin, gh --with-token, codex --with-api-key — read standard input
+    /// to the end. A pty cannot deliver that end on Windows: Ctrl-D is just a character to a console,
+    /// so the CLI sat waiting forever with nothing on screen. Asking for pipes is what closes it.
+    /// </summary>
+    [Fact]
+    public async Task A_secret_sent_without_a_terminal_ends_the_child_s_standard_input()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var service = new TerminalService(
+            Options.Create(new OrchestratorOptions { HomePath = _home }),
+            NullLogger<TerminalService>.Instance);
+
+        await using (service as IAsyncDisposable ?? throw new InvalidOperationException())
+        {
+            var session = await service.StartAsync(
+                "powershell",
+                ["-NoProfile", "-NonInteractive", "-Command", "if ([Console]::In.ReadToEnd().Trim().Length -gt 0) { 'GOT-INPUT' }"],
+                preferPseudoTerminal: false);
+
+            await session.SendSecretAsync("a-token-value");
+
+            var answer = await WaitForOutputAsync(session, TimeSpan.FromSeconds(45));
+
+            Assert.Contains("GOT-INPUT", answer, StringComparison.Ordinal);
+            Assert.Equal(0, session.ExitCode);
+
+            // And the token itself never reaches the transcript the user is looking at.
+            Assert.DoesNotContain("a-token-value", answer, StringComparison.Ordinal);
+        }
+    }
+
     private static async Task<string> WaitForOutputAsync(Application.Abstractions.ITerminalSession session, TimeSpan timeout)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;

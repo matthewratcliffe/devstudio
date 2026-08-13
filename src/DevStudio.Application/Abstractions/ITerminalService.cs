@@ -38,12 +38,17 @@ public interface ITerminalSession : IAsyncDisposable
 
 public interface ITerminalService
 {
-    /// <summary>Starts a terminal-attached command and tracks it until it is disposed.</summary>
+    /// <summary>
+    /// Starts a terminal-attached command and tracks it until it is disposed. Pass
+    /// <paramref name="preferPseudoTerminal"/> as false for the flows that hand a CLI a token on
+    /// standard input: those need a real end-of-input, which only a pipe can give.
+    /// </summary>
     Task<ITerminalSession> StartAsync(
         string fileName,
         IReadOnlyList<string> arguments,
         string? workingDirectory = null,
         IReadOnlyDictionary<string, string>? environment = null,
+        bool preferPseudoTerminal = true,
         CancellationToken ct = default);
 
     ITerminalSession? Get(string id);
