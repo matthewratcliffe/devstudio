@@ -62,8 +62,14 @@ public static class DesktopPaths
             // to nag about them.
             ["Orchestrator__UpdateCheckEnabled"] = "false",
 
-            // No bind mounts to declare — every repository under the user's home is attachable.
+            // No bind mounts to declare — the picker opens on the user's home directory and can
+            // reach anything under it.
             ["Orchestrator__LocalRepositoryRoots__0"] = DefaultRepositoryRoot,
+
+            // Checkouts are not all under the home directory: on Windows they are as likely to be on
+            // a second drive. The desktop build is already running as the user, so nothing is gained
+            // by hiding the rest of their own filesystem from a folder picker they drove there.
+            ["Orchestrator__AllowAllLocalDrives"] = "true",
         };
     }
 }

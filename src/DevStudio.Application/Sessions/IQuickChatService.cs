@@ -1,3 +1,4 @@
+using DevStudio.Application.Agents;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Providers;
 using DevStudio.Domain.Sessions;
@@ -16,5 +17,20 @@ public interface IQuickChatService
         string prompt,
         IReadOnlyList<string>? mcpServerIds = null,
         PermissionMode? permissionMode = null,
+        SessionModelSettings? model = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Points an existing quick chat at a different CLI from the next turn on. The transcript stays
+    /// where it is, but the provider's own conversation id cannot: it belongs to the CLI being left
+    /// behind, so the new one starts from the rolling summary instead of the other's history.
+    ///
+    /// Refused for a session belonging to a configured agent — that agent's CLI is part of what it
+    /// is, and changing it silently for one conversation would make the agent a lie.
+    /// </summary>
+    Task<ChatSession> SwitchProviderAsync(
+        string sessionId,
+        AiProvider provider,
+        string? cliProviderId,
         CancellationToken ct = default);
 }

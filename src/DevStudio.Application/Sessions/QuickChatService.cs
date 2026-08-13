@@ -1,4 +1,5 @@
 using DevStudio.Application.Abstractions;
+using DevStudio.Application.Agents;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Providers;
 using DevStudio.Domain.Sessions;
@@ -15,12 +16,18 @@ public sealed class QuickChatService : IQuickChatService
     private readonly IEntityStore<Agent> _agents;
     private readonly IProviderCliRegistry _clis;
     private readonly ISessionManager _sessions;
+    private readonly IEntityStore<ChatSession> _sessionStore;
 
-    public QuickChatService(IEntityStore<Agent> agents, IProviderCliRegistry clis, ISessionManager sessions)
+    public QuickChatService(
+        IEntityStore<Agent> agents,
+        IProviderCliRegistry clis,
+        ISessionManager sessions,
+        IEntityStore<ChatSession> sessionStore)
     {
         _agents = agents;
         _clis = clis;
         _sessions = sessions;
+        _sessionStore = sessionStore;
     }
 
     public async Task<ChatSession> StartAsync(
@@ -29,6 +36,7 @@ public sealed class QuickChatService : IQuickChatService
         string prompt,
         IReadOnlyList<string>? mcpServerIds = null,
         PermissionMode? permissionMode = null,
+        SessionModelSettings? model = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(prompt))
@@ -41,11 +49,49 @@ public sealed class QuickChatService : IQuickChatService
             AgentId = agent.Id,
             Prompt = prompt.Trim(),
             McpServerIds = mcpServerIds ?? [],
+            Model = model,
             // An explicit choice wins. Otherwise: plan mode refuses every MCP tool call, so a chat
             // with servers attached cannot be left in it.
             PermissionMode = permissionMode
                              ?? (mcpServerIds is { Count: > 0 } ? Domain.Agents.PermissionMode.AcceptEdits : null),
         }, ct);
+    }
+
+    public async Task<ChatSession> SwitchProviderAsync(
+        string sessionId,
+        AiProvider provider,
+        string? cliProviderId,
+        CancellationToken ct = default)
+    {
+        // The live instance when there is one, so the change lands on the object the chat is
+        // rendering and the next turn reads.
+        var session = await _sessions.GetAsync(sessionId, ct)
+                      ?? throw new InvalidOperationException("That session no longer exists.");
+
+        var current = await _agents.GetAsync(session.AgentId, ct);
+        if (current is not null && !current.IsQuickChat)
+            throw new InvalidOperationException(
+                $"'{current.Name}' is configured to use {current.Provider}. Change the CLI on the agent, or start a quick chat.");
+
+        if (session.Provider == provider && session.CliProviderId == cliProviderId)
+            return session;
+
+        var agent = await GetOrCreateAgentAsync(provider, cliProviderId, ct);
+        var cli = await _clis.ResolveAsync(provider, cliProviderId, ct);
+
+        session.AgentId = agent.Id;
+        session.AgentName = agent.Name;
+        session.Provider = provider;
+        session.CliProviderId = cliProviderId;
+        session.CliProviderName = provider == AiProvider.Custom ? cli.DisplayName : null;
+
+        // The id identifies a conversation inside the CLI being left behind; handing it to another one
+        // is at best ignored and at worst an error, so the next turn starts fresh.
+        session.ProviderSessionId = null;
+
+        await _sessionStore.UpsertAsync(session, ct);
+
+        return session;
     }
 
     private async Task<Agent> GetOrCreateAgentAsync(AiProvider provider, string? cliProviderId, CancellationToken ct)

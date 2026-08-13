@@ -1,0 +1,237 @@
+@page "/team-settings"
+@inject ITeamSettingsService Teams
+@inject IEntityStore<GitRepository> RepositoryStore
+@inject IEntityStore<Agent> AgentStore
+@inject IEntityStore<Skill> SkillStore
+@inject IEntityStore<Workflow> WorkflowStore
+@inject IEntityStore<Schedule> ScheduleStore
+
+<PageTitle>Team settings · devStudio</PageTitle>
+
+<div class="card" style="margin-bottom:1.2rem">
+    <div class="section-tag">What this is</div>
+    <p class="small">
+        One repository holding the team's setup — agents, workflows, skills, schedules and the standards
+        every session inherits. Point each install at it and they all get the same definitions, reviewed
+        and versioned like the rest of your code instead of retyped on every machine.
+    </p>
+    <p class="small">
+        Anything you make in the UI stays yours: local definitions are never touched by a sync, so your
+        own agents and skills sit alongside the team's. The repository owns only what it defines, and
+        deleting a file there does remove what it defined here.
+    </p>
+</div>
+
+<div class="card" style="margin-bottom:1.2rem">
+    <div class="section-tag">Where it lives</div>
+
+    @if (_repositories.Count == 0)
+    {
+        <p class="mono-dim">
+            No repositories yet. Clone or attach the settings repository on the
+            <a href="/repositories">Repositories</a> page first.
+        </p>
+    }
+    else
+    {
+        <div class="form-grid">
+            <div class="field">
+                <label>Repository</label>
+                <select value="@(_settings.RepositoryId ?? string.Empty)"
+                        @onchange="e => _settings.RepositoryId = Blank(e.Value?.ToString())">
+                    <option value="">None — team settings off</option>
+                    @foreach (var repository in _repositories)
+                    {
+                        <option value="@repository.Id">@repository.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="field">
+                <label>Folder in the repository</label>
+                <input type="text" @bind="_settings.Folder" placeholder="devstudio" />
+                <span class="hint">Blank for the repository root.</span>
+            </div>
+        </div>
+
+        <label class="check">
+            <input type="checkbox" @bind="_settings.PullBeforeSync" />
+            <span>Pull before reading, so a sync is never stale</span>
+        </label>
+        <label class="check">
+            <input type="checkbox" @bind="_settings.SyncOnStart" />
+            <span>Sync on start, so a machine that has been off catches up by itself</span>
+        </label>
+
+        <div class="btn-row" style="margin-top:0.8rem">
+            <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="SaveAsync">Save</button>
+            <button class="btn btn-sm" disabled="@(_busy || _settings.RepositoryId is null)" @onclick="SyncAsync">
+                @(_syncing ? "Syncing…" : "Sync now")
+            </button>
+            <button class="btn btn-sm btn-ghost" disabled="@(_busy || _settings.RepositoryId is null)" @onclick="ScaffoldAsync">
+                Write starter files
+            </button>
+        </div>
+
+        <div class="mono-dim" style="margin-top:0.6rem">
+            @if (_settings.LastSyncedAt is { } synced)
+            {
+                <text>Last synced <LocalTime Value="@synced" Format="daytime" />.</text>
+            }
+            else
+            {
+                <text>Never synced.</text>
+            }
+            Starter files give you a working example of each format to edit and commit.
+        </div>
+
+        @if (_settings.LastError is { Length: > 0 } error)
+        {
+            <div class="toast err" style="margin-top:0.7rem">@error</div>
+        }
+    }
+</div>
+
+@if (_settings.LastLog.Count > 0)
+{
+    <div class="card" style="margin-bottom:1.2rem">
+        <div class="section-tag">Last sync</div>
+        <ul class="list-reset small">
+            @foreach (var line in _settings.LastLog)
+            {
+                <li class="mono-dim">@line</li>
+            }
+        </ul>
+    </div>
+}
+
+<div class="card">
+    <div class="section-tag">What the repository owns here</div>
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+            <tr><th>Kind</th><th>From the repository</th><th>Yours</th><th></th></tr>
+            </thead>
+            <tbody>
+            @foreach (var row in _rows)
+            {
+                <tr>
+                    <td>@row.Kind</td>
+                    <td>@row.Team</td>
+                    <td class="mono-dim">@row.Local</td>
+                    <td><a class="btn btn-sm btn-ghost" href="@row.Href">Open</a></td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+    <div class="mono-dim" style="margin-top:0.6rem">
+        Team definitions are editable here, but the next sync writes the repository's version back over
+        anything you change. Copy one instead if you want your own.
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private DevStudio.Domain.Teams.TeamSettings _settings = new();
+    private IReadOnlyList<GitRepository> _repositories = [];
+    private List<Row> _rows = [];
+    private bool _syncing;
+    private bool _saving;
+
+    private bool _busy => _syncing || _saving;
+
+    private sealed record Row(string Kind, int Team, int Local, string Href);
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader("Team settings", "Shared definitions, out of a git repository");
+    }
+
+    private async Task ReloadAsync()
+    {
+        _settings = await Teams.GetAsync();
+        _repositories = await RepositoryStore.GetAllAsync();
+
+        var agents = await AgentStore.GetAllAsync();
+        var skills = await SkillStore.GetAllAsync();
+        var workflows = await WorkflowStore.GetAllAsync();
+        var schedules = await ScheduleStore.GetAllAsync();
+
+        _rows =
+        [
+            // Quick chat agents are an implementation detail of the chat window, not something anybody
+            // counts as one of theirs.
+            Count("Agents", agents.Where(a => !a.IsQuickChat), a => a.TeamSourcePath, "/agents"),
+            Count("Workflows", workflows, w => w.TeamSourcePath, "/workflows"),
+            Count("Schedules", schedules, s => s.TeamSourcePath, "/schedules"),
+            Count("Skills", skills, s => s.TeamSourcePath, "/skills"),
+        ];
+    }
+
+    private static Row Count<T>(string kind, IEnumerable<T> items, Func<T, string?> source, string href)
+    {
+        var all = items.ToList();
+        var team = all.Count(item => !string.IsNullOrEmpty(source(item)));
+
+        return new Row(kind, team, all.Count - team, href);
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        try
+        {
+            _settings = await Teams.SaveAsync(_settings);
+            Layout.Notify("Team settings saved.", "ok");
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify(ex.Message, "err");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task SyncAsync()
+    {
+        // Saved first, or a sync would read the repository the page is no longer showing.
+        _settings = await Teams.SaveAsync(_settings);
+
+        _syncing = true;
+        try
+        {
+            var result = await Teams.SyncAsync();
+            await ReloadAsync();
+            Layout.Notify(result.Message, result.Succeeded ? "ok" : "err");
+        }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+
+    private async Task ScaffoldAsync()
+    {
+        _settings = await Teams.SaveAsync(_settings);
+
+        _saving = true;
+        try
+        {
+            var result = await Teams.ScaffoldAsync();
+            _settings.LastLog = [.. result.Log];
+            Layout.Notify(result.Message, result.Succeeded ? "ok" : "err");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+}

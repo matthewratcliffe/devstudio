@@ -31,6 +31,10 @@
             <tr>
                 <td>
                     @schedule.Name
+                    @if (schedule.TeamSourcePath is { Length: > 0 } source)
+                    {
+                        <span class="pill" style="margin-left:0.4rem" title="From the team settings repository: @source">team</span>
+                    }
                     @if (!schedule.Enabled)
                     {
                         <span class="pill pill-red" style="margin-left:0.4rem">paused</span>

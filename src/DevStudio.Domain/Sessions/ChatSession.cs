@@ -128,6 +128,33 @@ public sealed class ChatSession : Entity
     public string? CliProviderId { get; set; }
     public string? CliProviderName { get; set; }
     public PermissionMode PermissionMode { get; set; }
+
+    /// <summary>
+    /// Model for this conversation, overriding the agent's. Null keeps the agent's choice, which is
+    /// what every session started before anyone touched this holds.
+    /// </summary>
+    public string? Model { get; set; }
+
+    /// <summary>Thinking level for this conversation, overriding the agent's. Null keeps the agent's.</summary>
+    public string? Effort { get; set; }
+
+    /// <summary>Overrides the agent's opening model. Null keeps the agent's.</summary>
+    public string? OpeningModel { get; set; }
+
+    /// <summary>Overrides the agent's opening thinking level. Null keeps the agent's.</summary>
+    public string? OpeningEffort { get; set; }
+
+    /// <summary>
+    /// Overrides how many opening turns the opening model covers. Null keeps the agent's; zero turns
+    /// off a handover the agent would otherwise do.
+    /// </summary>
+    public int? OpeningTurns { get; set; }
+
+    /// <summary>
+    /// The model the last turn actually ran on, recorded so the chat can say which side of a handover
+    /// it is on rather than making the reader work it out.
+    /// </summary>
+    public string? ModelInUse { get; set; }
     public SessionStatus Status { get; set; } = SessionStatus.Pending;
     public SessionTrigger Trigger { get; set; } = SessionTrigger.Manual;
 

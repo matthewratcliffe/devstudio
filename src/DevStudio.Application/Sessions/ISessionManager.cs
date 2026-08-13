@@ -1,3 +1,4 @@
+using DevStudio.Application.Agents;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Sessions;
 
@@ -20,6 +21,13 @@ public sealed record StartSessionRequest
     /// MCP tool call outright, so a chat that is meant to use tools cannot run in it.
     /// </summary>
     public PermissionMode? PermissionMode { get; init; }
+
+    /// <summary>
+    /// Model settings for this conversation only, overriding the agent's — including a handover from
+    /// an opening model to a cheaper one. Null leaves the agent in charge of all of it.
+    /// </summary>
+    public SessionModelSettings? Model { get; init; }
+
     public SessionTrigger Trigger { get; init; } = SessionTrigger.Manual;
     public string? WorkflowRunId { get; init; }
     public string? ScheduleId { get; init; }

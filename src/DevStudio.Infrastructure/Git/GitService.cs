@@ -20,6 +20,11 @@ public sealed class GitService : IGitService
     private readonly IEntityStore<GitRepository> _repositories;
     private readonly OrchestratorOptions _options;
     private readonly ILogger<GitService> _logger;
+    private readonly IReadOnlyList<string> _configuredRoots;
+
+    private static readonly TimeSpan RootCacheWindow = TimeSpan.FromSeconds(10);
+    private IReadOnlyList<string> _cachedRoots = [];
+    private DateTimeOffset _rootsCachedAt;
 
     public GitService(
         IProcessRunner runner,
@@ -35,10 +40,31 @@ public sealed class GitService : IGitService
         _repositories = repositories;
         _options = options.Value;
         _logger = logger;
-        LocalRepositoryRoots = LocalRepositoryPaths.NormaliseRoots(_options.LocalRepositoryRoots);
+        _configuredRoots = LocalRepositoryPaths.NormaliseRoots(_options.LocalRepositoryRoots);
     }
 
-    public IReadOnlyList<string> LocalRepositoryRoots { get; }
+    public IReadOnlyList<string> LocalRepositoryRoots => ResolveRoots();
+
+    /// <summary>
+    /// The allow-list the picker works within: the configured mounts, plus every drive on the machine
+    /// when the deployment has said that is fine. Drives are enumerated rather than configured because
+    /// they change while the app runs, so the answer is held for a few seconds instead of for the
+    /// lifetime of the service — the UI reads this on every render.
+    /// </summary>
+    private IReadOnlyList<string> ResolveRoots()
+    {
+        if (!_options.AllowAllLocalDrives)
+            return _configuredRoots;
+
+        if (_cachedRoots.Count > 0 && DateTimeOffset.UtcNow - _rootsCachedAt < RootCacheWindow)
+            return _cachedRoots;
+
+        // Configured roots come first so the picker opens on the folder somebody chose to name,
+        // rather than at the top of a drive.
+        _cachedRoots = LocalRepositoryPaths.NormaliseRoots([.. _configuredRoots, .. LocalRepositoryPaths.DriveRoots()]);
+        _rootsCachedAt = DateTimeOffset.UtcNow;
+        return _cachedRoots;
+    }
 
     public async Task<GitRepository> CloneAsync(
         string remoteUrl,
@@ -97,10 +123,15 @@ public sealed class GitService : IGitService
         bool IsRegistered(string candidate) =>
             registered.Any(p => string.Equals(p, candidate, LocalRepositoryPaths.Comparison));
 
-        // The top level is the configured roots themselves — there is nothing above them to browse.
+        // Read once: the drive list behind it is recomputed periodically, and a listing that used one
+        // set of roots to resolve a path and another to decide what is above it would be incoherent.
+        var allowed = LocalRepositoryRoots;
+
+        // The top level is the roots themselves — the configured mounts and, where the deployment
+        // allows it, each drive on the machine.
         if (string.IsNullOrWhiteSpace(path))
         {
-            var roots = LocalRepositoryRoots
+            var roots = allowed
                 .Where(Directory.Exists)
                 .Select(r => new LocalDirectoryEntry(r, r, LocalRepositoryPaths.IsGitRepository(r), IsRegistered(r)))
                 .ToList();
@@ -108,17 +139,27 @@ public sealed class GitService : IGitService
             return new LocalBrowseResult(null, null, roots);
         }
 
-        if (!LocalRepositoryPaths.TryResolveWithinRoots(path, LocalRepositoryRoots, out var resolved))
-            throw new InvalidOperationException("That path is not inside a configured local repository root.");
+        if (!LocalRepositoryPaths.TryResolveWithinRoots(path, allowed, out var resolved))
+            throw new InvalidOperationException("That path is not inside a folder devStudio is allowed to browse.");
 
         if (!Directory.Exists(resolved))
-            throw new InvalidOperationException($"'{resolved}' does not exist inside the container. Is the bind mount still there?");
+            throw new InvalidOperationException($"'{resolved}' does not exist. Has the folder moved, or the mount gone?");
 
         var children = new List<LocalDirectoryEntry>();
 
         try
         {
-            foreach (var child in Directory.EnumerateDirectories(resolved).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+            // A drive root holds folders the user has no business in — System Volume Information,
+            // $Recycle.Bin — and one unreadable entry used to fail the whole listing.
+            var enumeration = new EnumerationOptions
+            {
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.System,
+                RecurseSubdirectories = false,
+            };
+
+            foreach (var child in Directory.EnumerateDirectories(resolved, "*", enumeration)
+                         .OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
             {
                 var name = Path.GetFileName(child);
 
@@ -135,12 +176,15 @@ public sealed class GitService : IGitService
         }
         catch (UnauthorizedAccessException)
         {
-            throw new InvalidOperationException($"'{resolved}' is not readable by the container user.");
+            throw new InvalidOperationException($"'{resolved}' is not readable by the user devStudio runs as.");
         }
 
-        // Root entries have no parent, which is what stops the picker walking out of the allow-list.
-        var isRoot = LocalRepositoryRoots.Any(r => string.Equals(r, resolved, LocalRepositoryPaths.Comparison));
-        var parent = isRoot ? null : Path.GetDirectoryName(resolved);
+        // Up is offered only as far as the allow-list reaches, which is what stops the picker walking
+        // out of it. A configured mount nested inside a browsable drive can still be stepped out of,
+        // because its parent is allowed in its own right.
+        var parent = LocalRepositoryPaths.TryResolveWithinRoots(Path.GetDirectoryName(resolved), allowed, out var above)
+            ? above
+            : null;
 
         return new LocalBrowseResult(resolved, parent, children);
     }
@@ -148,13 +192,13 @@ public sealed class GitService : IGitService
     public async Task<GitRepository> AttachLocalAsync(string path, string? name, CancellationToken ct = default)
     {
         if (LocalRepositoryRoots.Count == 0)
-            throw new InvalidOperationException("No local repository roots are configured, so nothing can be attached.");
+            throw new InvalidOperationException("No local folders are browsable, so nothing can be attached.");
 
         if (!LocalRepositoryPaths.TryResolveWithinRoots(path, LocalRepositoryRoots, out var resolved))
-            throw new InvalidOperationException("That path is not inside a configured local repository root.");
+            throw new InvalidOperationException("That path is not inside a folder devStudio is allowed to attach from.");
 
         if (!Directory.Exists(resolved))
-            throw new InvalidOperationException($"'{resolved}' does not exist inside the container.");
+            throw new InvalidOperationException($"'{resolved}' does not exist.");
 
         if (!LocalRepositoryPaths.IsGitRepository(resolved))
             throw new InvalidOperationException($"'{resolved}' is not a git repository — no .git there.");

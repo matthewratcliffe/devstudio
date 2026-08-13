@@ -407,6 +407,17 @@ public sealed class WorkspaceService : IWorkspaceService
         {
             var settings = await _globals.GetAsync(GlobalSettings.WellKnownId, ct);
 
+            // The team's repository first, then whatever this install added on top of it: the local
+            // rule is the narrower one, and the later line is the one a model treats as the override.
+            if (settings is not null && !string.IsNullOrWhiteSpace(settings.TeamInstructions))
+            {
+                builder.AppendLine("# Team standards");
+                builder.AppendLine("Shared by everyone working on this, from the team settings repository.");
+                builder.AppendLine();
+                builder.AppendLine(settings.TeamInstructions);
+                builder.AppendLine();
+            }
+
             if (settings is not null && !string.IsNullOrWhiteSpace(settings.Instructions))
             {
                 builder.AppendLine("# Standards");

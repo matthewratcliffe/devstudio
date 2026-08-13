@@ -61,7 +61,7 @@
 <div class="card" style="margin-bottom:1.2rem">
     <div class="section-tag">Attach local folder</div>
 
-    @if (Git.LocalRepositoryRoots.Count == 0)
+    @if (_roots.Count == 0)
     {
         <p class="mono-dim">
             Nothing is mounted. To work on the same checkout your IDE has open, bind mount it into the
@@ -71,20 +71,34 @@
   - D:/repos:/host/repos
 environment:
   Orchestrator__LocalRepositoryRoots__0: "/host/repos"</pre>
+        <p class="mono-dim">
+            A desktop install needs none of this: it browses every drive on the machine already.
+        </p>
     }
     else
     {
         <div class="btn-row" style="margin-bottom:0.6rem">
-            <button class="btn btn-sm btn-ghost" disabled="@(_browsing || _browse?.ParentPath is null && _browse?.Path is null)"
-                    @onclick="() => BrowseAsync(_browse?.Path is null ? null : _browse.ParentPath)">
+            <button class="btn btn-sm btn-ghost" disabled="@(_browsing || _browse?.Path is null)"
+                    @onclick="() => BrowseAsync(_browse?.ParentPath)">
                 ↑ Up
             </button>
-            <span class="mono-dim">@(_browse?.Path ?? "mounted roots")</span>
+            <button class="btn btn-sm btn-ghost" disabled="@_browsing" @onclick="() => BrowseAsync(null)">
+                Drives
+            </button>
+            <span class="mono-dim">@(_browse?.Path ?? "drives and mounted roots")</span>
         </div>
 
-        <div class="field" style="max-width:320px">
-            <label>Name (optional)</label>
-            <input type="text" @bind="_localName" placeholder="the folder name" />
+        <div class="form-grid">
+            <div class="field">
+                <label>Go to path</label>
+                <input type="text" @bind="_jumpPath" @onkeydown="OnJumpKeyDown"
+                       placeholder="@JumpPlaceholder" />
+                <span class="hint">Paste a path instead of clicking down to it. Enter to open.</span>
+            </div>
+            <div class="field">
+                <label>Name (optional)</label>
+                <input type="text" @bind="_localName" placeholder="the folder name" />
+            </div>
         </div>
 
         @if (_browse is { Entries.Count: 0 })
@@ -125,6 +139,7 @@ environment:
         }
 
         <div class="mono-dim" style="margin-top:0.7rem">
+            Browsing @_roots.Count root@(_roots.Count == 1 ? "" : "s"): @string.Join(", ", _roots).
             Attached repos are never cloned or deleted. Worktrees for them are cut into
             <code>@Options.Value.LocalWorktreesFolderName</code> beside the checkout, so the IDE sees them too.
         </div>
@@ -217,9 +232,16 @@ environment:
     private string? _branchesFor;
 
     private LocalBrowseResult? _browse;
+    private IReadOnlyList<string> _roots = [];
     private bool _browsing;
     private bool _attaching;
     private string _localName = string.Empty;
+    private string _jumpPath = string.Empty;
+
+    /// <summary>An example in the shape of this machine's paths, not a hard-coded Windows one.</summary>
+    private string JumpPlaceholder => _roots.Count > 0
+        ? Path.Combine(_roots[0], "path", "to", "repo")
+        : "path to a repository";
 
     private string _remoteUrl = string.Empty;
     private string _name = string.Empty;
@@ -230,7 +252,11 @@ environment:
     {
         await ReloadAsync();
 
-        if (Git.LocalRepositoryRoots.Count > 0)
+        // Held in a field: the roots include the machine's drives, which are re-enumerated behind
+        // this call, and a render should not be re-reading the filesystem.
+        _roots = Git.LocalRepositoryRoots;
+
+        if (_roots.Count > 0)
             await BrowseAsync(null);
     }
 
@@ -263,12 +289,24 @@ environment:
         }
     }
 
+    /// <summary>Opens the typed path, which is faster than clicking down a deep tree.</summary>
+    private async Task OnJumpKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key != "Enter" || string.IsNullOrWhiteSpace(_jumpPath))
+            return;
+
+        await BrowseAsync(_jumpPath.Trim());
+    }
+
     private async Task BrowseAsync(string? path)
     {
         _browsing = true;
         try
         {
             _browse = await Git.BrowseLocalAsync(path);
+
+            // Cleared only on success, so a rejected path stays on screen to be corrected.
+            _jumpPath = string.Empty;
         }
         catch (Exception ex)
         {
@@ -372,7 +410,7 @@ environment:
         await RepositoryStore.DeleteAsync(repository.Id);
         await ReloadAsync();
 
-        if (wasLocal && Git.LocalRepositoryRoots.Count > 0)
+        if (wasLocal && _roots.Count > 0)
             await BrowseAsync(_browse?.Path);
 
         Layout.Notify(wasLocal ? "Detached. The folder on the mount is untouched." : "Removed from the list. The clone is still on disk.", "ok");

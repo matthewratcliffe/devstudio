@@ -3,111 +3,136 @@
 @inject IQuickChatService QuickChats
 @inject ISessionManager Sessions
 @inject IEntityStore<McpServer> McpStore
+@inject IEntityStore<CliProvider> CliProviderStore
+@inject Microsoft.Extensions.Options.IOptions<OrchestratorOptions> Options
+@inject IJSRuntime Js
 @inject NavigationManager Nav
 
-<PageTitle>Quick chat · devStudio</PageTitle>
+<PageTitle>New chat · devStudio</PageTitle>
 
-<div class="card" style="max-width:900px;margin-bottom:1.2rem">
-    <div class="section-tag">Just ask</div>
-    <p class="small">
-        No project, no agent, no worktree — pick a CLI and talk. It runs in a scratch directory, and
-        read-only unless you say otherwise, so nothing gets edited by surprise. Everything else still
-        applies: the session is saved, you can steer it, and it appears in Sessions like any other.
-    </p>
+<div class="chat-layout">
+    <div class="chat-main">
+        <div class="chat-scroll">
+            <div class="chat-thread">
+                <div class="empty" style="margin-bottom:1.2rem">
+                    <div class="big">💬</div>
+                    Type below to start. No project, no agent, no worktree — it runs in a scratch
+                    directory, read-only unless you say otherwise. The CLI, permissions, model and MCP
+                    servers are on the right, and stay changeable once the chat is going.
+                </div>
 
-    <div class="field">
-        <label>Talk to</label>
-        <select value="@_selected" @onchange="e => _selected = e.Value?.ToString() ?? string.Empty">
-            @foreach (var cli in _clis)
-            {
-                <option value="@Key(cli)">@cli.DisplayName</option>
-            }
-        </select>
-    </div>
-
-    <div class="field">
-        <label>Permissions</label>
-        <select @bind="_permissionMode">
-            <option value="@PermissionMode.Plan">Plan — read only</option>
-            <option value="@PermissionMode.Default">Default — ask for everything</option>
-            <option value="@PermissionMode.AcceptEdits">Accept edits</option>
-            <option value="@PermissionMode.Unrestricted">No restrictions</option>
-        </select>
-        <span class="hint">You can change this later from the chat itself.</span>
-    </div>
-
-    @if (_mcpServers.Count > 0)
-    {
-        <div class="field">
-            <label>MCP servers</label>
-            <div class="btn-row">
-                @foreach (var server in _mcpServers)
+                @if (_recent.Count > 0)
                 {
-                    <label class="check" style="margin:0">
-                        <input type="checkbox" checked="@(_selectedMcp.Contains(server.Id) || server.IsDefault)"
-                               disabled="@server.IsDefault"
-                               @onchange="e => ToggleMcp(server.Id, e)" />
-                        <span>@server.Name @(server.IsDefault ? "(always on)" : "")</span>
-                    </label>
+                    <div class="section-tag">Recent chats</div>
+                    <div class="table-wrap">
+                        <table class="table">
+                            <thead>
+                            <tr><th>Chat</th><th>CLI</th><th>Status</th><th>When</th></tr>
+                            </thead>
+                            <tbody>
+                            @foreach (var session in _recent)
+                            {
+                                <tr style="cursor:pointer" @onclick="() => Open(session)">
+                                    <td>@session.Title</td>
+                                    <td class="mono-dim">@(session.CliProviderName ?? session.Provider.ToString())</td>
+                                    <td><StatusPill Session="session.Status" /></td>
+                                    <td class="mono-dim"><LocalTime Value="@session.CreatedAt" Format="daytime" /></td>
+                                </tr>
+                            }
+                            </tbody>
+                        </table>
+                    </div>
                 }
             </div>
-            <span class="hint">Wired into this chat only. Add more later from the chat itself.</span>
+        </div>
+
+        <div class="composer">
+            <div class="composer-inner">
+                <div class="composer-row">
+                    <textarea @bind="_prompt" @bind:event="oninput" @onkeydown="OnKeyDown" @ref="_draftElement"
+                              placeholder="Ask anything. Enter to send, Shift+Enter for a new line."></textarea>
+                    <div style="display:flex;flex-direction:column;gap:0.4rem">
+                        <button class="btn btn-primary" disabled="@(_starting || string.IsNullOrWhiteSpace(_prompt))"
+                                @onclick="StartAsync">
+                            @(_starting ? "Starting…" : "Send")
+                        </button>
+                    </div>
+                </div>
+                <div class="mono-dim" style="margin-top:0.4rem">
+                    @SelectedName · @ModeSummary · scratch workspace
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <aside class="chat-side">
+        <div class="section-tag">New chat</div>
+
+        <div class="field">
+            <label>Talk to</label>
+            <select value="@_selected" @onchange="SelectCli">
+                @foreach (var cli in _clis)
+                {
+                    <option value="@Key(cli)">@cli.DisplayName</option>
+                }
+            </select>
+        </div>
+
+        <div class="field">
+            <label>Permissions</label>
+            <select @bind="_permissionMode">
+                <option value="@PermissionMode.Plan">Plan — read only</option>
+                <option value="@PermissionMode.Default">Default — ask for everything</option>
+                <option value="@PermissionMode.AcceptEdits">Accept edits</option>
+                <option value="@PermissionMode.Unrestricted">No restrictions</option>
+            </select>
+            <span class="hint">Changeable from the chat afterwards.</span>
+        </div>
+
+        <div class="divider"></div>
+        <div class="section-tag">Model</div>
+        <ModelPicker @bind-Value="_model" Models="_models" Efforts="_efforts" />
+
+        @if (_mcpServers.Count > 0)
+        {
+            <div class="divider"></div>
+            <div class="section-tag">MCP servers</div>
+            @foreach (var server in _mcpServers)
+            {
+                <label class="check">
+                    <input type="checkbox" checked="@(_selectedMcp.Contains(server.Id) || server.IsDefault)"
+                           disabled="@server.IsDefault"
+                           @onchange="e => ToggleMcp(server.Id, e)" />
+                    <span>@server.Name @(server.IsDefault ? "(always on)" : "")</span>
+                </label>
+            }
+            <div class="mono-dim">Wired into this chat only.</div>
             @if (_permissionMode == PermissionMode.Plan && (_selectedMcp.Count > 0 || _mcpServers.Any(s => s.IsDefault)))
             {
-                <span class="hint" style="color:var(--amber)">
+                <div class="mono-dim" style="color:var(--amber)">
                     Plan mode refuses every MCP tool call. Choose Accept edits to actually use these.
-                </span>
+                </div>
             }
-        </div>
-    }
-
-    <div class="field">
-        <label>Message</label>
-        <textarea @bind="_prompt" @bind:event="oninput" rows="6" @onkeydown="OnKeyDown"
-                  placeholder="Ask anything. Ctrl+Enter to send."></textarea>
-    </div>
-
-    <div class="btn-row">
-        <button class="btn btn-primary" disabled="@(_starting || string.IsNullOrWhiteSpace(_prompt))" @onclick="StartAsync">
-            @(_starting ? "Starting…" : "Start chat")
-        </button>
-        <span class="mono-dim">@ModeSummary · scratch workspace</span>
-    </div>
+        }
+    </aside>
 </div>
-
-@if (_recent.Count > 0)
-{
-    <div class="section-tag">Recent quick chats</div>
-    <div class="table-wrap" style="max-width:900px">
-        <table class="table">
-            <thead>
-            <tr><th>Chat</th><th>CLI</th><th>Status</th><th>When</th></tr>
-            </thead>
-            <tbody>
-            @foreach (var session in _recent)
-            {
-                <tr style="cursor:pointer" @onclick="() => Open(session)">
-                    <td>@session.Title</td>
-                    <td class="mono-dim">@(session.CliProviderName ?? session.Provider.ToString())</td>
-                    <td><StatusPill Session="session.Status" /></td>
-                    <td class="mono-dim"><LocalTime Value="@session.CreatedAt" Format="daytime" /></td>
-                </tr>
-            }
-            </tbody>
-        </table>
-    </div>
-}
 
 @code {
     [CascadingParameter] private MainLayout Layout { get; set; } = default!;
 
     private IReadOnlyList<IProviderCli> _clis = [];
+    private IReadOnlyList<CliProvider> _cliProviders = [];
     private List<ChatSession> _recent = [];
     private string _selected = string.Empty;
     private string _prompt = string.Empty;
     private bool _starting;
+    private ElementReference _draftElement;
     private IReadOnlyList<McpServer> _mcpServers = [];
     private readonly HashSet<string> _selectedMcp = [];
+
+    private SessionModelSettings _model = new();
+    private IReadOnlyList<string> _models = [];
+    private IReadOnlyList<string> _efforts = [];
 
     // Read-only unless asked otherwise: a chat window should not edit anything by surprise.
     private PermissionMode _permissionMode = PermissionMode.Plan;
@@ -120,11 +145,16 @@
         _ => "No restrictions",
     };
 
+    private string SelectedName =>
+        _clis.FirstOrDefault(c => Key(c) == _selected)?.DisplayName ?? "no CLI";
+
     protected override async Task OnInitializedAsync()
     {
         _clis = await Clis.GetAllAsync();
+        _cliProviders = await CliProviderStore.GetAllAsync();
         _mcpServers = (await McpStore.GetAllAsync()).Where(s => s.Enabled).ToList();
         _selected = _clis.Count > 0 ? Key(_clis[0]) : string.Empty;
+        LoadModelChoices();
 
         var all = await Sessions.GetAllAsync();
         _recent = all.Where(s => s.Title.StartsWith("Quick chat", StringComparison.Ordinal) || s.AgentName.StartsWith("Quick chat", StringComparison.Ordinal))
@@ -133,15 +163,51 @@
             .ToList();
     }
 
-    protected override void OnAfterRender(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
-            Layout.SetHeader("Quick chat", "A conversation with no setup");
+        if (!firstRender)
+            return;
+
+        Layout.SetHeader("New chat", "A conversation with no setup");
+        await Js.InvokeVoidAsync("aiShop.sendOnEnter", _draftElement);
+        await Js.InvokeVoidAsync("aiShop.focus", _draftElement);
     }
 
     /// <summary>Built-ins are keyed by provider; custom CLIs by their definition id.</summary>
     private static string Key(IProviderCli cli) =>
         cli.DefinitionId is { Length: > 0 } id ? $"custom:{id}" : cli.Provider.ToString();
+
+    private (AiProvider Provider, string? CliProviderId) Resolve() =>
+        _selected.StartsWith("custom:", StringComparison.Ordinal)
+            ? (AiProvider.Custom, _selected["custom:".Length..])
+            : (Enum.TryParse<AiProvider>(_selected, out var provider) ? provider : AiProvider.Claude, null);
+
+    /// <summary>
+    /// Another CLI has other models, and a model name from the old one would be passed straight
+    /// through and rejected — so the choices are reloaded and anything now meaningless is dropped.
+    /// </summary>
+    private void SelectCli(ChangeEventArgs args)
+    {
+        _selected = args.Value?.ToString() ?? string.Empty;
+        LoadModelChoices();
+
+        _model = new SessionModelSettings(
+            Keep(_model.Model, _models),
+            Keep(_model.Effort, _efforts),
+            Keep(_model.OpeningModel, _models),
+            Keep(_model.OpeningEffort, _efforts),
+            _model.OpeningTurns);
+    }
+
+    private void LoadModelChoices()
+    {
+        var (provider, cliProviderId) = Resolve();
+        _models = ProviderModels.Models(provider, cliProviderId, Options.Value, _cliProviders);
+        _efforts = ProviderModels.Efforts(provider, cliProviderId, Options.Value, _cliProviders);
+    }
+
+    private static string? Keep(string? value, IReadOnlyList<string> offered) =>
+        value is not null && offered.Contains(value) ? value : null;
 
     private async Task StartAsync()
     {
@@ -151,12 +217,11 @@
         _starting = true;
         try
         {
-            var (provider, cliProviderId) = _selected.StartsWith("custom:", StringComparison.Ordinal)
-                ? (AiProvider.Custom, _selected["custom:".Length..])
-                : (Enum.Parse<AiProvider>(_selected), null);
+            var (provider, cliProviderId) = Resolve();
 
             var session = await QuickChats.StartAsync(
-                provider, cliProviderId, _prompt, _selectedMcp.ToList(), _permissionMode);
+                provider, cliProviderId, _prompt, _selectedMcp.ToList(), _permissionMode, _model);
+
             Nav.NavigateTo($"/chat/{session.Id}");
         }
         catch (Exception ex)
@@ -166,9 +231,16 @@
         }
     }
 
+    /// <summary>
+    /// Enter sends; Shift+Enter starts a new line. The newline itself is suppressed in JS, because
+    /// Blazor decides preventDefault when the element renders, not when the key arrives.
+    /// </summary>
     private async Task OnKeyDown(KeyboardEventArgs args)
     {
-        if (args.Key == "Enter" && (args.CtrlKey || args.MetaKey))
+        if (args.Key != "Enter")
+            return;
+
+        if (!args.ShiftKey || args.CtrlKey || args.MetaKey)
             await StartAsync();
     }
 

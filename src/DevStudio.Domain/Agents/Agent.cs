@@ -35,6 +35,22 @@ public sealed class Agent : Entity
     /// </summary>
     public string? Effort { get; set; }
 
+    /// <summary>
+    /// Model for the first <see cref="OpeningTurns"/> turns of a session, before it hands over to
+    /// <see cref="Model"/>. The opening of a conversation is where the plan is made and where a
+    /// stronger model earns its cost; the turns after it are usually carrying that plan out. Empty
+    /// means there is no handover and <see cref="Model"/> runs the whole session.
+    /// </summary>
+    public string? OpeningModel { get; set; }
+
+    /// <summary>Thinking level for the opening turns. Empty falls back to <see cref="Effort"/>.</summary>
+    public string? OpeningEffort { get; set; }
+
+    /// <summary>
+    /// How many turns the opening model covers. Zero — the default — means no handover at all.
+    /// </summary>
+    public int OpeningTurns { get; set; }
+
     /// <summary>Prepended to the first prompt of every session this agent starts.</summary>
     public string SystemPrompt { get; set; } = string.Empty;
 
@@ -81,6 +97,14 @@ public sealed class Agent : Entity
 
     /// <summary>Accent used for this agent's cards and chat bubbles.</summary>
     public string Accent { get; set; } = "cyan";
+
+
+    /// <summary>
+    /// Path, relative to the team settings repository, of the file this was imported from. Set means
+    /// the repository owns it: the next sync rewrites it, and deleting the file deletes it. Null is a
+    /// local definition, which no sync ever touches.
+    /// </summary>
+    public string? TeamSourcePath { get; set; }
 
     /// <summary>
     /// Created on demand to back the quick chat. Hidden from the Agents page: it is an implementation
