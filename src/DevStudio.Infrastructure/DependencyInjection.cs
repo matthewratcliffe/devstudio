@@ -73,6 +73,7 @@ public static class DependencyInjection
         services.AddSingleton<ILoopbackCallbackForwarder, LoopbackCallbackForwarder>();
         services.AddSingleton<IMcpTokenService, McpTokenService>();
         services.AddSingleton<IMcpProbeService, McpProbeService>();
+        services.AddSingleton<IMcpAuthDiscovery, McpAuthDiscoveryService>();
 
         // Image backends. All three are registered whether or not they hold credentials — the UI
         // shows what each one needs, which is more use than a backend that silently is not there.
