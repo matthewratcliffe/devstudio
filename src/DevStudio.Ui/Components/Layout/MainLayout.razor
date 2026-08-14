@@ -1,6 +1,7 @@
 @inherits LayoutComponentBase
 @implements IDisposable
 @inject ISessionManager Sessions
+@inject IQueueService Queues
 @inject NavigationManager Nav
 
 @* Prerendering paints the real page before the circuit that carries every click exists, so for a
@@ -17,7 +18,7 @@
 }
 
 <div class="shell">
-    <NavMenu Open="_navOpen" LiveCount="_liveCount" OnNavigate="CloseNav" />
+    <NavMenu Open="_navOpen" LiveCount="_liveCount" QueuedCount="_queuedCount" OnNavigate="CloseNav" />
 
     <div class="main">
         <header class="topbar">
@@ -57,6 +58,7 @@
     private readonly List<Toast> _toasts = [];
     private bool _navOpen;
     private int _liveCount;
+    private int _queuedCount;
 
     /// <summary>Set by pages so the top bar reads like a breadcrumb.</summary>
     public string Title { get; private set; } = "Orchestrator";
@@ -68,8 +70,11 @@
     protected override void OnInitialized()
     {
         Sessions.SessionUpdated += OnSessionUpdated;
+        Queues.ItemChanged += OnQueueItemChanged;
         _liveCount = Sessions.Live.Count(s => s.IsLive);
     }
+
+    protected override async Task OnInitializedAsync() => await RefreshQueuedCountAsync();
 
     public void SetHeader(string title, string? subtitle = null, bool flush = false)
     {
@@ -96,6 +101,24 @@
 
     private void CloseNav() => _navOpen = false;
 
+    /// <summary>
+    /// Outstanding work across every queue, for the badge. Recounted on any item change rather than
+    /// kept as a running total, because items also arrive over MCP and from the dispatcher.
+    /// </summary>
+    private async Task RefreshQueuedCountAsync()
+    {
+        var items = await Queues.GetItemsAsync();
+        var outstanding = items.Count(i => !i.IsFinished);
+
+        if (outstanding == _queuedCount)
+            return;
+
+        _queuedCount = outstanding;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OnQueueItemChanged(QueueItem item) => _ = RefreshQueuedCountAsync();
+
     private void OnSessionUpdated(ChatSession session)
     {
         var live = Sessions.Live.Count(s => s.IsLive);
@@ -106,5 +129,9 @@
         InvokeAsync(StateHasChanged);
     }
 
-    public void Dispose() => Sessions.SessionUpdated -= OnSessionUpdated;
+    public void Dispose()
+    {
+        Sessions.SessionUpdated -= OnSessionUpdated;
+        Queues.ItemChanged -= OnQueueItemChanged;
+    }
 }

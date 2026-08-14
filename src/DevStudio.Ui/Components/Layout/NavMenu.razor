@@ -24,6 +24,13 @@
                 <span class="count">@LiveCount</span>
             }
         </NavLink>
+        <NavLink class="nav-link" href="/queues" @onclick="OnNavigate">
+            <span class="ico">▦</span> Queues
+            @if (QueuedCount > 0)
+            {
+                <span class="count">@QueuedCount</span>
+            }
+        </NavLink>
         <NavLink class="nav-link" href="/projects" @onclick="OnNavigate">
             <span class="ico">▣</span> Projects
         </NavLink>
@@ -84,6 +91,9 @@
 @code {
     [Parameter] public bool Open { get; set; }
     [Parameter] public int LiveCount { get; set; }
+
+    /// <summary>Queue items waiting or running, across every queue.</summary>
+    [Parameter] public int QueuedCount { get; set; }
     [Parameter] public EventCallback OnNavigate { get; set; }
 
     private ReleaseStatus? _release;

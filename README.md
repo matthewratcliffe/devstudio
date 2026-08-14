@@ -26,6 +26,7 @@ only credential involved is the login you complete in the web UI.
 | **Auto-summarisation** | After N turns a project's sessions roll themselves up and — if you want — restart the CLI conversation from the summary, so long chats stay fast and keep the context that matters. |
 | **Workflows** | Ordered steps with a shared run context: every finished step publishes its output as `{{steps.step-name}}`, readable by *all* later steps. Steps sharing an order run at the same time. |
 | **Scheduler** | Cron expressions, plain timers, or manual-only saved runs — targeting an agent or a workflow, optionally inside a project folder. |
+| **Queues** | Backlogs of work, each drained by one agent or workflow — or by nothing yet, in which case the queue just fills up until you choose. A scheduled bot finds the open merge requests and enqueues them; the dispatcher starts an agent per item, as many at a time as you allow. Items are deduplicated on a key, so a poller can re-report the same thing every run without piling up work. |
 | **Repositories** | Clone repos from the UI (or pick from `gh repo list`), and cut a fresh git worktree per session so parallel agents never collide. |
 | **Your own checkout** | Bind mount a folder from the host and attach it from the UI ([how](#working-on-the-code-your-ide-has-open)); the desktop build browses every drive on the machine instead. Agents work in the same files your IDE has open, in worktrees cut beside the checkout so you can see them. |
 | **GitHub and GitLab** | `gh` and `glab` both ship in the image and share the container login, so agents can open pull or merge requests and read issues. A project picks one forge; it can still have several repositories from it. Set `Orchestrator__GitLabHost` (or `GitHubHost`) for a self-managed instance. |
@@ -319,15 +320,15 @@ Clean architecture, dependencies pointing inwards:
 
 ```
 src/
-  DevStudio.Domain          entities only — agents, sessions, projects, workflows, schedules, skills, MCP
-  DevStudio.Application     abstractions and orchestration — SessionManager, WorkflowEngine, cron parser
-  DevStudio.Infrastructure  the outside world — CLI adapters, git, gh, JSON stores, pty terminals (ConPTY and script), scheduler
+  DevStudio.Domain          entities only — agents, sessions, projects, workflows, schedules, queues, skills, MCP
+  DevStudio.Application     abstractions and orchestration — SessionManager, WorkflowEngine, QueueService, cron parser
+  DevStudio.Infrastructure  the outside world — CLI adapters, git, gh, JSON stores, pty terminals (ConPTY and script), scheduler, queue dispatcher
   DevStudio.Ui              Blazor Server console, MCP endpoint, PWA
   DevStudio.Desktop.Core    shared desktop plumbing: the server child, paths, tool preflight, updates
   DevStudio.Desktop         Windows tray shell — WebView2, tray icon, balloon notifications
   DevStudio.Desktop.Photino macOS and Linux shell — WKWebView and WebKitGTK through Photino
 tests/
-  DevStudio.Tests           cron, templating, persistence, workflow engine
+  DevStudio.Tests           cron, templating, persistence, workflow engine, queues
 ```
 
 The key seam is `IProviderCli`. `ClaudeCli` runs `claude -p --output-format stream-json` and
@@ -375,6 +376,92 @@ The implementation was:
 Available in every step: workflow inputs by name, `{{previous}}`, and `{{steps.<slugified-name>}}`
 for any earlier step regardless of distance.
 
+## Queues
+
+A schedule fires on a clock. A queue drains a backlog. The two meet where a scheduled bot finds work
+and the queue turns each piece of it into an agent run.
+
+Each queue names one **agent** or one **workflow** to process its items, and that is the only thing
+that touches them. Several queues can run side by side — one for merge requests reviewed by a strict
+agent, one for failing builds handled by a repair workflow, one for support tickets triaged by a
+cheap model.
+
+The handler is optional. A queue with nothing set still accepts items and simply holds them, so you
+can point a poller at a queue today and decide what should drain it later — the backlog that built
+up in the meantime is picked up as soon as you choose. The queue reads **no handler** until then.
+
+### Filling one
+
+Three routes in, all equivalent:
+
+- **A bot on a schedule.** A schedule runs an agent every ten minutes whose job is to look, not to
+  act: `glab mr list --state opened`, then one `enqueue` call per merge request it found. Give that
+  agent the built-in `orchestrator` MCP server and nothing else.
+- **Any agent, over MCP.** `enqueue` is a normal tool. An agent that notices work for somebody else
+  can hand it over instead of doing it.
+- **By hand.** **Add item** on the queue's page.
+
+### Not doing the same work twice
+
+The poller above re-reports every still-open merge request each time it runs. That is not a bug in
+the poller — it is the only thing it can do, because it cannot know what has already been queued.
+The queue is what makes it safe.
+
+Every item carries a **key** — the merge request URL, the issue number, whatever identifies the work
+to whoever found it. Send the same key for the same thing and the queue decides what to do with the
+repeat:
+
+| Duplicates | Behaviour |
+| --- | --- |
+| **Reject while queued or running** | The default. A repeat is refused while the first is outstanding, and accepted once it has finished — right for work that can come round again, like a merge request reopened after changes. |
+| **Reject if ever queued** | A key is processed once, ever. |
+| **Accept everything** | No deduplication. Right when items are events rather than things. |
+
+A refusal is a normal answer, not an error: `enqueue` replies that the item is already queued, and
+the bot carries on.
+
+### Draining it
+
+The dispatcher wakes every `QueueTickSeconds`, and for each enabled queue **that has a handler**
+starts as many items as it has free slots — **items at once** is the cap. Items go out highest
+priority first, oldest first within a priority.
+
+An agent queue renders its prompt from the item:
+
+```
+Review the merge request at {{item.key}}.
+
+{{item.body}}
+
+The author is {{payload.author}} and it targets {{payload.branch}}.
+```
+
+`{{item.title}}`, `{{item.body}}`, `{{item.key}}`, `{{item.priority}}` and every payload entry —
+bare or as `{{payload.<name>}}` — are available. Leave the template empty and the agent is handed the
+item as it stands, which is enough when the agent's system prompt already describes the job.
+
+A workflow queue passes the same values as run inputs, with the queue's own inputs underneath as
+constants the item can override.
+
+### When it goes wrong
+
+A failed item is retried up to **tries per item**, waiting **retry delay** between attempts, and then
+settles as failed with the error on the row. Failed items stay on the queue so somebody can look at
+them; **Retry** puts one back with its history cleared.
+
+Each row links to the session or run that processed it, so the transcript is one click from the
+failure. If the orchestrator restarts mid-item, the item is released back to pending on start — the
+interrupted attempt still counts, so an item that kills the process cannot loop forever.
+
+Pausing a queue stops dispatch but not arrivals: items keep landing and wait for you to resume.
+
+**Clear finished** removes what has already settled and leaves the outstanding work alone.
+**Empty queue** removes everything, cancelling whatever is running. Both keep the queue itself, so a
+poller refills it on its next pass — deleting the queue is what stops that.
+
+Queues are local to an install; unlike agents, workflows and schedules they are not part of
+[team settings](#team-settings).
+
 ## The orchestrator's MCP server
 
 There are two built-in servers. `images` is attached everywhere by default and exposes only
@@ -385,7 +472,7 @@ Attach the built-in `orchestrator` server to an agent and it gains these tools:
 
 `list_agents` · `list_sessions` · `get_session` · `send_message` · `start_session` ·
 `send_guidance` · `check_guidance` · `get_notes` · `add_note` · `list_projects` ·
-`list_workflows` · `run_workflow`
+`list_workflows` · `run_workflow` · `list_queues` · `enqueue` · `list_queue_items`
 
 That is how a manager agent supervises worker agents — it can read what they produced, steer them
 mid-run, and respond.
@@ -607,6 +694,7 @@ Everything is under the `Orchestrator` configuration section, overridable with
 | `MaxConcurrentSessions` | `6` | Cap on agent turns running at once. |
 | `TurnTimeoutMinutes` | `60` | A turn is abandoned after this long. |
 | `SchedulerTickSeconds` | `20` | How often due schedules are checked. |
+| `QueueTickSeconds` | `10` | How often queues are checked for items to start. This is the delay between an item arriving and work beginning on it. |
 | `UpdateCheckEnabled` | `true` | Ask GitHub every six hours whether a newer release exists, and say so under the sidebar. Nothing is downloaded or installed — a container cannot replace itself. The desktop builds set this false, because they update themselves. |
 | `UpdateRepository` | `matthewratcliffe/devstudio` | Repository the check reads releases from, as `owner/name`. |
 | `PruneEphemeralWorktrees` | `false` | Delete a session's worktree when it finishes. Off, because uncommitted work would go with it. |

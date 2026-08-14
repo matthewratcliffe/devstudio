@@ -1,3 +1,4 @@
+using DevStudio.Application.Queues;
 using DevStudio.Application.Sessions;
 using DevStudio.Application.Workflows;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,6 +14,7 @@ public static class DependencyInjection
         services.AddSingleton<ISessionManager>(sp => sp.GetRequiredService<SessionManager>());
         services.AddSingleton<IWorkflowEngine, WorkflowEngine>();
         services.AddSingleton<IQuickChatService, QuickChatService>();
+        services.AddSingleton<IQueueService, QueueService>();
         return services;
     }
 }

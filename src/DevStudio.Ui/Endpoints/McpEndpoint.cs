@@ -1,11 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using DevStudio.Application.Abstractions;
+using DevStudio.Application.Queues;
 using DevStudio.Application.Sessions;
 using DevStudio.Application.Workflows;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Images;
 using DevStudio.Domain.Projects;
+using DevStudio.Domain.Queues;
 using DevStudio.Domain.Sessions;
 using DevStudio.Domain.Workflows;
 
@@ -175,6 +177,18 @@ public static class McpEndpoint
         Tool("run_workflow", "Start a workflow run in the background.", Props(
             ("workflowId", "string", "Workflow to run."),
             ("inputs", "object", "Input values keyed by input name.")), "workflowId"),
+        Tool("list_queues", "List the work queues, what processes each one, and how much is outstanding.", new JsonObject()),
+        Tool("enqueue", "Add an item to a work queue. Agents are started for queued items automatically. Sending the same key twice is safe — a queue that deduplicates will say it already has it rather than doing the work again.", Props(
+            ("queueId", "string", "Queue to add to."),
+            ("key", "string", "Your identity for this work, e.g. the merge request URL. Send the same key for the same thing every time so it is not queued twice."),
+            ("title", "string", "One line describing the item."),
+            ("body", "string", "The detail, which the processing agent receives."),
+            ("payload", "object", "Anything else worth passing on, as string values."),
+            ("priority", "number", "Higher goes first. Default 0.")), "queueId"),
+        Tool("list_queue_items", "List items on a queue with their status and outcome.", Props(
+            ("queueId", "string", "Queue to read."),
+            ("status", "string", "Filter: Pending, Running, Succeeded, Failed, Cancelled."),
+            ("limit", "number", "Maximum items to return (default 25).")), "queueId"),
         Tool("generate_image", "Generate an image from a text description. Returns a URL this orchestrator serves it from.", Props(
             ("prompt", "string", "What to draw. Detailed prompts work better than short ones."),
             ("width", "number", "Pixels wide. Optional, default 1024."),
@@ -334,6 +348,70 @@ public static class McpEndpoint
                     .StartAsync(Required(arguments, "workflowId"), inputs, "mcp", ct);
 
                 return Text($"Started workflow run {run.Id}.");
+            }
+
+            case "list_queues":
+            {
+                var queues = services.GetRequiredService<IQueueService>();
+                var all = await queues.GetQueuesAsync(ct);
+                if (all.Count == 0)
+                    return Text("No queues are configured.");
+
+                var lines = new List<string>();
+                foreach (var queue in all)
+                {
+                    var counts = await queues.GetCountsAsync(queue.Id, ct);
+                    lines.Add(
+                        $"{queue.Id}  {queue.Name}  target={queue.Target}:{queue.TargetId}  " +
+                        $"enabled={queue.Enabled}  dedupe={queue.Dedupe}  " +
+                        $"pending={counts.Pending} running={counts.Running} failed={counts.Failed}");
+                }
+
+                return Text(string.Join("\n", lines));
+            }
+
+            case "enqueue":
+            {
+                var payload = new Dictionary<string, string>();
+                if (arguments["payload"] is JsonObject supplied)
+                {
+                    foreach (var pair in supplied)
+                        payload[pair.Key] = pair.Value?.ToString() ?? string.Empty;
+                }
+
+                var agentName = parameters?["_meta"]?["agentName"]?.GetValue<string>();
+
+                var result = await services.GetRequiredService<IQueueService>().EnqueueAsync(new EnqueueRequest
+                {
+                    QueueId = Required(arguments, "queueId"),
+                    Key = arguments["key"]?.GetValue<string>() ?? string.Empty,
+                    Title = arguments["title"]?.GetValue<string>() ?? string.Empty,
+                    Body = arguments["body"]?.GetValue<string>() ?? string.Empty,
+                    Payload = payload,
+                    Priority = (int?)arguments["priority"]?.GetValue<double>() ?? 0,
+                    EnqueuedBy = agentName is null ? "mcp" : $"agent:{agentName}",
+                }, ct);
+
+                // A duplicate is not an error: a poller re-reporting work already queued is the
+                // expected case, and reporting it as a failure would have the agent retrying.
+                return Text(result.Accepted
+                    ? $"Queued as {result.Item!.Id}."
+                    : $"Not queued. {result.Reason}");
+            }
+
+            case "list_queue_items":
+            {
+                var queueId = Required(arguments, "queueId");
+                var status = arguments["status"]?.GetValue<string>();
+                var limit = (int?)arguments["limit"]?.GetValue<double>() ?? 25;
+
+                var items = (await services.GetRequiredService<IQueueService>().GetItemsAsync(queueId, ct))
+                    .Where(i => status is null || string.Equals(i.Status.ToString(), status, StringComparison.OrdinalIgnoreCase))
+                    .Take(Math.Clamp(limit, 1, 200));
+
+                return Text(string.Join("\n", items.Select(i =>
+                    $"{i.Id}  [{i.Status}]  attempts={i.Attempts}  key={i.Key}  {i.Title}" +
+                    (i.LastError is { Length: > 0 } error ? $"  error={error}" : string.Empty))));
             }
 
             // The CLI-driven providers bring their own toolsets and never see the orchestrator's

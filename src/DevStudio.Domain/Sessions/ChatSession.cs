@@ -86,6 +86,7 @@ public enum SessionTrigger
     Manual = 0,
     Schedule = 1,
     Workflow = 2,
+    Queue = 3,
 }
 
 public enum ApprovalStatus
@@ -206,6 +207,9 @@ public sealed class ChatSession : Entity
     /// <summary>Set when the session was started by a workflow run, for tracing.</summary>
     public string? WorkflowRunId { get; set; }
     public string? ScheduleId { get; set; }
+
+    /// <summary>Set when the session was started to process a queue item, for tracing.</summary>
+    public string? QueueItemId { get; set; }
 
     /// <summary>
     /// MCP servers attached to this conversation specifically, on top of whatever the agent already

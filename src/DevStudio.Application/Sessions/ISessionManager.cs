@@ -32,6 +32,9 @@ public sealed record StartSessionRequest
     public string? WorkflowRunId { get; init; }
     public string? ScheduleId { get; init; }
 
+    /// <summary>Set when the session is processing a queue item, for tracing.</summary>
+    public string? QueueItemId { get; init; }
+
     /// <summary>Run in this directory instead of provisioning a fresh workspace.</summary>
     public string? WorkingDirectoryOverride { get; init; }
 }
