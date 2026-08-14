@@ -18,7 +18,14 @@ public static class DesktopPaths
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             OperatingSystem.IsWindows() ? "devStudio-data" : "devStudio");
 
-    public static string WebViewProfile => Path.Combine(DataRoot, "webview");
+    /// <summary>Holds one profile directory per version. See <see cref="WebViewProfiles"/>.</summary>
+    public static string WebViewProfileRoot => Path.Combine(DataRoot, "webview");
+
+    /// <summary>
+    /// The profile this build uses. Versioned, because the cache in it is keyed on an origin that
+    /// never changes and would otherwise go on serving the previous build's pages to this one.
+    /// </summary>
+    public static string WebViewProfile => WebViewProfiles.DirectoryFor(WebViewProfileRoot, DesktopVersion.Current);
 
     public static string SettingsFile => Path.Combine(DataRoot, "desktop.json");
 

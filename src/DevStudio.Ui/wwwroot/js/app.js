@@ -105,3 +105,34 @@ window.aiShop = {
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('/service-worker.js').catch(() => { }));
 }
+
+// The desktop shells show this page in a window with no address bar, no reload button and no
+// context menu, and their caches outlive the build that filled them. Ctrl+Shift+R is the way back:
+// the same shortcut a browser uses, doing as much of the same thing as a page can do for itself.
+// The HTTP cache is the shell's to clear, so on Windows the shell is asked and it reloads; anywhere
+// else this is everything available.
+window.addEventListener('keydown', async function (e) {
+    if (!e.ctrlKey || !e.shiftKey || e.key.toLowerCase() !== 'r') return;
+
+    e.preventDefault();
+
+    try {
+        if ('serviceWorker' in navigator) {
+            const workers = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(workers.map(worker => worker.unregister()));
+        }
+
+        if (window.caches) {
+            const names = await caches.keys();
+            await Promise.all(names.map(name => caches.delete(name)));
+        }
+    } catch {
+        // Whatever could not be cleared, reloading is still worth doing.
+    }
+
+    if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage('devstudio:hard-reload');
+    } else {
+        location.reload();
+    }
+});

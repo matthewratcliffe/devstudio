@@ -29,6 +29,10 @@ internal sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer _watchdog = new() { Interval = 4000 };
 
     private bool _quitting;
+    private bool _reloading;
+
+    /// <summary>What the page posts when the user presses Ctrl+Shift+R inside it.</summary>
+    private const string HardReloadMessage = "devstudio:hard-reload";
 
     public MainForm(ServerProcess server)
     {
@@ -110,7 +114,15 @@ internal sealed class MainForm : Form
 
         try
         {
-            var environment = await CoreWebView2Environment.CreateAsync(null, DesktopPaths.WebViewProfile);
+            var profile = DesktopPaths.WebViewProfile;
+
+            // The profile the previous version used is now unreachable — the directory is named
+            // after the version — and it is a browser profile, so it is tens of megabytes of cache
+            // that nothing would ever collect.
+            foreach (var gone in WebViewProfiles.Prune(DesktopPaths.WebViewProfileRoot, DesktopVersion.Current))
+                UpdateLog.Instance.Write($"Removed the web view profile left behind by {gone}.");
+
+            var environment = await CoreWebView2Environment.CreateAsync(null, profile);
             await _view.EnsureCoreWebView2Async(environment);
 
             // A desktop app with a right-click "Reload frame" menu reads as a browser, not an app.
@@ -124,6 +136,25 @@ internal sealed class MainForm : Form
                 args.Handled = true;
                 OpenInBrowser(args.Uri);
             };
+
+            // Ctrl+Shift+R inside the page: the key never reaches this form while the web view has
+            // focus, so the page asks for the reload instead. Only the shell can clear the HTTP
+            // cache the request would otherwise be answered from.
+            _view.CoreWebView2.WebMessageReceived += async (_, args) =>
+            {
+                if (Message(args) == HardReloadMessage)
+                    await HardReloadAsync();
+            };
+
+            // A versioned profile is already empty on its first launch, so this catches what
+            // versioning cannot: a development build, which keeps its version and its directory
+            // across every rebuild.
+            if (WebViewProfiles.CacheIsStale(profile, DesktopVersion.BuildStamp))
+            {
+                UpdateLog.Instance.Write($"First run of {DesktopVersion.BuildStamp} in this profile; clearing the cache.");
+                await ClearCacheAsync();
+                WebViewProfiles.RecordCache(profile, DesktopVersion.BuildStamp);
+            }
         }
         catch (Exception ex)
         {
@@ -143,6 +174,76 @@ internal sealed class MainForm : Form
         _view.CoreWebView2.Navigate(_server.Url);
         _status.Visible = false;
         _view.Visible = true;
+    }
+
+    /// <summary>
+    /// The same shortcut a browser uses, for the same reason, in a window that has no other way to
+    /// ask. This only fires while the shell has focus — the web view swallows the key when it has
+    /// it, and posts <see cref="HardReloadMessage"/> instead.
+    /// </summary>
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == (Keys.Control | Keys.Shift | Keys.R))
+        {
+            _ = HardReloadAsync();
+            return true;
+        }
+
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    /// <summary>
+    /// Throws the cache away and loads the page again. Nothing running is affected: the agents are
+    /// in the server process, and this only touches the window looking at it.
+    /// </summary>
+    private async Task HardReloadAsync()
+    {
+        if (_reloading || _view.CoreWebView2 is null)
+            return;
+
+        _reloading = true;
+
+        try
+        {
+            await ClearCacheAsync();
+            _view.CoreWebView2.Reload();
+        }
+        finally
+        {
+            _reloading = false;
+        }
+    }
+
+    /// <summary>
+    /// Everything a stale page could be served from. Cookies and local storage are deliberately not
+    /// in the list — clearing those signs the user out of the providers they connected.
+    /// </summary>
+    private async Task ClearCacheAsync()
+    {
+        try
+        {
+            await _view.CoreWebView2.Profile.ClearBrowsingDataAsync(
+                CoreWebView2BrowsingDataKinds.DiskCache
+                | CoreWebView2BrowsingDataKinds.CacheStorage
+                | CoreWebView2BrowsingDataKinds.ServiceWorkers);
+        }
+        catch (Exception ex)
+        {
+            UpdateLog.Instance.Write($"Could not clear the web view cache: {ex.Message}");
+        }
+    }
+
+    /// <summary>A message that is not a string throws rather than returning null, and one may not be.</summary>
+    private static string? Message(CoreWebView2WebMessageReceivedEventArgs args)
+    {
+        try
+        {
+            return args.TryGetWebMessageAsString();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>Closing the window leaves the agents running; the tray icon is the way back.</summary>
@@ -179,6 +280,10 @@ internal sealed class MainForm : Form
 
         menu.Items.Add("Open devStudio", null, (_, _) => ShowWindow());
         menu.Items.Add("Open in browser", null, (_, _) => OpenInBrowser(_server.Url));
+
+        // The shortcut is the one people already know, but a window with no browser chrome gives no
+        // sign it exists, and this is the item somebody goes looking for when the UI looks wrong.
+        menu.Items.Add("Reload the window (Ctrl+Shift+R)", null, async (_, _) => await HardReloadAsync());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Check tools…", null, (_, _) => ShowPreflight());
         menu.Items.Add("Open data folder", null, (_, _) => OpenInBrowser(DesktopPaths.DataRoot));
