@@ -358,6 +358,47 @@ public class QueueTests
     }
 
     [Fact]
+    public async Task A_session_started_for_an_item_is_closed_and_read_only_once_the_item_is_done()
+    {
+        var (service, _, queue, sessions) = Build();
+
+        await service.EnqueueAsync(Item(queue, "mr-42"));
+
+        await Dispatcher(service, sessions).PokeAsync();
+        await WaitForSettledAsync(service, queue.Id, expected: 1);
+
+        var item = Assert.Single(await service.GetItemsAsync(queue.Id));
+        var session = sessions.SessionFor(item.Id);
+
+        Assert.NotNull(session);
+        Assert.True(session!.IsClosed);
+        Assert.False(session.AcceptsInput);
+        Assert.Equal(SessionStatus.Completed, session.Status);
+        Assert.Contains(queue.Name, session.ClosedReason);
+    }
+
+    [Fact]
+    public async Task A_session_whose_item_failed_is_closed_still_saying_it_failed()
+    {
+        var (service, _, queue, sessions) = Build(q => q.MaxAttempts = 1);
+        sessions.Fail = true;
+
+        await service.EnqueueAsync(Item(queue, "mr-42"));
+
+        await Dispatcher(service, sessions).PokeAsync();
+        await WaitForSettledAsync(service, queue.Id, expected: 1);
+
+        var item = Assert.Single(await service.GetItemsAsync(queue.Id));
+        var session = sessions.SessionFor(item.Id);
+
+        Assert.NotNull(session);
+        Assert.True(session!.IsClosed);
+        // Closing settles a run that finished; it does not rewrite one that fell over.
+        Assert.Equal(SessionStatus.Failed, session.Status);
+        Assert.Equal(QueueItemStatus.Failed, item.Status);
+    }
+
+    [Fact]
     public async Task The_dispatcher_starts_no_more_than_the_queue_allows_at_once()
     {
         var (service, _, queue, sessions) = Build(q => q.MaxConcurrent = 2);
@@ -516,9 +557,15 @@ public class QueueTests
     /// <summary>Records what it was asked to start, and can be held open to observe the slot cap.</summary>
     private sealed class RecordingSessionManager : ISessionManager
     {
+        private readonly ConcurrentDictionary<string, ChatSession> _sessions = new();
+
         public List<StartSessionRequest> Started { get; } = [];
         public List<string> Cancelled { get; } = [];
+        public List<string> Closed { get; } = [];
         public bool Fail { get; set; }
+
+        public ChatSession? SessionFor(string queueItemId) =>
+            _sessions.Values.FirstOrDefault(s => s.QueueItemId == queueItemId);
 
         /// <summary>Set to stop sessions finishing until the test lets them.</summary>
         public TaskCompletionSource? Gate { get; set; }
@@ -545,12 +592,29 @@ public class QueueTests
                 Messages = [new ChatMessage { Role = MessageRole.Agent, Content = request.Prompt }],
             };
 
+            _sessions[session.Id] = session;
             SessionUpdated?.Invoke(session);
             return session;
         }
 
         public Task<ChatSession> RunToCompletionAsync(StartSessionRequest request, TimeSpan timeout, CancellationToken ct = default) =>
             StartAsync(request, ct);
+
+        public Task<ChatSession?> CloseAsync(string sessionId, string? reason = null, CancellationToken ct = default)
+        {
+            lock (Closed)
+                Closed.Add(sessionId);
+
+            if (!_sessions.TryGetValue(sessionId, out var session))
+                return Task.FromResult<ChatSession?>(null);
+
+            if (session.Status is not (SessionStatus.Failed or SessionStatus.Cancelled))
+                session.Status = SessionStatus.Completed;
+
+            session.IsClosed = true;
+            session.ClosedReason = reason;
+            return Task.FromResult<ChatSession?>(session);
+        }
 
         public Task CancelAsync(string sessionId)
         {

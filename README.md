@@ -443,6 +443,12 @@ item as it stands, which is enough when the agent's system prompt already descri
 A workflow queue passes the same values as run inputs, with the queue's own inputs underneath as
 constants the item can override.
 
+The session an item starts belongs to the item. When the agent finishes, the session is marked
+**finished** and turns read only: the transcript, its files and whatever the agent said last stay on
+the chat page, but the composer is replaced by a note and nothing — you, another agent over MCP, or a
+retry — can send it a further turn. The item's recorded outcome is the last word on it, and a turn
+sent afterwards would quietly make that outcome wrong. Start a new session when there is more to do.
+
 ### When it goes wrong
 
 A failed item is retried up to **tries per item**, waiting **retry delay** between attempts, and then

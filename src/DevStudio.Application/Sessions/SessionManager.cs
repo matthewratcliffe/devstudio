@@ -153,6 +153,8 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
 
     public async Task SendAsync(string sessionId, string message, CancellationToken ct = default)
     {
+        await EnsureOpenAsync(sessionId, ct);
+
         if (!_live.TryGetValue(sessionId, out var live))
         {
             live = await ReviveAsync(sessionId, ct)
@@ -306,6 +308,8 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         if (string.IsNullOrWhiteSpace(guidance))
             throw new ArgumentException("Guidance cannot be empty.", nameof(guidance));
 
+        await EnsureOpenAsync(sessionId, ct);
+
         if (!_live.TryGetValue(sessionId, out var live))
         {
             live = await ReviveAsync(sessionId, ct)
@@ -414,6 +418,47 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
 
         await live.Cancellation.CancelAsync();
         live.Turns.Writer.TryComplete();
+    }
+
+    public async Task<ChatSession?> CloseAsync(string sessionId, string? reason = null, CancellationToken ct = default)
+    {
+        var session = await GetAsync(sessionId, ct);
+        if (session is null)
+            return null;
+
+        if (session.IsClosed)
+            return session;
+
+        // Completing the writer rather than cancelling: the pump drains what it has, ends its loop
+        // normally and hands the workspace back, where a cancel would settle the run as Cancelled.
+        if (_live.TryRemove(sessionId, out var live))
+            live.Turns.Writer.TryComplete();
+
+        // A run that fell over keeps saying so. Everything else has now finished, whatever the pump
+        // left it on while it waited for input that is never coming.
+        if (session.Status is not (SessionStatus.Failed or SessionStatus.Cancelled))
+            session.Status = SessionStatus.Completed;
+
+        session.IsClosed = true;
+        session.ClosedReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+        session.ClosedAt = DateTimeOffset.UtcNow;
+        session.EndedAt ??= session.ClosedAt;
+
+        await PersistAsync(session);
+        return session;
+    }
+
+    /// <summary>Refuses anything that would put another turn on a session that is finished.</summary>
+    private async Task EnsureOpenAsync(string sessionId, CancellationToken ct)
+    {
+        var session = await GetAsync(sessionId, ct);
+        if (session is { IsClosed: true })
+        {
+            throw new InvalidOperationException(
+                session.ClosedReason is { Length: > 0 } reason
+                    ? $"This session is finished and read only: {reason}"
+                    : "This session is finished and read only.");
+        }
     }
 
     public async Task<ChatSession?> GetAsync(string sessionId, CancellationToken ct = default) =>

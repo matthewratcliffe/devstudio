@@ -86,6 +86,14 @@ public interface ISessionManager
 
     Task CancelAsync(string sessionId);
 
+    /// <summary>
+    /// Finishes a conversation for good: the turn queue is closed, the status settles on Completed
+    /// unless the run had already failed or been cancelled, and the session becomes read only. Used
+    /// when the work that owned the session is over — a queue item — so nothing sends it another
+    /// turn afterwards. Returns null when the session has gone; closing one twice is harmless.
+    /// </summary>
+    Task<ChatSession?> CloseAsync(string sessionId, string? reason = null, CancellationToken ct = default);
+
     /// <summary>Loads a session from memory when live, otherwise from the store.</summary>
     Task<ChatSession?> GetAsync(string sessionId, CancellationToken ct = default);
 

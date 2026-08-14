@@ -141,6 +141,9 @@ public class QuickChatModeTests : IDisposable
 
         public Task CancelAsync(string sessionId) => Task.CompletedTask;
 
+        public Task<ChatSession?> CloseAsync(string sessionId, string? reason = null, CancellationToken ct = default) =>
+            Task.FromResult(_stored.TryGetValue(sessionId, out var session) ? session : null);
+
         public Task<ChatSession?> GetAsync(string sessionId, CancellationToken ct = default) =>
             Task.FromResult(_stored.TryGetValue(sessionId, out var session) ? session : null);
 
