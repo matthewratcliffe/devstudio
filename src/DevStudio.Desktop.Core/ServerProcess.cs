@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.Net;
-using System.Net.Sockets;
 using System.Text;
 
 namespace DevStudio.Desktop;
@@ -35,7 +33,7 @@ public sealed class ServerProcess : IDisposable
     public void Start()
     {
         var executable = Locate();
-        Port = ChoosePort();
+        Port = PortSelection.Choose(PreferredPort);
 
         var info = new ProcessStartInfo
         {
@@ -137,37 +135,6 @@ public sealed class ServerProcess : IDisposable
         catch (IOException)
         {
             // The in-memory log is what the UI shows; the file is a convenience.
-        }
-    }
-
-    /// <summary>
-    /// 7080 when it is free, so a bookmark keeps working and the documented port stays right.
-    /// Anything else free otherwise, rather than refusing to start.
-    /// </summary>
-    private static int ChoosePort()
-    {
-        if (IsFree(PreferredPort))
-            return PreferredPort;
-
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
-
-    private static bool IsFree(int port)
-    {
-        try
-        {
-            var listener = new TcpListener(IPAddress.Loopback, port);
-            listener.Start();
-            listener.Stop();
-            return true;
-        }
-        catch (SocketException)
-        {
-            return false;
         }
     }
 
