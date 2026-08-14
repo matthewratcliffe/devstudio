@@ -19,6 +19,14 @@ public enum McpAuthMode
     /// CLI performs its own interactive OAuth.
     /// </summary>
     BearerToken = 2,
+
+    /// <summary>
+    /// User-delegated OAuth 2.1: authorization code with PKCE, registering this app with the issuer
+    /// first when it offers dynamic registration. Somebody signs in at a browser once and the
+    /// refresh token keeps it working after that. This is what hosted servers such as Atlassian's
+    /// Rovo actually require — they issue no service tokens at all.
+    /// </summary>
+    OAuth = 3,
 }
 
 public enum McpTransport
@@ -69,11 +77,31 @@ public sealed class McpServer : Entity
     /// <summary>Audience or resource parameter, when the issuer needs one.</summary>
     public string? Audience { get; set; }
 
+    /// <summary>Authorization endpoint, used by the OAuth mode to send the operator to sign in.</summary>
+    public string AuthorizationUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Dynamic client registration endpoint (RFC 7591). When set and no client id has been entered,
+    /// the OAuth mode registers this app on the spot rather than asking the operator to create one.
+    /// </summary>
+    public string RegistrationUrl { get; set; } = string.Empty;
+
     /// <summary>A token pasted in directly, used when the mode is BearerToken.</summary>
     public string AccessToken { get; set; } = string.Empty;
 
     /// <summary>When the cached token stops being usable. Null means it does not expire.</summary>
     public DateTimeOffset? AccessTokenExpiresAt { get; set; }
+
+    /// <summary>
+    /// Kept from the OAuth sign-in so the token can be renewed without another trip to the browser.
+    /// </summary>
+    public string RefreshToken { get; set; } = string.Empty;
+
+    /// <summary>Who signed in, purely so the UI can say whose authorisation is in use.</summary>
+    public string? AuthorizedAccount { get; set; }
+
+    /// <summary>When the OAuth sign-in was completed. Null means nobody has signed in yet.</summary>
+    public DateTimeOffset? AuthorizedAt { get; set; }
 
     /// <summary>Header the token is written into. Bearer is the norm.</summary>
     public string AuthHeaderName { get; set; } = "Authorization";

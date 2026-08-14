@@ -179,14 +179,14 @@ public static class McpEndpoint
             ("inputs", "object", "Input values keyed by input name.")), "workflowId"),
         Tool("list_queues", "List the work queues, what processes each one, and how much is outstanding.", new JsonObject()),
         Tool("enqueue", "Add an item to a work queue. Agents are started for queued items automatically. Sending the same key twice is safe — a queue that deduplicates will say it already has it rather than doing the work again.", Props(
-            ("queueId", "string", "Queue to add to."),
+            ("queueId", "string", "Queue to add to, by id or by name as list_queues shows it."),
             ("key", "string", "Your identity for this work, e.g. the merge request URL. Send the same key for the same thing every time so it is not queued twice."),
             ("title", "string", "One line describing the item."),
             ("body", "string", "The detail, which the processing agent receives."),
             ("payload", "object", "Anything else worth passing on, as string values."),
             ("priority", "number", "Higher goes first. Default 0.")), "queueId"),
         Tool("list_queue_items", "List items on a queue with their status and outcome.", Props(
-            ("queueId", "string", "Queue to read."),
+            ("queueId", "string", "Queue to read, by id or by name."),
             ("status", "string", "Filter: Pending, Running, Succeeded, Failed, Cancelled."),
             ("limit", "number", "Maximum items to return (default 25).")), "queueId"),
         Tool("generate_image", "Generate an image from a text description. Returns a URL this orchestrator serves it from.", Props(
@@ -372,6 +372,11 @@ public static class McpEndpoint
 
             case "enqueue":
             {
+                var queues = services.GetRequiredService<IQueueService>();
+                var target = await queues.ResolveQueueAsync(Required(arguments, "queueId"), ct);
+                if (target is null)
+                    return Text(await UnknownQueueAsync(queues, arguments["queueId"]?.GetValue<string>(), ct), isError: true);
+
                 var payload = new Dictionary<string, string>();
                 if (arguments["payload"] is JsonObject supplied)
                 {
@@ -381,9 +386,9 @@ public static class McpEndpoint
 
                 var agentName = parameters?["_meta"]?["agentName"]?.GetValue<string>();
 
-                var result = await services.GetRequiredService<IQueueService>().EnqueueAsync(new EnqueueRequest
+                var result = await queues.EnqueueAsync(new EnqueueRequest
                 {
-                    QueueId = Required(arguments, "queueId"),
+                    QueueId = target.Id,
                     Key = arguments["key"]?.GetValue<string>() ?? string.Empty,
                     Title = arguments["title"]?.GetValue<string>() ?? string.Empty,
                     Body = arguments["body"]?.GetValue<string>() ?? string.Empty,
@@ -395,17 +400,21 @@ public static class McpEndpoint
                 // A duplicate is not an error: a poller re-reporting work already queued is the
                 // expected case, and reporting it as a failure would have the agent retrying.
                 return Text(result.Accepted
-                    ? $"Queued as {result.Item!.Id}."
-                    : $"Not queued. {result.Reason}");
+                    ? $"Queued as {result.Item!.Id} on '{target.Name}'."
+                    : $"Not queued on '{target.Name}'. {result.Reason}");
             }
 
             case "list_queue_items":
             {
-                var queueId = Required(arguments, "queueId");
+                var queues = services.GetRequiredService<IQueueService>();
+                var queue = await queues.ResolveQueueAsync(Required(arguments, "queueId"), ct);
+                if (queue is null)
+                    return Text(await UnknownQueueAsync(queues, arguments["queueId"]?.GetValue<string>(), ct), isError: true);
+
                 var status = arguments["status"]?.GetValue<string>();
                 var limit = (int?)arguments["limit"]?.GetValue<double>() ?? 25;
 
-                var items = (await services.GetRequiredService<IQueueService>().GetItemsAsync(queueId, ct))
+                var items = (await queues.GetItemsAsync(queue.Id, ct))
                     .Where(i => status is null || string.Equals(i.Status.ToString(), status, StringComparison.OrdinalIgnoreCase))
                     .Take(Math.Clamp(limit, 1, 200));
 
@@ -449,6 +458,20 @@ public static class McpEndpoint
             default:
                 return Text($"Unknown tool '{name}'.", isError: true);
         }
+    }
+
+    /// <summary>
+    /// The refusal an agent gets when it names a queue that is not there. It lists the queues so the
+    /// next call can be right, rather than leaving the agent to ask the operator for the name again.
+    /// </summary>
+    private static async Task<string> UnknownQueueAsync(IQueueService queues, string? wanted, CancellationToken ct)
+    {
+        var all = await queues.GetQueuesAsync(ct);
+
+        return all.Count == 0
+            ? $"There is no queue '{wanted}'. No queues are configured."
+            : $"There is no queue '{wanted}'. The queues are: " +
+              string.Join(", ", all.Select(q => $"{q.Name} (id {q.Id})")) + ".";
     }
 
     private static string Required(JsonObject arguments, string key) =>

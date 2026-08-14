@@ -480,6 +480,55 @@ public class QueueTests
         Assert.Equal(1, (await service.GetCountsAsync(queue.Id)).Pending);
     }
 
+    [Fact]
+    public async Task A_queue_can_be_named_instead_of_identified_when_enqueueing()
+    {
+        var (service, _, queue, _) = Build();
+
+        var byName = await service.EnqueueAsync(Item(queue, "mr-1") with { QueueId = "Merge requests" });
+        var byCasing = await service.EnqueueAsync(Item(queue, "mr-2") with { QueueId = "merge REQUESTS" });
+        var bySlug = await service.EnqueueAsync(Item(queue, "mr-3") with { QueueId = "merge-requests" });
+
+        Assert.True(byName.Accepted);
+        Assert.True(byCasing.Accepted);
+        Assert.True(bySlug.Accepted);
+        Assert.All(
+            new[] { byName, byCasing, bySlug },
+            r => Assert.Equal(queue.Id, r.Item!.QueueId));
+    }
+
+    [Fact]
+    public async Task A_partial_name_finds_the_queue_when_only_one_matches()
+    {
+        var (service, _, queue, _) = Build();
+
+        Assert.Equal(queue.Id, (await service.ResolveQueueAsync("merge"))?.Id);
+    }
+
+    [Fact]
+    public async Task An_ambiguous_partial_name_resolves_to_nothing_rather_than_the_wrong_queue()
+    {
+        var (service, _, _, _, queues) = BuildWithStore();
+        await queues.UpsertAsync(new WorkQueue { Name = "Merge request reviews" });
+
+        // Both queues contain "merge": filing the work in either would be a guess.
+        Assert.Null(await service.ResolveQueueAsync("merge"));
+
+        // The full name is still unambiguous even though it is a prefix of the other.
+        Assert.Equal("Merge requests", (await service.ResolveQueueAsync("Merge requests"))?.Name);
+    }
+
+    [Fact]
+    public async Task Enqueueing_onto_an_unknown_queue_says_what_the_queues_are()
+    {
+        var (service, _, _, _) = Build();
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.EnqueueAsync(new EnqueueRequest { QueueId = "code review", Key = "x" }));
+
+        Assert.Contains("Merge requests", error.Message);
+    }
+
     private static EnqueueRequest Item(WorkQueue queue, string key, string title = "") => new()
     {
         QueueId = queue.Id,
@@ -517,6 +566,15 @@ public class QueueTests
     private static (QueueService Service, InMemoryStore<QueueItem> Items, WorkQueue Queue, RecordingSessionManager Sessions)
         Build(Action<WorkQueue>? configure = null)
     {
+        var (service, items, queue, sessions, _) = BuildWithStore(configure);
+        return (service, items, queue, sessions);
+    }
+
+    /// <summary>The same fixture, with the queue store handed back so a test can add a second queue.</summary>
+    private static (QueueService Service, InMemoryStore<QueueItem> Items, WorkQueue Queue,
+        RecordingSessionManager Sessions, InMemoryStore<WorkQueue> Queues)
+        BuildWithStore(Action<WorkQueue>? configure = null)
+    {
         var queues = new InMemoryStore<WorkQueue>();
         var items = new InMemoryStore<QueueItem>();
         var sessions = new RecordingSessionManager();
@@ -528,7 +586,7 @@ public class QueueTests
         var service = new QueueService(
             queues, items, sessions, new StubWorkflowEngine(), NullLogger<QueueService>.Instance);
 
-        return (service, items, queue, sessions);
+        return (service, items, queue, sessions, queues);
     }
 
     private sealed class InMemoryStore<T> : IEntityStore<T> where T : class, IEntity
