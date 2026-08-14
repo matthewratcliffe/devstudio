@@ -203,7 +203,12 @@ public sealed class SeedHostedService : IHostedService
         bool isDefault,
         CancellationToken ct)
     {
-        var url = $"http://localhost:{_options.HttpPort}{path}";
+        // 127.0.0.1, not localhost. The desktop build binds ASPNETCORE_URLS to 127.0.0.1 and nothing
+        // else, while localhost resolves to ::1 first on Windows — so a devStudio container
+        // published on the same port number answers the agents instead, on a socket this process
+        // never bound and cannot see. The two disagree silently: the agent connects, lists tools
+        // from the wrong build, and reports success against the wrong data.
+        var url = $"http://127.0.0.1:{_options.HttpPort}{path}";
 
         // Matched by name, not just by the built-in flag: there is more than one of these now.
         var existing = (await _mcpServers.GetAllAsync(ct))
