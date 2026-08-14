@@ -3,6 +3,7 @@
 @inject IEntityStore<Agent> AgentStore
 @inject IMcpTokenService McpTokens
 @inject IMcpProbeService McpProbe
+@inject IMcpAuthDiscovery McpAuth
 @inject NavigationManager Nav
 
 <PageTitle>MCP servers · devStudio</PageTitle>
@@ -205,6 +206,12 @@
                 <div class="field">
                     <label>URL</label>
                     <input type="url" @bind="_editing.Url" placeholder="https://example.com/mcp" />
+                    <div class="btn-row" style="margin-top:0.5rem">
+                        <button class="btn btn-sm" disabled="@_discovering" @onclick="DiscoverAsync">
+                            @(_discovering ? "Asking…" : "Discover auth")
+                        </button>
+                        <span class="hint">Asks the endpoint how it wants to be authenticated and fills in what it says.</span>
+                    </div>
                 </div>
             }
 
@@ -225,6 +232,61 @@
                         user-delegated OAuth, leave this on None — the CLI runs that flow itself.
                     </span>
                 </div>
+
+                @if (_discovery is { } found)
+                {
+                    <div class="card" style="margin-bottom:0.8rem">
+                        <div class="card-head">
+                            <h3 style="font-size:0.9rem">What the endpoint says</h3>
+                            <div class="spacer"></div>
+                            @if (!found.Succeeded)
+                            {
+                                <span class="pill pill-red">incomplete</span>
+                            }
+                            else if (found.SupportsClientCredentials)
+                            {
+                                <span class="pill pill-lime">client credentials</span>
+                            }
+                            else if (found.RequiresAuth)
+                            {
+                                <span class="pill pill-amber">browser sign-in</span>
+                            }
+                            else
+                            {
+                                <span class="pill pill-lime">no auth needed</span>
+                            }
+                        </div>
+
+                        <p class="small">@found.Detail</p>
+
+                        @if (found.Issuer is { Length: > 0 })
+                        {
+                            <dl class="kv">
+                                <dt>Issuer</dt><dd class="mono-dim">@found.Issuer</dd>
+                                @if (found.TokenUrl is { Length: > 0 })
+                                {
+                                    <dt>Token endpoint</dt><dd class="mono-dim">@found.TokenUrl</dd>
+                                }
+                                @if (found.RegistrationUrl is { Length: > 0 })
+                                {
+                                    <dt>Registration</dt><dd class="mono-dim">@found.RegistrationUrl</dd>
+                                }
+                                @if (found.Scopes is { Count: > 0 })
+                                {
+                                    <dt>Scopes offered</dt><dd class="mono-dim">@string.Join(" ", found.Scopes)</dd>
+                                }
+                            </dl>
+                        }
+
+                        @if (found.TokenUrl is { Length: > 0 })
+                        {
+                            <div class="btn-row" style="margin-top:0.6rem">
+                                <button class="btn btn-sm" @onclick="() => ApplyDiscovery(found)">Fill the fields in</button>
+                                <span class="hint">Sets the mode, token URL and scopes. You still supply the client id and secret.</span>
+                            </div>
+                        }
+                    </div>
+                }
 
                 @if (_editing.AuthMode == McpAuthMode.ClientCredentials)
                 {
@@ -316,6 +378,8 @@
     private McpServer? _editing;
     private bool _isNew;
     private string _tokenStatus = string.Empty;
+    private McpAuthDiscovery? _discovery;
+    private bool _discovering;
     private readonly Dictionary<string, McpProbeResult> _probes = [];
     private string? _probing;
 
@@ -351,6 +415,51 @@
         _isNew = _servers.All(s => s.Id != server.Id);
         _editing = _isNew ? server : Clone(server);
         _tokenStatus = string.Empty;
+        _discovery = null;
+    }
+
+    /// <summary>
+    /// Asks the endpoint how it authenticates rather than making the operator hunt through the
+    /// vendor's docs for an issuer and a token URL.
+    /// </summary>
+    private async Task DiscoverAsync()
+    {
+        if (_editing is null)
+            return;
+
+        _discovering = true;
+        _discovery = null;
+        try
+        {
+            _discovery = await McpAuth.DiscoverAsync(_editing.Url);
+        }
+        finally
+        {
+            _discovering = false;
+        }
+    }
+
+    /// <summary>
+    /// Writes the discovered issuer onto the record. The client id and secret are deliberately left
+    /// alone: those come from registering with the issuer, which is not something discovery can do.
+    /// </summary>
+    private void ApplyDiscovery(McpAuthDiscovery found)
+    {
+        if (_editing is null || found.TokenUrl is not { Length: > 0 })
+            return;
+
+        _editing.AuthMode = McpAuthMode.ClientCredentials;
+        _editing.TokenUrl = found.TokenUrl;
+
+        if (string.IsNullOrWhiteSpace(_editing.Scopes) && found.ScopeString is { Length: > 0 } scopes)
+            _editing.Scopes = scopes;
+
+        if (string.IsNullOrWhiteSpace(_editing.Audience) && found.Resource is { Length: > 0 } resource)
+            _editing.Audience = resource;
+
+        Layout.Notify(found.SupportsClientCredentials
+            ? "Filled in. Add the client id and secret, then test the token."
+            : "Filled in, but this issuer did not advertise client credentials — the token request may be refused.");
     }
 
     /// <summary>Connects like a CLI would and reports what the server actually offers.</summary>

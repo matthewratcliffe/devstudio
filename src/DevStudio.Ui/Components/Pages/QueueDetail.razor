@@ -2,6 +2,8 @@
 @implements IDisposable
 @inject IQueueService Queues
 @inject QueueDispatcherHostedService Dispatcher
+@inject IEntityStore<Agent> AgentStore
+@inject IEntityStore<Workflow> WorkflowStore
 @inject NavigationManager Nav
 
 <PageTitle>Queue · devStudio</PageTitle>
@@ -103,6 +105,7 @@ else
                     </td>
                     <td>
                         <div class="btn-row">
+                            <button class="btn btn-sm btn-ghost" @onclick="() => _previewing = item">Preview</button>
                             @if (item.SessionId is { Length: > 0 } sessionId)
                             {
                                 <a class="btn btn-sm" href="/chat/@sessionId">Session</a>
@@ -169,6 +172,53 @@ else
     </div>
 }
 
+@if (_previewing is { } preview && _queue is { } queue)
+{
+    <div class="modal-backdrop" @onclick="() => _previewing = null">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>What the @(queue.Target == QueueTarget.Agent ? "agent" : "workflow") receives</h2>
+
+            <dl class="kv">
+                <dt>Handled by</dt><dd class="mono-dim">@TargetName()</dd>
+                <dt>Item</dt><dd class="mono-dim">@(string.IsNullOrWhiteSpace(preview.Title) ? preview.Id : preview.Title)</dd>
+            </dl>
+
+            @if (string.IsNullOrWhiteSpace(queue.TargetId))
+            {
+                <p class="hint">
+                    This queue has no handler yet, so nothing is dispatched. The values below are what
+                    would be sent once an @(queue.Target == QueueTarget.Agent ? "agent" : "workflow") is chosen.
+                </p>
+            }
+
+            @if (queue.Target == QueueTarget.Agent)
+            {
+                <div class="field">
+                    <label>Prompt</label>
+                    <pre class="small" style="white-space:pre-wrap;max-height:340px;overflow-y:auto">@QueueContext.RenderPrompt(queue, preview)</pre>
+                    <span class="hint">
+                        @(string.IsNullOrWhiteSpace(queue.PromptTemplate)
+                            ? "No template on the queue, so the item is sent on its own."
+                            : "Rendered from the queue's prompt template.")
+                    </span>
+                </div>
+            }
+            else
+            {
+                <div class="field">
+                    <label>Inputs</label>
+                    <pre class="small" style="white-space:pre-wrap;max-height:340px;overflow-y:auto">@string.Join(Environment.NewLine, QueueContext.BuildInputs(queue, preview).Select(i => $"{i.Key}: {i.Value}"))</pre>
+                    <span class="hint">The queue's inputs with the item's payload merged over the top.</span>
+                </div>
+            }
+
+            <div class="btn-row">
+                <button class="btn btn-ghost" @onclick="() => _previewing = null">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     [CascadingParameter] private MainLayout Layout { get; set; } = default!;
     [Parameter] public string QueueId { get; set; } = string.Empty;
@@ -183,9 +233,21 @@ else
     private string _newBody = string.Empty;
     private int _newPriority;
 
+    private QueueItem? _previewing;
+    private IReadOnlyList<Agent> _agents = [];
+    private IReadOnlyList<Workflow> _workflows = [];
+
     protected override void OnInitialized() => Queues.ItemChanged += OnItemChanged;
 
-    protected override async Task OnParametersSetAsync() => await ReloadAsync();
+    protected override async Task OnParametersSetAsync()
+    {
+        // Names for the preview only, and they do not change while the page is open, so they are read
+        // once here rather than on every item change.
+        _agents = await AgentStore.GetAllAsync();
+        _workflows = await WorkflowStore.GetAllAsync();
+
+        await ReloadAsync();
+    }
 
     protected override void OnAfterRender(bool firstRender)
     {
@@ -266,6 +328,20 @@ else
             : $"Removed {removed} item(s){(everything ? ", including outstanding work" : "")}.");
 
         await ReloadAsync();
+    }
+
+    /// <summary>
+    /// The handler's name rather than its id, so the preview reads the way the queue list does. A
+    /// missing one is called out: it means the agent or workflow was deleted after the queue was set up.
+    /// </summary>
+    private string TargetName()
+    {
+        if (_queue is null || string.IsNullOrWhiteSpace(_queue.TargetId))
+            return "nothing yet";
+
+        return _queue.Target == QueueTarget.Agent
+            ? _agents.FirstOrDefault(a => a.Id == _queue.TargetId)?.Name ?? "(missing agent)"
+            : _workflows.FirstOrDefault(w => w.Id == _queue.TargetId)?.Name ?? "(missing workflow)";
     }
 
     private static string Tone(QueueItemStatus status) => status switch
