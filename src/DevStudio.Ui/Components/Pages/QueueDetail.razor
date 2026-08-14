@@ -1,0 +1,290 @@
+@page "/queues/{QueueId}"
+@implements IDisposable
+@inject IQueueService Queues
+@inject QueueDispatcherHostedService Dispatcher
+@inject NavigationManager Nav
+
+<PageTitle>Queue · devStudio</PageTitle>
+
+@if (_queue is null)
+{
+    <div class="empty">That queue no longer exists.</div>
+}
+else
+{
+    <div class="card" style="margin-bottom:1.2rem">
+        <div class="card-head">
+            <h3>@_queue.Name</h3>
+            <div class="spacer"></div>
+            @if (!_queue.Enabled)
+            {
+                <span class="pill pill-red">paused</span>
+            }
+            else if (string.IsNullOrWhiteSpace(_queue.TargetId))
+            {
+                <span class="pill pill-amber">no handler</span>
+            }
+            <span class="pill">@_counts.Outstanding outstanding</span>
+        </div>
+
+        <p class="small">@_queue.Description</p>
+
+        <dl class="kv">
+            <dt>Processed by</dt>
+            <dd class="mono-dim">
+                @if (string.IsNullOrWhiteSpace(_queue.TargetId))
+                {
+                    <text>nothing yet — items collect until an agent or workflow is set</text>
+                }
+                else
+                {
+                    <text>@_queue.Target — @_queue.TargetId</text>
+                }
+            </dd>
+            <dt>Items at once</dt><dd>@_queue.MaxConcurrent</dd>
+            <dt>Tries per item</dt><dd>@_queue.MaxAttempts @(_queue.MaxAttempts > 1 ? $"(retry after {_queue.RetryDelayMinutes}m)" : "")</dd>
+            <dt>Queue id</dt><dd class="mono-dim">@_queue.Id</dd>
+        </dl>
+
+        <div class="btn-row" style="margin-top:0.8rem">
+            <button class="btn btn-sm btn-primary" @onclick="() => _adding = true">Add item</button>
+            <button class="btn btn-sm" @onclick="PokeAsync">Dispatch now</button>
+            <button class="btn btn-sm btn-ghost" @onclick="() => PurgeAsync(false)">Clear finished</button>
+            <button class="btn btn-sm btn-danger" @onclick="() => PurgeAsync(true)">Empty queue</button>
+            <a class="btn btn-sm btn-ghost" href="/queues">All queues</a>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+            <tr>
+                <th>Item</th>
+                <th>Status</th>
+                <th>Tries</th>
+                <th>Added by</th>
+                <th>Started</th>
+                <th></th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var item in _items)
+            {
+                <tr>
+                    <td>
+                        @(string.IsNullOrWhiteSpace(item.Title) ? "(untitled)" : item.Title)
+                        @if (item.Key is { Length: > 0 })
+                        {
+                            <div class="mono-dim small">@item.Key</div>
+                        }
+                        @if (item.LastError is { Length: > 0 } error)
+                        {
+                            <div class="mono-dim small" style="color:var(--red)">@error</div>
+                        }
+                    </td>
+                    <td>
+                        <StatusPill Text="@item.Status.ToString()" Tone="@Tone(item.Status)" />
+                        @if (item.Status == QueueItemStatus.Pending && item.AvailableAt is { } retry && retry > DateTimeOffset.UtcNow)
+                        {
+                            <div class="mono-dim small">retry <LocalTime Value="@retry" Format="daytime" /></div>
+                        }
+                    </td>
+                    <td class="mono-dim">@item.Attempts</td>
+                    <td class="mono-dim">@item.EnqueuedBy</td>
+                    <td class="mono-dim">
+                        @if (item.StartedAt is { } started)
+                        {
+                            <LocalTime Value="@started" Format="daytime" />
+                        }
+                        else
+                        {
+                            <text>—</text>
+                        }
+                    </td>
+                    <td>
+                        <div class="btn-row">
+                            @if (item.SessionId is { Length: > 0 } sessionId)
+                            {
+                                <a class="btn btn-sm" href="/chat/@sessionId">Session</a>
+                            }
+                            @if (item.WorkflowRunId is { Length: > 0 } runId)
+                            {
+                                <a class="btn btn-sm" href="/workflows/runs/@runId">Run</a>
+                            }
+                            @if (item.IsFinished)
+                            {
+                                <button class="btn btn-sm" @onclick="() => RetryAsync(item)">Retry</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-ghost" @onclick="() => CancelAsync(item)">Cancel</button>
+                            }
+                            <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(item)">Delete</button>
+                        </div>
+                    </td>
+                </tr>
+            }
+            @if (_items.Count == 0)
+            {
+                <tr><td colspan="6" class="mono-dim">Nothing queued.</td></tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (_adding)
+{
+    <div class="modal-backdrop" @onclick="() => _adding = false">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>Add an item</h2>
+
+            <div class="field">
+                <label>Title</label>
+                <input type="text" @bind="_newTitle" placeholder="What needs doing" />
+            </div>
+
+            <div class="field">
+                <label>Key</label>
+                <input type="text" @bind="_newKey" placeholder="https://gitlab.com/acme/web/-/merge_requests/42" />
+                <span class="hint">The item's identity, used to reject duplicates. Optional.</span>
+            </div>
+
+            <div class="field">
+                <label>Detail</label>
+                <textarea rows="5" @bind="_newBody" placeholder="Everything the agent should know."></textarea>
+            </div>
+
+            <div class="field">
+                <label>Priority</label>
+                <input type="number" @bind="_newPriority" />
+                <span class="hint">Higher goes first.</span>
+            </div>
+
+            <div class="btn-row">
+                <button class="btn btn-primary" @onclick="AddAsync">Add to queue</button>
+                <button class="btn btn-ghost" @onclick="() => _adding = false">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+    [Parameter] public string QueueId { get; set; } = string.Empty;
+
+    private WorkQueue? _queue;
+    private IReadOnlyList<QueueItem> _items = [];
+    private QueueCounts _counts = new(0, 0, 0, 0, 0);
+
+    private bool _adding;
+    private string _newTitle = string.Empty;
+    private string _newKey = string.Empty;
+    private string _newBody = string.Empty;
+    private int _newPriority;
+
+    protected override void OnInitialized() => Queues.ItemChanged += OnItemChanged;
+
+    protected override async Task OnParametersSetAsync() => await ReloadAsync();
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader(_queue?.Name ?? "Queue", "Items waiting, running and done");
+    }
+
+    private async Task ReloadAsync()
+    {
+        _queue = await Queues.GetQueueAsync(QueueId);
+        _items = await Queues.GetItemsAsync(QueueId);
+        _counts = await Queues.GetCountsAsync(QueueId);
+    }
+
+    private async Task AddAsync()
+    {
+        var result = await Queues.EnqueueAsync(new EnqueueRequest
+        {
+            QueueId = QueueId,
+            Key = _newKey,
+            Title = _newTitle,
+            Body = _newBody,
+            Priority = _newPriority,
+            EnqueuedBy = "manual",
+        });
+
+        Layout.Notify(result.Reason, result.Accepted ? "ok" : "err");
+
+        if (result.Accepted)
+        {
+            _adding = false;
+            _newTitle = _newKey = _newBody = string.Empty;
+            _newPriority = 0;
+            await PokeAsync();
+        }
+
+        await ReloadAsync();
+    }
+
+    /// <summary>
+    /// Dispatch without waiting for the next tick, so adding an item to an idle queue starts work
+    /// now rather than leaving the operator watching a row that looks stuck.
+    /// </summary>
+    private async Task PokeAsync()
+    {
+        await Dispatcher.PokeAsync();
+        await ReloadAsync();
+    }
+
+    private async Task RetryAsync(QueueItem item)
+    {
+        await Queues.RetryAsync(item.Id);
+        await PokeAsync();
+    }
+
+    private async Task CancelAsync(QueueItem item)
+    {
+        await Queues.CancelAsync(item.Id);
+        await ReloadAsync();
+    }
+
+    private async Task DeleteAsync(QueueItem item)
+    {
+        await Queues.DeleteItemAsync(item.Id);
+        await ReloadAsync();
+    }
+
+    /// <summary>
+    /// Clears the queue. Emptying it takes the outstanding work as well, cancelling whatever is
+    /// running — the queue definition stays, so a poller refills it on its next pass.
+    /// </summary>
+    private async Task PurgeAsync(bool everything)
+    {
+        var removed = await Queues.PurgeAsync(QueueId, everything);
+
+        Layout.Notify(removed == 0
+            ? "Nothing to remove."
+            : $"Removed {removed} item(s){(everything ? ", including outstanding work" : "")}.");
+
+        await ReloadAsync();
+    }
+
+    private static string Tone(QueueItemStatus status) => status switch
+    {
+        QueueItemStatus.Running => "cyan",
+        QueueItemStatus.Pending => "amber",
+        QueueItemStatus.Succeeded => "lime",
+        QueueItemStatus.Failed => "red",
+        _ => "",
+    };
+
+    private void OnItemChanged(QueueItem item) => InvokeAsync(async () =>
+    {
+        if (item.QueueId != QueueId)
+            return;
+
+        await ReloadAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose() => Queues.ItemChanged -= OnItemChanged;
+}

@@ -103,6 +103,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             McpServerIds = [.. request.McpServerIds],
             WorkflowRunId = request.WorkflowRunId,
             ScheduleId = request.ScheduleId,
+            QueueItemId = request.QueueItemId,
             Status = SessionStatus.Starting,
         };
 

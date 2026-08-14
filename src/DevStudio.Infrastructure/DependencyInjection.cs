@@ -19,6 +19,7 @@ using DevStudio.Infrastructure.Processes;
 using DevStudio.Infrastructure.Providers;
 using DevStudio.Infrastructure.Providers.Acp;
 using DevStudio.Infrastructure.Providers.OpenAi;
+using DevStudio.Infrastructure.Queues;
 using DevStudio.Infrastructure.Scheduling;
 using DevStudio.Infrastructure.Skills;
 using DevStudio.Infrastructure.Seed;
@@ -118,6 +119,11 @@ public static class DependencyInjection
 
         services.AddSingleton<SchedulerHostedService>();
         services.AddHostedService(sp => sp.GetRequiredService<SchedulerHostedService>());
+
+        // Resolvable on its own as well, so the UI can poke it the moment an item is added rather
+        // than leaving the operator watching a queue that looks stuck until the next tick.
+        services.AddSingleton<QueueDispatcherHostedService>();
+        services.AddHostedService(sp => sp.GetRequiredService<QueueDispatcherHostedService>());
         services.AddHostedService<SeedHostedService>();
 
         return services;

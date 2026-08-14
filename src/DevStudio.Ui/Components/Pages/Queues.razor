@@ -1,0 +1,347 @@
+@page "/queues"
+@inject IQueueService QueueService
+@inject IEntityStore<WorkQueue> QueueStore
+@inject IEntityStore<Agent> AgentStore
+@inject IEntityStore<Workflow> WorkflowStore
+@inject IEntityStore<Project> ProjectStore
+@inject NavigationManager Nav
+
+<PageTitle>Queues · devStudio</PageTitle>
+
+<div class="btn-row" style="margin-bottom:1.2rem">
+    <button class="btn btn-primary" @onclick="() => Edit(new WorkQueue())">New queue</button>
+    <span class="mono-dim">
+        A backlog and the one thing that drains it. Something fills it — a scheduled bot, an agent
+        calling <code>enqueue</code> over MCP, or you — and agents are started per item.
+    </span>
+</div>
+
+<div class="grid grid-auto" style="margin-bottom:1.6rem">
+    @foreach (var queue in _queues)
+    {
+        var counts = Counts(queue.Id);
+        <div class="card">
+            <div class="card-head">
+                <h3>@queue.Name</h3>
+                <div class="spacer"></div>
+                @if (!queue.Enabled)
+                {
+                    <span class="pill pill-red">paused</span>
+                }
+                else if (string.IsNullOrWhiteSpace(queue.TargetId))
+                {
+                    <span class="pill pill-amber" title="Items collect here until something is set to process them">no handler</span>
+                }
+            </div>
+
+            <p class="small">@queue.Description</p>
+
+            <div class="btn-row" style="margin-bottom:0.8rem">
+                <span class="pill @(counts.Pending > 0 ? "pill-amber" : "")">@counts.Pending pending</span>
+                <span class="pill @(counts.Running > 0 ? "pill-cyan pill-live" : "")">
+                    @if (counts.Running > 0)
+                    {
+                        <span class="dot"></span>
+                    }
+                    @counts.Running running
+                </span>
+                @if (counts.Failed > 0)
+                {
+                    <span class="pill pill-red">@counts.Failed failed</span>
+                }
+                @if (counts.Succeeded > 0)
+                {
+                    <span class="pill pill-lime">@counts.Succeeded done</span>
+                }
+            </div>
+
+            <dl class="kv" style="margin-bottom:0.8rem">
+                <dt>Processed by</dt><dd>@TargetName(queue)</dd>
+                <dt>At once</dt><dd>@queue.MaxConcurrent</dd>
+                <dt>Duplicates</dt><dd>@DedupeLabel(queue.Dedupe)</dd>
+                @if (queue.ProjectId is not null)
+                {
+                    <dt>Project</dt>
+                    <dd>@ProjectName(queue.ProjectId)</dd>
+                }
+            </dl>
+
+            <div class="btn-row">
+                <a class="btn btn-sm btn-primary" href="/queues/@queue.Id">Open</a>
+                <button class="btn btn-sm" @onclick="() => Edit(queue)">Edit</button>
+                <button class="btn btn-sm btn-ghost" @onclick="() => ToggleAsync(queue)">
+                    @(queue.Enabled ? "Pause" : "Resume")
+                </button>
+                <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(queue)">Delete</button>
+            </div>
+        </div>
+    }
+</div>
+
+@if (_queues.Count == 0)
+{
+    <div class="empty">
+        <div class="big">▦</div>
+        No queues yet. Make one for the work a bot keeps finding.
+    </div>
+}
+
+@if (_editing is not null)
+{
+    <div class="modal-backdrop" @onclick="() => _editing = null">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>@(_isNew ? "New queue" : _editing.Name)</h2>
+
+            <div class="field">
+                <label>Name</label>
+                <input type="text" @bind="_editing.Name" />
+            </div>
+
+            <div class="field">
+                <label>Description</label>
+                <input type="text" @bind="_editing.Description" placeholder="What lands here, and who puts it here." />
+            </div>
+
+            <div class="form-grid">
+                <div class="field">
+                    <label>Processed by</label>
+                    <select @bind="_editing.Target">
+                        <option value="@QueueTarget.Agent">An agent</option>
+                        <option value="@QueueTarget.Workflow">A workflow</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>@(_editing.Target == QueueTarget.Agent ? "Agent" : "Workflow")</label>
+                    <select @bind="_editing.TargetId">
+                        <option value="">Nothing yet — items wait</option>
+                        @if (_editing.Target == QueueTarget.Agent)
+                        {
+                            @foreach (var agent in _agents)
+                            {
+                                <option value="@agent.Id">@agent.Name — @agent.Provider</option>
+                            }
+                        }
+                        else
+                        {
+                            @foreach (var workflow in _workflows)
+                            {
+                                <option value="@workflow.Id">@workflow.Name</option>
+                            }
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Project folder</label>
+                <select @bind="_editing.ProjectId">
+                    <option value="">None</option>
+                    @foreach (var project in _projects)
+                    {
+                        <option value="@project.Id">@project.Name</option>
+                    }
+                </select>
+                <span class="hint">Every item is processed in this project's folder, with its instructions and files.</span>
+            </div>
+
+            @if (_editing.Target == QueueTarget.Agent)
+            {
+                <div class="field">
+                    <label>Prompt</label>
+                    <textarea rows="5" @bind="_editing.PromptTemplate"
+                              placeholder="Review the merge request at {{item.key}}. {{item.body}}"></textarea>
+                    <span class="hint">
+                        <code>{{item.title}}</code>, <code>{{item.body}}</code>, <code>{{item.key}}</code> and every
+                        payload entry, bare or as <code>{{payload.name}}</code>. Leave it empty to hand the agent the
+                        item as it stands.
+                    </span>
+                </div>
+            }
+            else
+            {
+                <div class="field">
+                    <label>Workflow inputs (KEY=value per line)</label>
+                    <textarea rows="4" value="@InputsText" @onchange="e => SetInputs(e.Value?.ToString())"></textarea>
+                    <span class="hint">Constants for every run. An item's payload is merged over the top.</span>
+                </div>
+            }
+
+            <div class="divider"></div>
+
+            <div class="form-grid">
+                <div class="field">
+                    <label>Items at once</label>
+                    <input type="number" min="1" @bind="_editing.MaxConcurrent" />
+                    <span class="hint">How many agents this queue may have working in parallel.</span>
+                </div>
+                <div class="field">
+                    <label>Duplicates</label>
+                    <select @bind="_editing.Dedupe">
+                        <option value="@QueueDedupe.Active">Reject while still queued or running</option>
+                        <option value="@QueueDedupe.Ever">Reject if ever queued</option>
+                        <option value="@QueueDedupe.None">Accept everything</option>
+                    </select>
+                    <span class="hint">Matched on the item's key, so a poller can re-report the same work safely.</span>
+                </div>
+            </div>
+
+            <div class="form-grid">
+                <div class="field">
+                    <label>Tries per item</label>
+                    <input type="number" min="1" @bind="_editing.MaxAttempts" />
+                </div>
+                <div class="field">
+                    <label>Retry delay (minutes)</label>
+                    <input type="number" min="0" @bind="_editing.RetryDelayMinutes" />
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Timeout (minutes)</label>
+                <input type="number" min="1" @bind="_editing.TimeoutMinutes" />
+                <span class="hint">An item is given up on after this long and counts as a failed try.</span>
+            </div>
+
+            <div class="check">
+                <input type="checkbox" id="queue-enabled" @bind="_editing.Enabled" />
+                <label for="queue-enabled" style="text-transform:none;letter-spacing:0">
+                    Enabled — items still arrive while paused, nothing is started
+                </label>
+            </div>
+
+            <div class="btn-row">
+                <button class="btn btn-primary" @onclick="SaveAsync">Save queue</button>
+                <button class="btn btn-ghost" @onclick="() => _editing = null">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private IReadOnlyList<WorkQueue> _queues = [];
+    private IReadOnlyList<Agent> _agents = [];
+    private IReadOnlyList<Workflow> _workflows = [];
+    private IReadOnlyList<Project> _projects = [];
+    private readonly Dictionary<string, QueueCounts> _counts = [];
+    private WorkQueue? _editing;
+    private bool _isNew;
+
+    private string InputsText => string.Join('\n', _editing!.Inputs.Select(i => $"{i.Key}={i.Value}"));
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader("Queues", "Backlogs that agents and workflows drain");
+    }
+
+    private async Task ReloadAsync()
+    {
+        _queues = await QueueStore.GetAllAsync();
+        _agents = await AgentStore.GetAllAsync();
+        _workflows = await WorkflowStore.GetAllAsync();
+        _projects = await ProjectStore.GetAllAsync();
+
+        _counts.Clear();
+        foreach (var queue in _queues)
+            _counts[queue.Id] = await QueueService.GetCountsAsync(queue.Id);
+    }
+
+    private QueueCounts Counts(string queueId) =>
+        _counts.TryGetValue(queueId, out var counts) ? counts : new QueueCounts(0, 0, 0, 0, 0);
+
+    private void Edit(WorkQueue queue)
+    {
+        _isNew = _queues.All(q => q.Id != queue.Id);
+        _editing = _isNew ? queue : Clone(queue);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_editing is null)
+            return;
+
+        _editing.ProjectId = string.IsNullOrWhiteSpace(_editing.ProjectId) ? null : _editing.ProjectId;
+        _editing.MaxConcurrent = Math.Max(1, _editing.MaxConcurrent);
+        _editing.MaxAttempts = Math.Max(1, _editing.MaxAttempts);
+        _editing.TimeoutMinutes = Math.Max(1, _editing.TimeoutMinutes);
+        _editing.RetryDelayMinutes = Math.Max(0, _editing.RetryDelayMinutes);
+
+        await QueueStore.UpsertAsync(_editing);
+        _editing = null;
+        await ReloadAsync();
+        Layout.Notify("Queue saved.", "ok");
+    }
+
+    private async Task ToggleAsync(WorkQueue queue)
+    {
+        queue.Enabled = !queue.Enabled;
+        await QueueStore.UpsertAsync(queue);
+        await ReloadAsync();
+    }
+
+    private async Task DeleteAsync(WorkQueue queue)
+    {
+        // The items are the queue's own records and mean nothing without it.
+        await QueueService.PurgeAsync(queue.Id, everything: true);
+        await QueueStore.DeleteAsync(queue.Id);
+        await ReloadAsync();
+    }
+
+    private void SetInputs(string? value)
+    {
+        var inputs = new Dictionary<string, string>();
+        foreach (var line in (value ?? string.Empty).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var separator = line.IndexOf('=');
+            if (separator > 0)
+                inputs[line[..separator].Trim()] = line[(separator + 1)..].Trim();
+        }
+
+        _editing!.Inputs = inputs;
+    }
+
+    private string TargetName(WorkQueue queue)
+    {
+        // A queue with nothing set is a normal state, not a broken one: it collects until somebody
+        // decides what should drain it.
+        if (string.IsNullOrWhiteSpace(queue.TargetId))
+            return "nothing yet";
+
+        return queue.Target == QueueTarget.Agent
+            ? _agents.FirstOrDefault(a => a.Id == queue.TargetId)?.Name ?? "(missing agent)"
+            : _workflows.FirstOrDefault(w => w.Id == queue.TargetId)?.Name ?? "(missing workflow)";
+    }
+
+    private string ProjectName(string? projectId) =>
+        projectId is null ? "—" : _projects.FirstOrDefault(p => p.Id == projectId)?.Name ?? "—";
+
+    private static string DedupeLabel(QueueDedupe dedupe) => dedupe switch
+    {
+        QueueDedupe.Active => "rejected while queued",
+        QueueDedupe.Ever => "rejected if ever queued",
+        _ => "all accepted",
+    };
+
+    private static WorkQueue Clone(WorkQueue queue) => new()
+    {
+        Id = queue.Id,
+        CreatedAt = queue.CreatedAt,
+        Name = queue.Name,
+        Description = queue.Description,
+        Target = queue.Target,
+        TargetId = queue.TargetId,
+        ProjectId = queue.ProjectId,
+        PromptTemplate = queue.PromptTemplate,
+        Inputs = new Dictionary<string, string>(queue.Inputs),
+        MaxConcurrent = queue.MaxConcurrent,
+        MaxAttempts = queue.MaxAttempts,
+        RetryDelayMinutes = queue.RetryDelayMinutes,
+        TimeoutMinutes = queue.TimeoutMinutes,
+        Dedupe = queue.Dedupe,
+        Enabled = queue.Enabled,
+    };
+}

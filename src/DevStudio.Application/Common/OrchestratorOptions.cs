@@ -122,6 +122,13 @@ public sealed class OrchestratorOptions
     public int SchedulerTickSeconds { get; set; } = 20;
 
     /// <summary>
+    /// How often the queue dispatcher looks for items to start. Shorter than the scheduler's tick
+    /// because a queue is drained as fast as its slots allow, not on a clock — this is the delay
+    /// between an item arriving and work starting on it.
+    /// </summary>
+    public int QueueTickSeconds { get; set; } = 10;
+
+    /// <summary>
     /// Whether to ask GitHub, every six hours, whether a newer release exists — and say so in the
     /// UI. A container cannot update itself, so this only ever tells somebody; pulling the new image
     /// stays the operator's decision. The desktop builds turn it off, because they update themselves.
