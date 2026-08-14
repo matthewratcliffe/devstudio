@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -221,30 +222,45 @@ public sealed class McpProbeService : IMcpProbeService
         client.Timeout = Timeout;
 
         var headers = new Dictionary<string, string>(server.Headers);
-        if (await _tokens.GetAccessTokenAsync(server, ct) is { Length: > 0 } token)
+
+        // A grant that failed is the real diagnosis. Without this the request simply goes out with no
+        // credential and the server answers 401, which reads as "the server rejected us" when in fact
+        // we never had anything to send.
+        var token = await _tokens.AcquireAsync(server, ct);
+        if (!token.Succeeded)
+            return new Exchange(null, null, $"No token could be obtained: {token.Detail}");
+
+        if (token.Token is { Length: > 0 } bearer)
         {
             var prefix = string.IsNullOrWhiteSpace(server.AuthHeaderPrefix) ? string.Empty : server.AuthHeaderPrefix + " ";
-            headers[string.IsNullOrWhiteSpace(server.AuthHeaderName) ? "Authorization" : server.AuthHeaderName] = prefix + token;
+            headers[string.IsNullOrWhiteSpace(server.AuthHeaderName) ? "Authorization" : server.AuthHeaderName] = prefix + bearer;
         }
 
-        var (initialize, sessionId) = await PostAsync(client, server.Url, InitializeRequest(), headers, null, ct);
+        var (initialize, sessionId, status) = await PostAsync(client, server.Url, InitializeRequest(), headers, null, ct);
         if (initialize is null)
             return new Exchange(null, null, "The server did not return a usable initialize response.");
 
         if (initialize["error"] is not null)
-            return new Exchange(initialize, null, $"initialize failed: {Describe(initialize["error"])}");
+        {
+            var failure = $"initialize failed: {Describe(initialize["error"])}";
+
+            if (Advice(server, status) is { Length: > 0 } advice)
+                failure += " " + advice;
+
+            return new Exchange(initialize, null, failure);
+        }
 
         // The spec wants this notification before anything else is requested.
         await PostAsync(client, server.Url, InitializedNotification(), headers, sessionId, ct);
 
-        var (response, _) = await PostAsync(client, server.Url, followUp, headers, sessionId, ct);
+        var (response, _, _) = await PostAsync(client, server.Url, followUp, headers, sessionId, ct);
 
         return response is null
             ? new Exchange(initialize, null, $"The server did not answer {method}.")
             : new Exchange(initialize, response, null);
     }
 
-    private async Task<(JsonObject? Message, string? SessionId)> PostAsync(
+    private async Task<(JsonObject? Message, string? SessionId, HttpStatusCode? Status)> PostAsync(
         HttpClient client,
         string url,
         JsonObject payload,
@@ -279,10 +295,41 @@ public sealed class McpProbeService : IMcpProbeService
             return (new JsonObject
             {
                 ["error"] = new JsonObject { ["message"] = $"HTTP {(int)response.StatusCode}. {Summarise(body)}" },
-            }, returnedSession);
+            }, returnedSession, response.StatusCode);
         }
 
-        return (ParseBody(body), returnedSession);
+        return (ParseBody(body), returnedSession, response.StatusCode);
+    }
+
+    /// <summary>
+    /// What to do about a refused connection, which depends entirely on how the server is configured.
+    /// A 401 against a server set to None is the expected answer rather than a fault: the CLI signs in
+    /// for itself at session start, so the connection works even though this check cannot.
+    /// </summary>
+    private static string? Advice(McpServer server, HttpStatusCode? status)
+    {
+        if (status is not (HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden))
+            return null;
+
+        return server.AuthMode switch
+        {
+            McpAuthMode.None =>
+                "This server wants a token and the auth mode is None, so nothing was sent. Either sign in "
+              + "with the OAuth mode to test it from here, or leave it as it is and let the CLI run its own "
+              + "sign-in when a session starts — the agent will still reach it.",
+
+            McpAuthMode.BearerToken =>
+                "The pasted token was refused. These usually expire after an hour, so it most likely needs replacing.",
+
+            McpAuthMode.OAuth =>
+                "The signed-in token was refused. Sign in again to renew it.",
+
+            McpAuthMode.ClientCredentials =>
+                "The service token was accepted by the issuer but refused by this server, which usually means "
+              + "it only takes user-delegated tokens. Try the OAuth mode instead.",
+
+            _ => null,
+        };
     }
 
     /// <summary>Accepts a plain JSON body or an SSE stream, returning the first JSON-RPC message.</summary>

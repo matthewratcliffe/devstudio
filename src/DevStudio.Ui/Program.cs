@@ -66,6 +66,36 @@ app.MapGet("/auth/callback", async (HttpContext context, ILoopbackCallbackForwar
         result.Succeeded ? 200 : 502);
 });
 
+// Where an MCP server's OAuth sign-in comes back to. The redirect_uri is registered with the issuer
+// when the flow starts, so this path is fixed; the state in the query is what identifies which
+// server was being signed in to.
+app.MapGet("/mcp/oauth/callback", async (HttpContext context, IMcpOAuthService oauth, CancellationToken ct) =>
+{
+    var query = context.Request.Query;
+
+    var result = await oauth.CompleteAsync(
+        query["state"],
+        query["code"],
+        query["error"],
+        query["error_description"],
+        ct);
+
+    return Results.Content(
+        $"""
+         <!doctype html>
+         <html lang="en"><head><meta charset="utf-8"><title>MCP sign-in</title>
+         <link rel="stylesheet" href="/app.css"></head>
+         <body><div style="min-height:100vh;display:grid;place-items:center;text-align:center;padding:2rem"><div>
+         <h1 class="text-gradient">{(result.Succeeded ? "Signed in" : "Sign-in failed")}</h1>
+         <p class="muted">{System.Net.WebUtility.HtmlEncode(result.Detail)}</p>
+         <a class="btn btn-primary" href="/mcp-servers">Back to MCP servers</a>
+         </div></div></body></html>
+         """,
+        "text/html",
+        System.Text.Encoding.UTF8,
+        result.Succeeded ? 200 : 400);
+});
+
 // Download an uploaded file. "global" is the shared library; anything else is a project id.
 app.MapGet("/files/{scope}/{fileName}", (string scope, string fileName, IFileLibraryService files) =>
 {

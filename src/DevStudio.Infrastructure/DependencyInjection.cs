@@ -74,6 +74,7 @@ public static class DependencyInjection
         services.AddSingleton<IMcpTokenService, McpTokenService>();
         services.AddSingleton<IMcpProbeService, McpProbeService>();
         services.AddSingleton<IMcpAuthDiscovery, McpAuthDiscoveryService>();
+        services.AddSingleton<IMcpOAuthService, McpOAuthService>();
 
         // Image backends. All three are registered whether or not they hold credentials — the UI
         // shows what each one needs, which is more use than a backend that silently is not there.

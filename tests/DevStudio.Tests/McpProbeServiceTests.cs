@@ -19,12 +19,15 @@ public class McpProbeServiceTests
         Headers = new Dictionary<string, string> { ["X-API-Key"] = "key-1" },
     };
 
-    private static (McpProbeService Service, McpHandler Handler) Create(params string[] responses)
+    private static (McpProbeService Service, McpHandler Handler) Create(params string[] responses) =>
+        Create(new NoTokens(), responses);
+
+    private static (McpProbeService Service, McpHandler Handler) Create(IMcpTokenService tokens, params string[] responses)
     {
         var handler = new McpHandler(responses);
         var service = new McpProbeService(
             new StubFactory(handler),
-            new NoTokens(),
+            tokens,
             Options.Create(new OrchestratorOptions()),
             NullLogger<McpProbeService>.Instance);
 
@@ -61,6 +64,52 @@ public class McpProbeServiceTests
         Assert.False(result.Succeeded);
         Assert.Contains("401", result.Detail);
         Assert.Contains("unauthorized", result.Detail);
+    }
+
+    [Fact]
+    public async Task A_grant_that_failed_is_reported_instead_of_the_servers_401()
+    {
+        // Without this the request goes out with no credential at all and the server's 401 gets the
+        // blame, which sends the operator looking at the wrong end of the problem.
+        var (service, handler) = Create(new FailingTokens("The token endpoint returned 401."));
+
+        var result = await service.ListToolsAsync(HttpServer());
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("No token could be obtained", result.Detail);
+        Assert.Contains("token endpoint returned 401", result.Detail);
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
+    public async Task A_401_against_a_server_with_no_auth_mode_explains_that_the_cli_signs_in_itself()
+    {
+        var server = HttpServer();
+        server.AuthMode = McpAuthMode.None;
+
+        var (service, _) = Create();
+
+        var result = await service.ListToolsAsync(server);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("401", result.Detail);
+        Assert.Contains("auth mode is None", result.Detail);
+        Assert.Contains("CLI", result.Detail);
+    }
+
+    [Fact]
+    public async Task A_401_against_a_pasted_token_says_it_has_probably_expired()
+    {
+        var server = HttpServer();
+        server.AuthMode = McpAuthMode.BearerToken;
+        server.AccessToken = "stale";
+
+        var (service, _) = Create(new StubTokens("stale"));
+
+        var result = await service.ListToolsAsync(server);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("expire", result.Detail);
     }
 
     [Fact]
@@ -173,10 +222,39 @@ public class McpProbeServiceTests
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 
+    /// <summary>A grant that could not be performed at all — no token, and a reason why.</summary>
+    private sealed class FailingTokens(string detail) : IMcpTokenService
+    {
+        public Task<string?> GetAccessTokenAsync(McpServer server, CancellationToken ct = default) =>
+            Task.FromResult<string?>(null);
+
+        public Task<McpTokenResult> AcquireAsync(McpServer server, CancellationToken ct = default) =>
+            Task.FromResult(new McpTokenResult(false, null, detail));
+
+        public Task<McpTokenResult> TestAsync(McpServer server, CancellationToken ct = default) =>
+            Task.FromResult(new McpTokenResult(false, null, detail));
+    }
+
+    /// <summary>A grant that worked, so the refusal comes from the server rather than the issuer.</summary>
+    private sealed class StubTokens(string token) : IMcpTokenService
+    {
+        public Task<string?> GetAccessTokenAsync(McpServer server, CancellationToken ct = default) =>
+            Task.FromResult<string?>(token);
+
+        public Task<McpTokenResult> AcquireAsync(McpServer server, CancellationToken ct = default) =>
+            Task.FromResult(new McpTokenResult(true, token, "ok"));
+
+        public Task<McpTokenResult> TestAsync(McpServer server, CancellationToken ct = default) =>
+            Task.FromResult(new McpTokenResult(true, token, "ok"));
+    }
+
     private sealed class NoTokens : IMcpTokenService
     {
         public Task<string?> GetAccessTokenAsync(McpServer server, CancellationToken ct = default) =>
             Task.FromResult<string?>(null);
+
+        public Task<McpTokenResult> AcquireAsync(McpServer server, CancellationToken ct = default) =>
+            Task.FromResult(new McpTokenResult(true, null, "not used"));
 
         public Task<McpTokenResult> TestAsync(McpServer server, CancellationToken ct = default) =>
             Task.FromResult(new McpTokenResult(true, null, "not used"));

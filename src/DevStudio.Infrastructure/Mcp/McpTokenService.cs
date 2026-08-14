@@ -7,7 +7,10 @@ using Microsoft.Extensions.Logging;
 namespace DevStudio.Infrastructure.Mcp;
 
 /// <summary>
-/// Runs the OAuth 2.0 client-credentials grant for MCP servers that authenticate as a service.
+/// Hands out bearer tokens for MCP servers. Two grants run here, both unattended: client credentials
+/// for servers that authenticate as a service, and the refresh grant that renews what a user's OAuth
+/// sign-in left behind. The sign-in itself needs a browser and belongs to <see cref="IMcpOAuthService"/>.
+///
 /// Tokens are cached on the server record and refreshed a minute before they lapse, so a long-lived
 /// agent session never hands over a token that expires mid-call.
 /// </summary>
@@ -33,48 +36,61 @@ public sealed class McpTokenService : IMcpTokenService
 
     public async Task<string?> GetAccessTokenAsync(McpServer server, CancellationToken ct = default)
     {
+        var result = await AcquireAsync(server, ct);
+
+        if (!result.Succeeded)
+            _logger.LogWarning("Could not get a token for MCP server {Server}: {Detail}", server.Name, result.Detail);
+
+        return result.Token;
+    }
+
+    public async Task<McpTokenResult> AcquireAsync(McpServer server, CancellationToken ct = default)
+    {
         switch (server.AuthMode)
         {
+            case McpAuthMode.None:
+                return new McpTokenResult(true, null, "This server needs no token.");
+
             case McpAuthMode.BearerToken:
-                return string.IsNullOrWhiteSpace(server.AccessToken) ? null : server.AccessToken;
+                return string.IsNullOrWhiteSpace(server.AccessToken)
+                    ? new McpTokenResult(false, null, "No token has been pasted in.")
+                    : new McpTokenResult(true, server.AccessToken, "Using the token that was pasted in.");
 
             case McpAuthMode.ClientCredentials:
+            case McpAuthMode.OAuth:
                 break;
 
             default:
-                return null;
+                return new McpTokenResult(true, null, "This server needs no token.");
         }
 
-        if (!string.IsNullOrWhiteSpace(server.AccessToken) &&
-            server.AccessTokenExpiresAt is { } expiry &&
-            expiry - Leeway > DateTimeOffset.UtcNow)
-        {
-            return server.AccessToken;
-        }
+        if (Usable(server))
+            return new McpTokenResult(true, server.AccessToken, "The cached token is still valid.");
 
         // One refresh at a time: several sessions starting together would otherwise all fetch.
         await _lock.WaitAsync(ct);
         try
         {
             var latest = await _servers.GetAsync(server.Id, ct) ?? server;
-            if (!string.IsNullOrWhiteSpace(latest.AccessToken) &&
-                latest.AccessTokenExpiresAt is { } fresh &&
-                fresh - Leeway > DateTimeOffset.UtcNow)
+
+            // Another caller may have renewed it while this one waited for the lock.
+            if (Usable(latest))
             {
-                return latest.AccessToken;
+                Copy(latest, server);
+                return new McpTokenResult(true, latest.AccessToken, "The cached token is still valid.");
             }
 
-            var result = await RequestTokenAsync(latest, ct);
+            var result = server.AuthMode == McpAuthMode.OAuth
+                ? await RefreshAsync(latest, ct)
+                : await RequestClientCredentialsAsync(latest, ct);
+
             if (!result.Succeeded)
-            {
-                _logger.LogWarning("Could not get a token for MCP server {Server}: {Detail}", latest.Name, result.Detail);
-                return null;
-            }
+                return result;
 
             await _servers.UpsertAsync(latest, ct);
-            server.AccessToken = latest.AccessToken;
-            server.AccessTokenExpiresAt = latest.AccessTokenExpiresAt;
-            return result.Token;
+            Copy(latest, server);
+
+            return result;
         }
         finally
         {
@@ -91,18 +107,77 @@ public sealed class McpTokenService : IMcpTokenService
                 : new McpTokenResult(true, server.AccessToken, "A token is set and will be sent as a bearer header.");
         }
 
-        if (server.AuthMode != McpAuthMode.ClientCredentials)
+        if (server.AuthMode == McpAuthMode.None)
             return new McpTokenResult(true, null, "This server needs no token.");
 
-        var result = await RequestTokenAsync(server, ct);
+        if (server.AuthMode == McpAuthMode.OAuth)
+        {
+            if (string.IsNullOrWhiteSpace(server.RefreshToken) && !Usable(server))
+                return new McpTokenResult(false, null, "Nobody has signed in yet. Use Sign in to authorise this server.");
+
+            var renewed = await AcquireAsync(server, ct);
+            return renewed;
+        }
+
+        var result = await RequestClientCredentialsAsync(server, ct);
         if (result.Succeeded)
             await _servers.UpsertAsync(server, ct);
 
         return result;
     }
 
-    /// <summary>Performs the grant and writes the result onto <paramref name="server"/>.</summary>
-    private async Task<McpTokenResult> RequestTokenAsync(McpServer server, CancellationToken ct)
+    /// <summary>True when the record holds a token that has not expired and is not about to.</summary>
+    private static bool Usable(McpServer server) =>
+        !string.IsNullOrWhiteSpace(server.AccessToken) &&
+        server.AccessTokenExpiresAt is { } expiry &&
+        expiry - Leeway > DateTimeOffset.UtcNow;
+
+    private static void Copy(McpServer from, McpServer to)
+    {
+        if (ReferenceEquals(from, to))
+            return;
+
+        to.AccessToken = from.AccessToken;
+        to.AccessTokenExpiresAt = from.AccessTokenExpiresAt;
+        to.RefreshToken = from.RefreshToken;
+    }
+
+    /// <summary>Renews a user's sign-in from its refresh token, with no browser involved.</summary>
+    private async Task<McpTokenResult> RefreshAsync(McpServer server, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(server.RefreshToken))
+        {
+            return new McpTokenResult(
+                false,
+                null,
+                string.IsNullOrWhiteSpace(server.AccessToken)
+                    ? "Nobody has signed in to this server yet."
+                    : "The sign-in has expired and the issuer left no refresh token, so it has to be done again.");
+        }
+
+        if (string.IsNullOrWhiteSpace(server.TokenUrl))
+            return new McpTokenResult(false, null, "No token endpoint is configured.");
+
+        var form = new Dictionary<string, string>
+        {
+            ["grant_type"] = "refresh_token",
+            ["refresh_token"] = server.RefreshToken,
+            ["client_id"] = server.ClientId,
+        };
+
+        if (!string.IsNullOrWhiteSpace(server.ClientSecret))
+            form["client_secret"] = server.ClientSecret;
+
+        var result = await SendAsync(server, form, ct);
+
+        // A refresh token the issuer has revoked is not a transient failure: say what has to happen.
+        return result.Succeeded
+            ? result
+            : new McpTokenResult(false, null, $"{result.Detail} The sign-in may have been revoked — sign in again.");
+    }
+
+    /// <summary>Performs the client-credentials grant and writes the result onto <paramref name="server"/>.</summary>
+    private async Task<McpTokenResult> RequestClientCredentialsAsync(McpServer server, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(server.TokenUrl) || string.IsNullOrWhiteSpace(server.ClientId))
             return new McpTokenResult(false, null, "A token URL and client id are required.");
@@ -122,6 +197,12 @@ public sealed class McpTokenService : IMcpTokenService
         if (!string.IsNullOrWhiteSpace(server.Audience))
             form["audience"] = server.Audience!;
 
+        return await SendAsync(server, form, ct);
+    }
+
+    /// <summary>Posts a grant to the token endpoint and stores whatever comes back.</summary>
+    private async Task<McpTokenResult> SendAsync(McpServer server, Dictionary<string, string> form, CancellationToken ct)
+    {
         var client = _clients.CreateClient(nameof(McpTokenService));
         client.Timeout = TimeSpan.FromSeconds(30);
 
@@ -149,6 +230,11 @@ public sealed class McpTokenService : IMcpTokenService
             server.AccessTokenExpiresAt = root.TryGetProperty("expires_in", out var expires) && expires.TryGetInt32(out var seconds)
                 ? DateTimeOffset.UtcNow.AddSeconds(seconds)
                 : null;
+
+            // Issuers that rotate refresh tokens send a new one with every renewal; keeping the old
+            // one would break the next refresh.
+            if (root.TryGetProperty("refresh_token", out var refresh) && refresh.ValueKind == JsonValueKind.String)
+                server.RefreshToken = refresh.GetString()!;
 
             var lifetime = server.AccessTokenExpiresAt is { } at
                 ? $"valid until {at.ToLocalTime():HH:mm}"

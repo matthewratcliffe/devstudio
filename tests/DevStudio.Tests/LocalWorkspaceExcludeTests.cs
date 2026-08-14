@@ -142,6 +142,9 @@ public class LocalWorkspaceExcludeTests : IDisposable
         public Task<string?> GetAccessTokenAsync(McpServer server, CancellationToken ct = default) =>
             Task.FromResult<string?>(null);
 
+        public Task<McpTokenResult> AcquireAsync(McpServer server, CancellationToken ct = default) =>
+            Task.FromResult(new McpTokenResult(true, null, "stub"));
+
         public Task<McpTokenResult> TestAsync(McpServer server, CancellationToken ct = default) =>
             Task.FromResult(new McpTokenResult(true, null, "stub"));
     }

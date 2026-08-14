@@ -133,6 +133,95 @@ public class McpTokenServiceTests : IDisposable
         Assert.Contains("access_token", result.Detail);
     }
 
+    [Fact]
+    public async Task An_oauth_server_renews_itself_from_its_refresh_token()
+    {
+        var (service, handler) = Create("""{"access_token":"fresh","refresh_token":"rotated","expires_in":3600}""");
+        var server = await _servers.UpsertAsync(new McpServer
+        {
+            Name = "rovo",
+            AuthMode = McpAuthMode.OAuth,
+            TokenUrl = "https://issuer.example.com/token",
+            ClientId = "abc",
+            AccessToken = "expired",
+            AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1),
+            RefreshToken = "refresh-1",
+        });
+
+        var token = await service.GetAccessTokenAsync(server);
+
+        Assert.Equal("fresh", token);
+        Assert.Contains("grant_type=refresh_token", handler.LastBody);
+        Assert.Contains("refresh_token=refresh-1", handler.LastBody);
+
+        // A rotated refresh token has to replace the old one or the next renewal fails.
+        Assert.Equal("rotated", (await _servers.GetAsync(server.Id))!.RefreshToken);
+    }
+
+    [Fact]
+    public async Task An_oauth_server_nobody_has_signed_in_to_says_so()
+    {
+        var (service, handler) = Create();
+
+        var result = await service.AcquireAsync(new McpServer
+        {
+            Name = "rovo",
+            AuthMode = McpAuthMode.OAuth,
+            TokenUrl = "https://issuer.example.com/token",
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("signed in", result.Detail);
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
+    public async Task A_revoked_refresh_token_says_to_sign_in_again()
+    {
+        var handler = new TokenHandler("""{"error":"invalid_grant"}""", HttpStatusCode.BadRequest);
+        var service = new McpTokenService(new StubFactory(handler), _servers, NullLogger<McpTokenService>.Instance);
+        var server = await _servers.UpsertAsync(new McpServer
+        {
+            Name = "rovo",
+            AuthMode = McpAuthMode.OAuth,
+            TokenUrl = "https://issuer.example.com/token",
+            RefreshToken = "revoked",
+        });
+
+        var result = await service.AcquireAsync(server);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("sign in again", result.Detail);
+    }
+
+    [Fact]
+    public async Task A_valid_oauth_token_is_used_without_contacting_the_issuer()
+    {
+        var (service, handler) = Create();
+
+        var result = await service.AcquireAsync(new McpServer
+        {
+            AuthMode = McpAuthMode.OAuth,
+            AccessToken = "still-good",
+            AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+        });
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("still-good", result.Token);
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
+    public async Task Acquiring_for_a_server_with_no_auth_succeeds_with_no_token()
+    {
+        var (service, _) = Create();
+
+        var result = await service.AcquireAsync(new McpServer { AuthMode = McpAuthMode.None });
+
+        Assert.True(result.Succeeded);
+        Assert.Null(result.Token);
+    }
+
     private sealed class TokenHandler(string body, HttpStatusCode status = HttpStatusCode.OK) : HttpMessageHandler
     {
         public int Calls { get; private set; }
