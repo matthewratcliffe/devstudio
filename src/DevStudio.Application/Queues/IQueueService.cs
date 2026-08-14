@@ -56,6 +56,12 @@ public interface IQueueService
 
     Task<WorkQueue?> GetQueueAsync(string queueId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Finds a queue by id or by name. <see cref="EnqueueAsync"/> resolves the same way, so a caller
+    /// that only knows what the queue is called does not have to look the id up first.
+    /// </summary>
+    Task<WorkQueue?> ResolveQueueAsync(string idOrName, CancellationToken ct = default);
+
     /// <summary>Offers an item, honouring the queue's deduplication rule.</summary>
     Task<EnqueueResult> EnqueueAsync(EnqueueRequest request, CancellationToken ct = default);
 

@@ -4,6 +4,7 @@
 @inject IMcpTokenService McpTokens
 @inject IMcpProbeService McpProbe
 @inject IMcpAuthDiscovery McpAuth
+@inject IMcpOAuthService McpOAuth
 @inject NavigationManager Nav
 
 <PageTitle>MCP servers · devStudio</PageTitle>
@@ -224,12 +225,14 @@
                     <label>Mode</label>
                     <select @bind="_editing.AuthMode">
                         <option value="@McpAuthMode.None">None — or static headers below</option>
+                        <option value="@McpAuthMode.OAuth">OAuth sign-in (browser)</option>
                         <option value="@McpAuthMode.ClientCredentials">OAuth client credentials</option>
                         <option value="@McpAuthMode.BearerToken">Bearer token I paste in</option>
                     </select>
                     <span class="hint">
-                        Client credentials is for servers that authenticate as a service. For
-                        user-delegated OAuth, leave this on None — the CLI runs that flow itself.
+                        Client credentials is for servers that authenticate as a service. Hosted servers
+                        such as Atlassian's Rovo issue no service tokens at all — those need the sign-in,
+                        which is done once here and then renewed on its own.
                     </span>
                 </div>
 
@@ -288,7 +291,45 @@
                     </div>
                 }
 
-                @if (_editing.AuthMode == McpAuthMode.ClientCredentials)
+                @if (_editing.AuthMode == McpAuthMode.OAuth)
+                {
+                    <div class="field">
+                        <label>Authorization URL</label>
+                        <input type="url" @bind="_editing.AuthorizationUrl" placeholder="https://issuer.example.com/authorize" />
+                        <span class="hint">Left blank, this is discovered from the endpoint when you sign in.</span>
+                    </div>
+                    <div class="field">
+                        <label>Token URL</label>
+                        <input type="url" @bind="_editing.TokenUrl" placeholder="https://issuer.example.com/oauth/token" />
+                    </div>
+                    <div class="form-grid">
+                        <div class="field">
+                            <label>Client id</label>
+                            <input type="text" @bind="_editing.ClientId" />
+                            <span class="hint">Left blank, this app registers itself if the issuer allows it.</span>
+                        </div>
+                        <div class="field">
+                            <label>Scopes</label>
+                            <input type="text" @bind="_editing.Scopes" placeholder="read:jira-work offline_access" />
+                        </div>
+                    </div>
+
+                    <div class="btn-row" style="margin-bottom:0.6rem">
+                        <button class="btn btn-primary btn-sm" disabled="@_signingIn" @onclick="SignInAsync">
+                            @(_signingIn ? "Starting…" : _editing.AuthorizedAt is null ? "Sign in" : "Sign in again")
+                        </button>
+                        @if (_editing.AuthorizedAt is { } signedInAt)
+                        {
+                            <span class="pill pill-lime">signed in @signedInAt.ToLocalTime().ToString("d MMM HH:mm")</span>
+                            <button class="btn btn-ghost btn-sm" @onclick="SignOutAsync">Sign out</button>
+                        }
+                        else
+                        {
+                            <span class="hint">Saves the server, then sends you to the provider to authorise it.</span>
+                        }
+                    </div>
+                }
+                else if (_editing.AuthMode == McpAuthMode.ClientCredentials)
                 {
                     <div class="field">
                         <label>Token URL</label>
@@ -380,6 +421,7 @@
     private string _tokenStatus = string.Empty;
     private McpAuthDiscovery? _discovery;
     private bool _discovering;
+    private bool _signingIn;
     private readonly Dictionary<string, McpProbeResult> _probes = [];
     private string? _probing;
 
@@ -448,8 +490,19 @@
         if (_editing is null || found.TokenUrl is not { Length: > 0 })
             return;
 
-        _editing.AuthMode = McpAuthMode.ClientCredentials;
+        // A server that offers no service grant can only be reached by signing in, so land on the mode
+        // that will actually work rather than one that is guaranteed to be refused.
+        _editing.AuthMode = found.SupportsClientCredentials
+            ? McpAuthMode.ClientCredentials
+            : McpAuthMode.OAuth;
+
         _editing.TokenUrl = found.TokenUrl;
+
+        if (found.AuthorizationUrl is { Length: > 0 } authorize)
+            _editing.AuthorizationUrl = authorize;
+
+        if (found.RegistrationUrl is { Length: > 0 } register)
+            _editing.RegistrationUrl = register;
 
         if (string.IsNullOrWhiteSpace(_editing.Scopes) && found.ScopeString is { Length: > 0 } scopes)
             _editing.Scopes = scopes;
@@ -459,7 +512,7 @@
 
         Layout.Notify(found.SupportsClientCredentials
             ? "Filled in. Add the client id and secret, then test the token."
-            : "Filled in, but this issuer did not advertise client credentials — the token request may be refused.");
+            : "Filled in. This issuer needs a browser sign-in — press Sign in.");
     }
 
     /// <summary>Connects like a CLI would and reports what the server actually offers.</summary>
@@ -525,6 +578,55 @@
         var result = await McpTokens.TestAsync(_editing);
         _tokenStatus = result.Detail;
         Layout.Notify(result.Detail, result.Succeeded ? "ok" : "err");
+    }
+
+    /// <summary>
+    /// Saves, then hands the browser to the issuer. Saving first is not a convenience: the callback
+    /// arrives on a different request and finds the server by id, so an unsaved record has nowhere
+    /// for the tokens to land.
+    /// </summary>
+    private async Task SignInAsync()
+    {
+        if (_editing is null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(_editing.Name))
+        {
+            Layout.Notify("An MCP server needs a name before it can be signed in to.", "err");
+            return;
+        }
+
+        _signingIn = true;
+        try
+        {
+            await McpStore.UpsertAsync(_editing);
+
+            var redirectUri = Nav.BaseUri.TrimEnd('/') + "/mcp/oauth/callback";
+            var start = await McpOAuth.BeginAsync(_editing, redirectUri);
+
+            if (!start.Succeeded || start.AuthorizationUrl is not { Length: > 0 } url)
+            {
+                Layout.Notify(start.Detail, "err");
+                return;
+            }
+
+            // Leaves the circuit behind, which is fine — the callback page links back here.
+            Nav.NavigateTo(url, forceLoad: true);
+        }
+        finally
+        {
+            _signingIn = false;
+        }
+    }
+
+    private async Task SignOutAsync()
+    {
+        if (_editing is null)
+            return;
+
+        await McpOAuth.SignOutAsync(_editing);
+        await ReloadAsync();
+        Layout.Notify("Signed out. The server will need authorising again before it can be used.", "ok");
     }
 
     private async Task SaveAsync()
@@ -598,8 +700,13 @@
         ClientSecret = server.ClientSecret,
         Scopes = server.Scopes,
         Audience = server.Audience,
+        AuthorizationUrl = server.AuthorizationUrl,
+        RegistrationUrl = server.RegistrationUrl,
         AccessToken = server.AccessToken,
         AccessTokenExpiresAt = server.AccessTokenExpiresAt,
+        RefreshToken = server.RefreshToken,
+        AuthorizedAccount = server.AuthorizedAccount,
+        AuthorizedAt = server.AuthorizedAt,
         AuthHeaderName = server.AuthHeaderName,
         AuthHeaderPrefix = server.AuthHeaderPrefix,
         Enabled = server.Enabled,

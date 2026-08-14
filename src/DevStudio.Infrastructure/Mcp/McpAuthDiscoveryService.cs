@@ -72,6 +72,14 @@ public sealed class McpAuthDiscoveryService : IMcpAuthDiscovery
 
             if (resource is null)
             {
+                // Not every server publishes the RFC 9728 document. Plenty host their own
+                // authorization server metadata at their authority root instead, which is enough on
+                // its own — Atlassian's Rovo endpoint is one of them.
+                var direct = await ReadJsonAsync(client, DirectAuthServerUrl(url), timeout.Token);
+
+                if (direct?["token_endpoint"] is not null)
+                    return FromAuthServer(direct, direct["issuer"]?.GetValue<string>() ?? url.GetLeftPart(UriPartial.Authority), null, null, []);
+
                 return new McpAuthDiscovery(
                     false,
                     "The endpoint requires a token but published no resource metadata, so its issuer has to be configured by hand.",
@@ -106,20 +114,12 @@ public sealed class McpAuthDiscoveryService : IMcpAuthDiscovery
                     Scopes: scopes);
             }
 
-            var grants = Strings(server["grant_types_supported"]);
-
-            return new McpAuthDiscovery(
-                true,
-                Describe(grants),
-                RequiresAuth: true,
-                ResourceMetadataUrl: metadataUrl,
-                Resource: resource["resource"]?.GetValue<string>(),
-                Issuer: server["issuer"]?.GetValue<string>() ?? issuer,
-                TokenUrl: server["token_endpoint"]?.GetValue<string>(),
-                AuthorizationUrl: server["authorization_endpoint"]?.GetValue<string>(),
-                RegistrationUrl: server["registration_endpoint"]?.GetValue<string>(),
-                Scopes: scopes,
-                GrantTypes: grants);
+            return FromAuthServer(
+                server,
+                server["issuer"]?.GetValue<string>() ?? issuer,
+                metadataUrl,
+                resource["resource"]?.GetValue<string>(),
+                scopes);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -195,6 +195,43 @@ public sealed class McpAuthDiscoveryService : IMcpAuthDiscovery
         $"{url.GetLeftPart(UriPartial.Authority)}/.well-known/oauth-protected-resource{url.AbsolutePath.TrimEnd('/')}";
 
     /// <summary>
+    /// The endpoint's own authorization server document, for servers that are their own issuer and
+    /// never publish the protected-resource indirection.
+    /// </summary>
+    private static string DirectAuthServerUrl(Uri url) =>
+        $"{url.GetLeftPart(UriPartial.Authority)}/.well-known/oauth-authorization-server";
+
+    /// <summary>Turns an authorization server document into the result the UI reads.</summary>
+    private static McpAuthDiscovery FromAuthServer(
+        JsonObject server,
+        string issuer,
+        string? resourceMetadataUrl,
+        string? resource,
+        IReadOnlyList<string> scopes)
+    {
+        var grants = Strings(server["grant_types_supported"]);
+        var registration = server["registration_endpoint"]?.GetValue<string>();
+
+        // A document that lists no grants is not saying there are none; authorization_code is the
+        // default every one of these servers supports.
+        if (grants.Count == 0)
+            grants = ["authorization_code"];
+
+        return new McpAuthDiscovery(
+            true,
+            Describe(grants, registration is { Length: > 0 }),
+            RequiresAuth: true,
+            ResourceMetadataUrl: resourceMetadataUrl,
+            Resource: resource,
+            Issuer: issuer,
+            TokenUrl: server["token_endpoint"]?.GetValue<string>(),
+            AuthorizationUrl: server["authorization_endpoint"]?.GetValue<string>(),
+            RegistrationUrl: registration,
+            Scopes: scopes.Count > 0 ? scopes : Strings(server["scopes_supported"]),
+            GrantTypes: grants);
+    }
+
+    /// <summary>
     /// Tries the issuer's metadata the ways it is published in the wild: the path-aware well-known
     /// form, the plain suffix form, and OpenID discovery.
     /// </summary>
@@ -250,25 +287,28 @@ public sealed class McpAuthDiscoveryService : IMcpAuthDiscovery
     /// The one line the operator needs: whether this app can get a token on its own, or whether the
     /// sign-in has to happen at a browser.
     /// </summary>
-    private static string Describe(IReadOnlyList<string> grants)
+    private static string Describe(IReadOnlyList<string> grants, bool canRegister)
     {
         var service = grants.Contains("client_credentials", StringComparer.OrdinalIgnoreCase);
         var delegated = grants.Contains("authorization_code", StringComparer.OrdinalIgnoreCase);
 
+        var signIn = canRegister
+            ? "Choose the OAuth mode and press Sign in — this app can register itself with the issuer, so "
+            + "there is nothing to create by hand."
+            : "Choose the OAuth mode, enter a client id created with the provider, then press Sign in.";
+
         if (service && delegated)
         {
-            return "This issuer offers client credentials, so it can be configured here — but it also "
-                 + "offers the user-delegated flow, which is what most hosted servers actually require. "
-                 + "If a service token is refused, leave the mode on None and let the CLI sign in.";
+            return "This issuer offers both client credentials and user-delegated sign-in. Hosted servers "
+                 + "generally accept only the delegated kind, so start there: " + signIn;
         }
 
         if (service)
-            return "This issuer offers client credentials, so it can be configured here.";
+            return "This issuer offers client credentials, so it can be configured here without a sign-in.";
 
         return delegated
-            ? "This issuer only supports user-delegated OAuth, which needs a person at a browser. Leave "
-              + "the mode on None and let the CLI run the sign-in, or paste a token you obtained yourself."
-            : "The issuer was found, but it advertises no grant this app can run on its own.";
+            ? "This issuer uses user-delegated OAuth, which needs somebody at a browser once. " + signIn
+            : "The issuer was found, but it advertises no grant this app can run.";
     }
 
     private static IReadOnlyList<string> Strings(JsonNode? node) =>

@@ -358,6 +358,47 @@ public class QueueTests
     }
 
     [Fact]
+    public async Task A_session_started_for_an_item_is_closed_and_read_only_once_the_item_is_done()
+    {
+        var (service, _, queue, sessions) = Build();
+
+        await service.EnqueueAsync(Item(queue, "mr-42"));
+
+        await Dispatcher(service, sessions).PokeAsync();
+        await WaitForSettledAsync(service, queue.Id, expected: 1);
+
+        var item = Assert.Single(await service.GetItemsAsync(queue.Id));
+        var session = sessions.SessionFor(item.Id);
+
+        Assert.NotNull(session);
+        Assert.True(session!.IsClosed);
+        Assert.False(session.AcceptsInput);
+        Assert.Equal(SessionStatus.Completed, session.Status);
+        Assert.Contains(queue.Name, session.ClosedReason);
+    }
+
+    [Fact]
+    public async Task A_session_whose_item_failed_is_closed_still_saying_it_failed()
+    {
+        var (service, _, queue, sessions) = Build(q => q.MaxAttempts = 1);
+        sessions.Fail = true;
+
+        await service.EnqueueAsync(Item(queue, "mr-42"));
+
+        await Dispatcher(service, sessions).PokeAsync();
+        await WaitForSettledAsync(service, queue.Id, expected: 1);
+
+        var item = Assert.Single(await service.GetItemsAsync(queue.Id));
+        var session = sessions.SessionFor(item.Id);
+
+        Assert.NotNull(session);
+        Assert.True(session!.IsClosed);
+        // Closing settles a run that finished; it does not rewrite one that fell over.
+        Assert.Equal(SessionStatus.Failed, session.Status);
+        Assert.Equal(QueueItemStatus.Failed, item.Status);
+    }
+
+    [Fact]
     public async Task The_dispatcher_starts_no_more_than_the_queue_allows_at_once()
     {
         var (service, _, queue, sessions) = Build(q => q.MaxConcurrent = 2);
@@ -439,6 +480,55 @@ public class QueueTests
         Assert.Equal(1, (await service.GetCountsAsync(queue.Id)).Pending);
     }
 
+    [Fact]
+    public async Task A_queue_can_be_named_instead_of_identified_when_enqueueing()
+    {
+        var (service, _, queue, _) = Build();
+
+        var byName = await service.EnqueueAsync(Item(queue, "mr-1") with { QueueId = "Merge requests" });
+        var byCasing = await service.EnqueueAsync(Item(queue, "mr-2") with { QueueId = "merge REQUESTS" });
+        var bySlug = await service.EnqueueAsync(Item(queue, "mr-3") with { QueueId = "merge-requests" });
+
+        Assert.True(byName.Accepted);
+        Assert.True(byCasing.Accepted);
+        Assert.True(bySlug.Accepted);
+        Assert.All(
+            new[] { byName, byCasing, bySlug },
+            r => Assert.Equal(queue.Id, r.Item!.QueueId));
+    }
+
+    [Fact]
+    public async Task A_partial_name_finds_the_queue_when_only_one_matches()
+    {
+        var (service, _, queue, _) = Build();
+
+        Assert.Equal(queue.Id, (await service.ResolveQueueAsync("merge"))?.Id);
+    }
+
+    [Fact]
+    public async Task An_ambiguous_partial_name_resolves_to_nothing_rather_than_the_wrong_queue()
+    {
+        var (service, _, _, _, queues) = BuildWithStore();
+        await queues.UpsertAsync(new WorkQueue { Name = "Merge request reviews" });
+
+        // Both queues contain "merge": filing the work in either would be a guess.
+        Assert.Null(await service.ResolveQueueAsync("merge"));
+
+        // The full name is still unambiguous even though it is a prefix of the other.
+        Assert.Equal("Merge requests", (await service.ResolveQueueAsync("Merge requests"))?.Name);
+    }
+
+    [Fact]
+    public async Task Enqueueing_onto_an_unknown_queue_says_what_the_queues_are()
+    {
+        var (service, _, _, _) = Build();
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.EnqueueAsync(new EnqueueRequest { QueueId = "code review", Key = "x" }));
+
+        Assert.Contains("Merge requests", error.Message);
+    }
+
     private static EnqueueRequest Item(WorkQueue queue, string key, string title = "") => new()
     {
         QueueId = queue.Id,
@@ -476,6 +566,15 @@ public class QueueTests
     private static (QueueService Service, InMemoryStore<QueueItem> Items, WorkQueue Queue, RecordingSessionManager Sessions)
         Build(Action<WorkQueue>? configure = null)
     {
+        var (service, items, queue, sessions, _) = BuildWithStore(configure);
+        return (service, items, queue, sessions);
+    }
+
+    /// <summary>The same fixture, with the queue store handed back so a test can add a second queue.</summary>
+    private static (QueueService Service, InMemoryStore<QueueItem> Items, WorkQueue Queue,
+        RecordingSessionManager Sessions, InMemoryStore<WorkQueue> Queues)
+        BuildWithStore(Action<WorkQueue>? configure = null)
+    {
         var queues = new InMemoryStore<WorkQueue>();
         var items = new InMemoryStore<QueueItem>();
         var sessions = new RecordingSessionManager();
@@ -487,7 +586,7 @@ public class QueueTests
         var service = new QueueService(
             queues, items, sessions, new StubWorkflowEngine(), NullLogger<QueueService>.Instance);
 
-        return (service, items, queue, sessions);
+        return (service, items, queue, sessions, queues);
     }
 
     private sealed class InMemoryStore<T> : IEntityStore<T> where T : class, IEntity
@@ -516,9 +615,15 @@ public class QueueTests
     /// <summary>Records what it was asked to start, and can be held open to observe the slot cap.</summary>
     private sealed class RecordingSessionManager : ISessionManager
     {
+        private readonly ConcurrentDictionary<string, ChatSession> _sessions = new();
+
         public List<StartSessionRequest> Started { get; } = [];
         public List<string> Cancelled { get; } = [];
+        public List<string> Closed { get; } = [];
         public bool Fail { get; set; }
+
+        public ChatSession? SessionFor(string queueItemId) =>
+            _sessions.Values.FirstOrDefault(s => s.QueueItemId == queueItemId);
 
         /// <summary>Set to stop sessions finishing until the test lets them.</summary>
         public TaskCompletionSource? Gate { get; set; }
@@ -545,12 +650,29 @@ public class QueueTests
                 Messages = [new ChatMessage { Role = MessageRole.Agent, Content = request.Prompt }],
             };
 
+            _sessions[session.Id] = session;
             SessionUpdated?.Invoke(session);
             return session;
         }
 
         public Task<ChatSession> RunToCompletionAsync(StartSessionRequest request, TimeSpan timeout, CancellationToken ct = default) =>
             StartAsync(request, ct);
+
+        public Task<ChatSession?> CloseAsync(string sessionId, string? reason = null, CancellationToken ct = default)
+        {
+            lock (Closed)
+                Closed.Add(sessionId);
+
+            if (!_sessions.TryGetValue(sessionId, out var session))
+                return Task.FromResult<ChatSession?>(null);
+
+            if (session.Status is not (SessionStatus.Failed or SessionStatus.Cancelled))
+                session.Status = SessionStatus.Completed;
+
+            session.IsClosed = true;
+            session.ClosedReason = reason;
+            return Task.FromResult<ChatSession?>(session);
+        }
 
         public Task CancelAsync(string sessionId)
         {

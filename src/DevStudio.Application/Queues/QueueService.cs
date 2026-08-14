@@ -42,10 +42,62 @@ public sealed class QueueService : IQueueService
     public Task<WorkQueue?> GetQueueAsync(string queueId, CancellationToken ct = default) =>
         _queues.GetAsync(queueId, ct);
 
+    /// <summary>
+    /// Finds a queue by its id or by its name. Producers are told the id, but an agent asked to "add
+    /// this to the code review queue" has only the name to go on, so a name has to work as well as an
+    /// id — otherwise the first attempt fails and only a second, better-informed one succeeds.
+    /// </summary>
+    public async Task<WorkQueue?> ResolveQueueAsync(string idOrName, CancellationToken ct = default)
+    {
+        var wanted = idOrName?.Trim() ?? string.Empty;
+        if (wanted.Length == 0)
+            return null;
+
+        var all = await _queues.GetAllAsync(ct);
+
+        var exact = all.FirstOrDefault(q => string.Equals(q.Id, wanted, StringComparison.OrdinalIgnoreCase))
+                    ?? all.FirstOrDefault(q => string.Equals(q.Name.Trim(), wanted, StringComparison.OrdinalIgnoreCase));
+
+        if (exact is not null)
+            return exact;
+
+        // Beyond an exact match, only an unambiguous one counts: guessing between two queues would
+        // file the work somewhere nobody is watching, which is worse than saying the name was unclear.
+        var slug = Slug(wanted);
+        if (slug.Length == 0)
+            return null;
+
+        return Only(all.Where(q => Slug(q.Name) == slug))
+               ?? Only(all.Where(q => Slug(q.Name).Contains(slug, StringComparison.Ordinal)));
+
+        static WorkQueue? Only(IEnumerable<WorkQueue> matches)
+        {
+            var found = matches.Take(2).ToList();
+            return found.Count == 1 ? found[0] : null;
+        }
+    }
+
+    /// <summary>
+    /// Names what is actually there. A caller that guessed the name wrong can only correct itself if
+    /// the refusal says what the choices were.
+    /// </summary>
+    private async Task<string> UnknownQueueMessageAsync(string wanted, CancellationToken ct)
+    {
+        var names = (await _queues.GetAllAsync(ct)).Select(q => $"'{q.Name}'").ToList();
+
+        return names.Count == 0
+            ? $"There is no queue '{wanted}'. No queues are configured."
+            : $"There is no queue '{wanted}'. The queues are: {string.Join(", ", names)}.";
+    }
+
+    /// <summary>Names compared with their punctuation and spacing dropped, so "Code Review" finds "code-review".</summary>
+    private static string Slug(string value) =>
+        new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
     public async Task<EnqueueResult> EnqueueAsync(EnqueueRequest request, CancellationToken ct = default)
     {
-        var queue = await _queues.GetAsync(request.QueueId, ct)
-                    ?? throw new InvalidOperationException($"Queue '{request.QueueId}' no longer exists.");
+        var queue = await ResolveQueueAsync(request.QueueId, ct)
+                    ?? throw new InvalidOperationException(await UnknownQueueMessageAsync(request.QueueId, ct));
 
         var key = request.Key.Trim();
 

@@ -94,65 +94,79 @@ else
 
             <div class="composer">
                 <div class="composer-inner">
-                @foreach (var approval in _session.Approvals.Where(a => a.Status == ApprovalStatus.Pending))
+                @if (!_session.AcceptsInput)
                 {
-                    <div class="approval">
-                        <div class="approval-head">
-                            <span class="approval-tag">Permission needed</span>
-                            <code>@approval.ToolName</code>
-                        </div>
-                        <div class="approval-detail">@approval.Detail</div>
-                        <div class="btn-row">
-                            <button class="btn btn-sm btn-primary" @onclick="() => ApproveAsync(approval, retry: true)">
-                                Allow &amp; retry
-                            </button>
-                            <button class="btn btn-sm" @onclick="() => ApproveAsync(approval, retry: false)">Allow</button>
-                            <button class="btn btn-sm btn-danger" @onclick="() => DenyAsync(approval)">Deny</button>
-                            <span class="mono-dim">grants <code>@approval.SuggestedRule</code> for this session</span>
-                        </div>
+                    <div class="closed-note">
+                        <span class="pill pill-lime"><span class="dot"></span>Finished</span>
+                        <span>
+                            @(_session.ClosedReason ?? "This conversation is finished.")
+                            It is read only — the transcript and its files stay here, but no further
+                            turns can be sent.
+                        </span>
                     </div>
                 }
-                @if (Suggestions is { Count: > 0 } suggestions)
+                else
                 {
-                    <div class="suggestions">
-                        @foreach (var suggestion in suggestions)
-                        {
-                            <button class="suggestion" @onclick="() => SendMessageAsync(suggestion)">@suggestion</button>
-                        }
-                    </div>
-                }
+                    @foreach (var approval in _session.Approvals.Where(a => a.Status == ApprovalStatus.Pending))
+                    {
+                        <div class="approval">
+                            <div class="approval-head">
+                                <span class="approval-tag">Permission needed</span>
+                                <code>@approval.ToolName</code>
+                            </div>
+                            <div class="approval-detail">@approval.Detail</div>
+                            <div class="btn-row">
+                                <button class="btn btn-sm btn-primary" @onclick="() => ApproveAsync(approval, retry: true)">
+                                    Allow &amp; retry
+                                </button>
+                                <button class="btn btn-sm" @onclick="() => ApproveAsync(approval, retry: false)">Allow</button>
+                                <button class="btn btn-sm btn-danger" @onclick="() => DenyAsync(approval)">Deny</button>
+                                <span class="mono-dim">grants <code>@approval.SuggestedRule</code> for this session</span>
+                            </div>
+                        </div>
+                    }
+                    @if (Suggestions is { Count: > 0 } suggestions)
+                    {
+                        <div class="suggestions">
+                            @foreach (var suggestion in suggestions)
+                            {
+                                <button class="suggestion" @onclick="() => SendMessageAsync(suggestion)">@suggestion</button>
+                            }
+                        </div>
+                    }
 
-                <div class="composer-row">
-                    <textarea @bind="_draft" @bind:event="oninput" @onkeydown="OnKeyDown" @ref="_draftElement"
-                              placeholder="@(_session.IsLive ? "The agent is working — your message will be queued." : "Send another turn. Enter to send, Shift+Enter for a new line.")"></textarea>
-                    <div style="display:flex;flex-direction:column;gap:0.4rem">
-                        <button class="btn btn-primary" disabled="@string.IsNullOrWhiteSpace(_draft)" @onclick="SendAsync">Send</button>
-                        <button class="btn btn-guidance btn-sm" disabled="@string.IsNullOrWhiteSpace(_draft)"
-                                title="Steer the agent now instead of queueing a turn"
-                                @onclick="SendGuidanceAsync">Guide ⚡</button>
-                        @if (_session.IsLive)
-                        {
-                            <button class="btn btn-danger btn-sm" @onclick="StopAsync">Stop</button>
-                        }
+                    <div class="composer-row">
+                        <textarea @bind="_draft" @bind:event="oninput" @onkeydown="OnKeyDown" @ref="_draftElement"
+                                  placeholder="@(_session.IsLive ? "The agent is working — your message will be queued." : "Send another turn. Enter to send, Shift+Enter for a new line.")"></textarea>
+                        <div style="display:flex;flex-direction:column;gap:0.4rem">
+                            <button class="btn btn-primary" disabled="@string.IsNullOrWhiteSpace(_draft)" @onclick="SendAsync">Send</button>
+                            <button class="btn btn-guidance btn-sm" disabled="@string.IsNullOrWhiteSpace(_draft)"
+                                    title="Steer the agent now instead of queueing a turn"
+                                    @onclick="SendGuidanceAsync">Guide ⚡</button>
+                            @if (_session.IsLive)
+                            {
+                                <button class="btn btn-danger btn-sm" @onclick="StopAsync">Stop</button>
+                            }
+                        </div>
                     </div>
-                </div>
-                @if (_session.Status == SessionStatus.Running)
-                {
-                    <div class="check" style="margin-top:0.4rem">
-                        <input type="checkbox" id="interrupt" @bind="_interrupt" />
-                        <label for="interrupt" style="text-transform:none;letter-spacing:0">
-                            Interrupt the turn in flight so guidance applies immediately
-                        </label>
-                    </div>
-                }
-                @if (_session.Guidance.Any(g => g.Status == GuidanceStatus.Pending))
-                {
-                    <div class="mono-dim" style="margin-top:0.3rem;color:var(--amber)">
-                        @_session.Guidance.Count(g => g.Status == GuidanceStatus.Pending) guidance message(s) waiting to be picked up.
-                    </div>
+                    @if (_session.Status == SessionStatus.Running)
+                    {
+                        <div class="check" style="margin-top:0.4rem">
+                            <input type="checkbox" id="interrupt" @bind="_interrupt" />
+                            <label for="interrupt" style="text-transform:none;letter-spacing:0">
+                                Interrupt the turn in flight so guidance applies immediately
+                            </label>
+                        </div>
+                    }
+                    @if (_session.Guidance.Any(g => g.Status == GuidanceStatus.Pending))
+                    {
+                        <div class="mono-dim" style="margin-top:0.3rem;color:var(--amber)">
+                            @_session.Guidance.Count(g => g.Status == GuidanceStatus.Pending) guidance message(s) waiting to be picked up.
+                        </div>
+                    }
                 }
                 <div class="mono-dim" style="margin-top:0.4rem">
-                    @_session.Status · @_session.Provider · @_session.PermissionMode
+                    @_session.Status@(_session.IsClosed ? " · read only" : "") · @_session.Provider · @_session.PermissionMode
                     @if (_session.ProviderSessionId is { Length: > 0 } id)
                     {
                         <span> · resume id @id[..Math.Min(8, id.Length)]</span>
@@ -189,7 +203,8 @@ else
                 </dd>
                 <dt>Permissions</dt>
                 <dd>
-                    <select value="@_session.PermissionMode" @onchange="SetPermissionModeAsync">
+                    <select value="@_session.PermissionMode" disabled="@(!_session.AcceptsInput)"
+                            @onchange="SetPermissionModeAsync">
                         <option value="@PermissionMode.Default">Default — ask for everything</option>
                         <option value="@PermissionMode.Plan">Plan — read only</option>
                         <option value="@PermissionMode.AcceptEdits">Accept edits</option>
@@ -210,20 +225,23 @@ else
                 <div class="toast err" style="margin-top:0.8rem">@_session.LastError</div>
             }
 
-            <div class="divider"></div>
-            <div class="section-tag">Model</div>
-            <ModelPicker Value="_model" ValueChanged="SetModelAsync" Models="_models" Efforts="_efforts"
-                         DefaultLabel="Agent default" />
-            <div class="mono-dim">
-                Applies from your next message.
-                @if (OpeningTurns > 0)
-                {
-                    <text>
-                        @_session.TurnCount turn@(_session.TurnCount == 1 ? "" : "s") done, so the opening
-                        model @(HandoverPending ? "still covers the next one" : "has already handed over").
-                    </text>
-                }
-            </div>
+            @if (_session.AcceptsInput)
+            {
+                <div class="divider"></div>
+                <div class="section-tag">Model</div>
+                <ModelPicker Value="_model" ValueChanged="SetModelAsync" Models="_models" Efforts="_efforts"
+                             DefaultLabel="Agent default" />
+                <div class="mono-dim">
+                    Applies from your next message.
+                    @if (OpeningTurns > 0)
+                    {
+                        <text>
+                            @_session.TurnCount turn@(_session.TurnCount == 1 ? "" : "s") done, so the opening
+                            model @(HandoverPending ? "still covers the next one" : "has already handed over").
+                        </text>
+                    }
+                </div>
+            }
 
             @if (!string.IsNullOrWhiteSpace(_session.Summary))
             {
@@ -302,7 +320,7 @@ else
                 {
                     <label class="check">
                         <input type="checkbox" checked="@(_session.McpServerIds.Contains(server.Id) || server.IsDefault)"
-                               disabled="@server.IsDefault"
+                               disabled="@(server.IsDefault || !_session.AcceptsInput)"
                                @onchange="e => ToggleMcpAsync(server.Id, e)" />
                         <span>@server.Name @(server.IsDefault ? "(always on)" : "")</span>
                     </label>
@@ -450,7 +468,7 @@ else
     /// </summary>
     private async Task SendGuidanceAsync()
     {
-        if (string.IsNullOrWhiteSpace(_draft) || _session is null)
+        if (string.IsNullOrWhiteSpace(_draft) || _session is null || !_session.AcceptsInput)
             return;
 
         var text = _draft.Trim();
@@ -497,7 +515,7 @@ else
 
     private async Task SendMessageAsync(string message)
     {
-        if (_session is null || string.IsNullOrWhiteSpace(message))
+        if (_session is null || string.IsNullOrWhiteSpace(message) || !_session.AcceptsInput)
             return;
 
         try

@@ -223,7 +223,23 @@ public sealed class ChatSession : Entity
     /// <summary>Soft delete, so a session can be recovered from the archive.</summary>
     public bool IsArchived { get; set; }
 
+    /// <summary>
+    /// The conversation is finished and takes no further turns. Set when the work that owned the
+    /// session is over — a queue item, whose agent answers to the queue rather than to anyone at the
+    /// keyboard — so the transcript stays readable while nobody can restart a CLI behind the
+    /// queue's back and leave the item's recorded outcome describing a run that has moved on.
+    /// </summary>
+    public bool IsClosed { get; set; }
+
+    /// <summary>Why it was closed, shown in the chat where the composer used to be.</summary>
+    public string? ClosedReason { get; set; }
+
+    public DateTimeOffset? ClosedAt { get; set; }
+
     public bool IsLive => Status is SessionStatus.Starting or SessionStatus.Running or SessionStatus.AwaitingInput;
+
+    /// <summary>Whether another turn can be sent: a closed session is read only for good.</summary>
+    public bool AcceptsInput => !IsClosed;
 
     /// <summary>Guidance the agent has not acted on yet.</summary>
     public IEnumerable<GuidanceMessage> PendingGuidance =>

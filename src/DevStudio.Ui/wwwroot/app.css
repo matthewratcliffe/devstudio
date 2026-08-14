@@ -466,6 +466,16 @@ select option { background: var(--bg-1); }
 .composer-row { display: flex; gap: 0.6rem; align-items: flex-end; }
 .composer .composer-row textarea { flex: 1; }
 
+/* A finished conversation keeps its transcript, so the composer becomes an explanation. */
+.closed-note {
+    display: flex; align-items: flex-start; gap: 0.6rem;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--surface-2);
+    padding: 0.6rem 0.75rem;
+    font-size: 0.82rem; color: var(--text-2);
+}
+.closed-note .pill { flex: none; }
+
 /* A blocked tool call is the one thing in the composer that must not be missed. */
 .approval {
     border: 1px solid var(--amber); border-left-width: 3px;

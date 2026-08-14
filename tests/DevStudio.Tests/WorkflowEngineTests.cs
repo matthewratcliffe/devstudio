@@ -196,6 +196,9 @@ public class WorkflowEngineTests
 
         public Task CancelAsync(string sessionId) => Task.CompletedTask;
 
+        public Task<ChatSession?> CloseAsync(string sessionId, string? reason = null, CancellationToken ct = default) =>
+            Task.FromResult<ChatSession?>(null);
+
         public Task<ChatSession?> GetAsync(string sessionId, CancellationToken ct = default) =>
             Task.FromResult<ChatSession?>(null);
 

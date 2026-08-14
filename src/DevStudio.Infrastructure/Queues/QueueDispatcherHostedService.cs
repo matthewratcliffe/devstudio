@@ -163,6 +163,22 @@ public sealed class QueueDispatcherHostedService : BackgroundService
             .Select(m => m.Content)
             .LastOrDefault() ?? string.Empty;
 
+        // The item is what this conversation was for, and it is over: close the session so the
+        // transcript stays readable but nobody can send it another turn. Whatever the agent said
+        // last is about to be recorded against the item, and a later turn would make that a lie.
+        try
+        {
+            await _sessions.CloseAsync(
+                session.Id,
+                $"Finished the queue item on {queue.Name}.",
+                CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // The item's outcome matters more than the session being sealed, so this is not fatal.
+            _logger.LogWarning(ex, "Could not close session {SessionId} after its queue item finished", session.Id);
+        }
+
         return session.Status is SessionStatus.Failed or SessionStatus.Cancelled
             ? QueueOutcome.Failure(session.LastError ?? "The agent did not finish.", session.Id) with { Output = output }
             : QueueOutcome.Success(output, session.Id);
