@@ -33,7 +33,7 @@ only credential involved is the login you complete in the web UI.
 | **New chat** | A conversation with no project and no agent: type and send. The CLI, permission mode, model and MCP servers sit on the right of the chat and stay changeable once it is running — including swapping CLI mid-conversation. Read-only by default, in a scratch directory. |
 | **Output files** | Everything an agent writes in its workspace is listed in the chat, with images previewed inline and every file downloadable. |
 | **Skills** | Reusable instruction files, written to `.claude/skills/<slug>/SKILL.md` (and mirrored to `AGENTS.orchestrator.md` for Codex) before a session starts. |
-| **MCP — both directions** | Register MCP servers and attach them to agents (`.mcp.json` per workspace), **and** the orchestrator exposes its own MCP server at `/mcp` so agents can list sessions, read another agent's transcript, steer a run, leave notes, start sessions and run workflows. HTTP servers can authenticate with an OAuth client-credentials grant, refreshed automatically, or a pasted bearer token. **Test** connects like a CLI would and lists the tools the server actually offers. Servers attach to agents, and a chat — including a quick chat — can carry extra servers of its own, applied from its next turn. The built-in orchestrator entry cannot be deleted and is restored on start if it goes missing. |
+| **MCP — both directions** | Register MCP servers and attach them to agents (`.mcp.json` per workspace), **and** the orchestrator exposes its own MCP server at `/mcp` so agents can list sessions, read another agent's transcript, steer a run, leave notes, start sessions and run workflows. HTTP servers can authenticate with an OAuth client-credentials grant, refreshed automatically, or a pasted bearer token. **Test** connects like a CLI would and lists the tools the server actually offers. Servers attach to agents, and a chat — including a quick chat — can carry extra servers of its own, applied from its next turn. The built-in orchestrator entry cannot be deleted and is restored on start if it goes missing. Its own endpoints require a token this app generates and attaches to every session by itself, so nothing else that reaches the port can steer your agents. |
 | **PWA** | Installable, with a themed offline page. |
 | **Version in the corner** | The build you are running sits under the sidebar, with a line beside it when a newer release exists. |
 | **Desktop app** | Installers for Windows, macOS and Linux that run the whole thing natively — no Docker, no volumes, direct access to your files ([how](#as-a-desktop-app-windows-macos-linux)). Updates download in the background and install when you quit. |
@@ -482,6 +482,21 @@ Attach the built-in `orchestrator` server to an agent and it gains these tools:
 
 That is how a manager agent supervises worker agents — it can read what they produced, steer them
 mid-run, and respond.
+
+Both endpoints are closed to anything that cannot prove it is this app. Requests must carry a bearer
+token the app generates itself and keeps on the data volume; anything else gets a 401. Nobody types
+it in — it is written into each session's `.mcp.json` when the workspace is prepared, and read fresh
+every time, so rotating it from the MCP servers page takes effect without touching any server
+record. A browser already signed in to the console is let through as well, which is what keeps the
+**Test** button working.
+
+Rotating does not interrupt work. `.mcp.json` is rewritten before every turn, so the only thing left
+holding the old token is a turn already in flight — and it read that value at process start, where
+nothing can reach in and correct it. So the replaced token stays accepted for slightly longer than a
+turn is allowed to run (`TurnTimeoutMinutes` + 5), which covers every turn in flight and nothing
+else; the window is written to disk beside the token, so a redeploy mid-turn does not undo it.
+**Rotate and cut off now** skips the window for when the token itself has leaked, and any turn
+mid-flight loses its MCP tools with a 401.
 
 ## Guidance
 
