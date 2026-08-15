@@ -1,8 +1,11 @@
 using DevStudio.Application;
 using DevStudio.Application.Abstractions;
+using DevStudio.Application.Common;
 using DevStudio.Infrastructure;
 using DevStudio.Ui.Components;
 using DevStudio.Ui.Endpoints;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +27,37 @@ builder.Services.AddRazorComponents()
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
+// Sign-in cookies are encrypted with data protection keys, which default to a folder inside the
+// container. Keeping them on the mounted volume instead means a redeploy does not sign everyone out.
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(
+        Path.GetFullPath(builder.Configuration.GetSection(OrchestratorOptions.SectionName)["DataPath"] ?? "/data"),
+        "keys")))
+    .SetApplicationName("devstudio");
+
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.Cookie.Name = "devstudio_auth";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        // SameAsRequest, not Always: this is usually reached over plain HTTP on a home network, and
+        // Always would issue a cookie the browser then refuses to send back.
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.LoginPath = "/login";
+        options.ReturnUrlParameter = "returnUrl";
+        options.AccessDeniedPath = "/login";
+        // Deliberately long and sliding. The point is the installed home-screen app: iOS discards
+        // the web view constantly, so anything shorter means signing in most times it is opened.
+        // Sliding means the year only starts counting from the last visit. HttpOnly matters here too
+        // — Safari caps cookies written by script at seven days, but not ones the server sets.
+        options.ExpireTimeSpan = TimeSpan.FromDays(365);
+        options.SlidingExpiration = true;
+    });
+
+builder.Services.AddAuthorization();
+builder.Services.AddCascadingAuthenticationState();
+
 var app = builder.Build();
 
 if (!app.Environment.IsDevelopment())
@@ -32,11 +66,19 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseAntiforgery();
 app.MapStaticAssets();
 
+app.MapAuth();
+
+// Every page needs an account. The sign-in endpoints opt out of this with AllowAnonymous; static
+// assets are mapped separately and stay open, which is what lets the sign-in page style itself and
+// the browser fetch the manifest before anyone has signed in.
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .RequireAuthorization();
 
 // Agents talk to the orchestrator over MCP.
 app.MapMcp();
@@ -103,7 +145,7 @@ app.MapGet("/files/{scope}/{fileName}", (string scope, string fileName, IFileLib
     return File.Exists(path)
         ? Results.File(path, "application/octet-stream", Path.GetFileName(fileName))
         : Results.NotFound();
-});
+}).RequireAuthorization();
 
 // Generated images, by the file name held on their record. Path.GetFileName keeps a crafted name
 // from walking out of the folder, and the images are served inline because being looked at is the
@@ -136,7 +178,7 @@ app.MapGet("/images/{fileName}", async (
     var record = await images.FindByFileNameAsync(safeName, ct);
 
     return Results.File(path, contentType, record is null ? safeName : images.DownloadNameFor(record));
-});
+}).RequireAuthorization();
 
 // Anything an agent produced in its workspace, downloadable. The service refuses a path that
 // resolves outside the session's own directory.
@@ -156,6 +198,6 @@ app.MapGet("/workspace/{sessionId}/{**path}", async (
     return inline
         ? Results.Stream(file.Value.Content, file.Value.ContentType)
         : Results.Stream(file.Value.Content, file.Value.ContentType, file.Value.FileName);
-});
+}).RequireAuthorization();
 
 app.Run();

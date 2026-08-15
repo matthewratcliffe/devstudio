@@ -1,5 +1,6 @@
 using DevStudio.Application.Queues;
 using DevStudio.Application.Sessions;
+using DevStudio.Application.Users;
 using DevStudio.Application.Workflows;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -15,6 +16,7 @@ public static class DependencyInjection
         services.AddSingleton<IWorkflowEngine, WorkflowEngine>();
         services.AddSingleton<IQuickChatService, QuickChatService>();
         services.AddSingleton<IQueueService, QueueService>();
+        services.AddSingleton<IUserService, UserService>();
         return services;
     }
 }

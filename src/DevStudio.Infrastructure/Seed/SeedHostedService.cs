@@ -1,5 +1,6 @@
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
+using DevStudio.Application.Users;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Globals;
 using DevStudio.Domain.Mcp;
@@ -24,6 +25,7 @@ public sealed class SeedHostedService : IHostedService
     private readonly IEntityStore<McpServer> _mcpServers;
     private readonly IEntityStore<ProviderAccount> _accounts;
     private readonly IEntityStore<GlobalSettings> _globals;
+    private readonly IUserService _users;
     private readonly ISourceControlHosts _hosts;
     private readonly OrchestratorOptions _options;
     private readonly ILogger<SeedHostedService> _logger;
@@ -35,6 +37,7 @@ public sealed class SeedHostedService : IHostedService
         IEntityStore<McpServer> mcpServers,
         IEntityStore<ProviderAccount> accounts,
         IEntityStore<GlobalSettings> globals,
+        IUserService users,
         ISourceControlHosts hosts,
         IOptions<OrchestratorOptions> options,
         ILogger<SeedHostedService> logger)
@@ -45,6 +48,7 @@ public sealed class SeedHostedService : IHostedService
         _mcpServers = mcpServers;
         _accounts = accounts;
         _globals = globals;
+        _users = users;
         _hosts = hosts;
         _options = options.Value;
         _logger = logger;
@@ -73,6 +77,10 @@ public sealed class SeedHostedService : IHostedService
                 _logger.LogWarning(ex, "Could not create {Path}", path);
             }
         }
+
+        // Before anything else: with no account the sign-in page has nothing to accept, and the app
+        // is unreachable rather than merely empty.
+        await _users.EnsureSeedAccountAsync(cancellationToken);
 
         if ((await _accounts.GetAllAsync(cancellationToken)).Count == 0)
             await SeedAccountsAsync(cancellationToken);
