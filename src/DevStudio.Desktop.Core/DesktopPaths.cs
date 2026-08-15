@@ -39,14 +39,16 @@ public static class DesktopPaths
     /// Configuration for the server child. Every value mirrors a key the container sets through
     /// compose; the difference is that a desktop install has no volumes and no container boundary.
     /// </summary>
-    public static Dictionary<string, string> ServerEnvironment(int port)
+    public static Dictionary<string, string> ServerEnvironment(int port, bool listenOnLocalNetwork = false)
     {
         var data = Path.Combine(DataRoot, "data");
 
         return new Dictionary<string, string>
         {
             ["ASPNETCORE_ENVIRONMENT"] = "Production",
-            ["ASPNETCORE_URLS"] = $"http://127.0.0.1:{port}",
+            // Loopback unless the user has asked for the local network, in which case every
+            // interface — that is the whole of the setting. See <see cref="NetworkSettings"/>.
+            ["ASPNETCORE_URLS"] = $"http://{(listenOnLocalNetwork ? "0.0.0.0" : "127.0.0.1")}:{port}",
 
             // The built-in MCP server advertises its own URL to agents, so it has to know the port
             // that was actually free, not the default one.

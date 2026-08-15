@@ -119,16 +119,18 @@ files because they are already your files.
 All four are on the [latest release](https://github.com/matthewratcliffe/devstudio/releases/latest).
 
 It is the same application on every platform: a small shell starts `DevStudio.Ui` — the exact binary
-the container runs — on `127.0.0.1`, and shows it in the system web view. Windows uses WebView2 and
+the container runs — on `127.0.0.1` by default, and shows it in the system web view. Windows uses WebView2 and
 gets a tray icon, so closing the window leaves the agents running and **Quit** from the tray stops
 them. macOS and Linux use [Photino](https://www.tryphotino.io/) — WKWebView and WebKitGTK — where
 there is no tray, so closing the window stops the server with it.
 
-Two flags, for the platforms without a menu to click:
+A few flags, for the platforms without a menu to click:
 
 ```bash
-devstudio --check-tools   # what is installed, what is missing, and how to install it
-devstudio --update        # install a waiting update now instead of on the next quit
+devstudio --check-tools           # what is installed, what is missing, and how to install it
+devstudio --update                # install a waiting update now instead of on the next quit
+devstudio --listen-local-network  # reachable from other machines from the next launch
+devstudio --loopback-only         # back to 127.0.0.1 only (the default)
 ```
 
 #### What changes without the container
@@ -152,6 +154,26 @@ and removes the old one. Point `DEVSTUDIO_DATA` somewhere else if you would rath
 
 The window uses port 7080 when it is free — same as the container, so a bookmark keeps working — and
 any free port otherwise.
+
+#### Reaching it from another machine
+
+The desktop build listens on `127.0.0.1` alone, so nothing but this machine can reach it. Turning
+that off binds `0.0.0.0` instead, which is how you drive an agent from a phone or a laptop on the
+same network:
+
+* **Windows** — tray menu, **Listen on local network**. It asks first, and ticks when it is on.
+* **macOS and Linux** — `devstudio --listen-local-network`, and `--loopback-only` to undo it.
+* **Either** — `DEVSTUDIO_LISTEN_LOCAL_NETWORK=1` in the environment, which wins over the saved
+  setting and is what a scripted launch should use. The shells then show the toggle as fixed.
+
+The setting is applied when the server child starts, so it takes effect on the next launch rather
+than mid-session — restarting the server would take every agent mid-turn with it. It is saved in
+`network.json` beside the rest of the state.
+
+Read the [sandbox row above](#what-changes-without-the-container) again before turning it on. A
+desktop install runs as you, browses every drive on the machine and uses your real CLI logins, and
+the seeded account is still `admin`/`admin` until you change it — [change it](#accounts) first.
+Windows will also ask whether to allow the connection through its firewall.
 
 #### Updates that do not interrupt anything
 

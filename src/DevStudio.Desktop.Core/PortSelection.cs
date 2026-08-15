@@ -22,9 +22,9 @@ public static class PortSelection
     /// The preferred port when it is free, so a bookmark keeps working and the documented port
     /// stays right. Anything else free otherwise, rather than refusing to start.
     /// </summary>
-    public static int Choose(int preferred)
+    public static int Choose(int preferred, bool allInterfaces = false)
     {
-        if (IsFree(preferred))
+        if (IsFree(preferred, allInterfaces))
             return preferred;
 
         // The kernel hands out an IPv4 port here, which says nothing about the same number on IPv6,
@@ -34,7 +34,7 @@ public static class PortSelection
         {
             var candidate = Ephemeral();
 
-            if (IsFree(candidate))
+            if (IsFree(candidate, allInterfaces))
                 return candidate;
         }
 
@@ -43,9 +43,15 @@ public static class PortSelection
         return Ephemeral();
     }
 
-    /// <summary>Free on both loopback addresses, not just the one the server binds.</summary>
-    public static bool IsFree(int port) =>
-        CanBind(IPAddress.Loopback, port) && CanBind(IPAddress.IPv6Loopback, port);
+    /// <summary>
+    /// Free on both loopback addresses, not just the one the server binds. When the server is going
+    /// to listen on every interface, the wildcard address has to be free as well: something holding
+    /// the port on one LAN address alone leaves both loopbacks free and still refuses the bind.
+    /// </summary>
+    public static bool IsFree(int port, bool allInterfaces = false) =>
+        CanBind(IPAddress.Loopback, port)
+        && CanBind(IPAddress.IPv6Loopback, port)
+        && (!allInterfaces || CanBind(IPAddress.Any, port));
 
     private static int Ephemeral()
     {

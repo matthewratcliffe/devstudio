@@ -26,6 +26,11 @@ internal static class Program
         if (args.Contains("--update"))
             return UpdateNow();
 
+        // There is no tray menu on these platforms, so the setting is a flag. Setting it is its own
+        // run: it is applied when the server child starts, and this one has not started it yet.
+        if (args.Contains("--listen-local-network") || args.Contains("--loopback-only"))
+            return SetNetworkAccess(args.Contains("--listen-local-network"));
+
         // One server per machine. The lock file also carries the port, so a second launch can point
         // a browser at the copy that is already running instead of starting a rival on another port.
         using var only = SingleInstance.Acquire();
@@ -52,6 +57,9 @@ internal static class Program
 
         only.Publish(server.Url);
 
+        foreach (var url in server.NetworkUrls)
+            Console.WriteLine($"Also reachable at {url}");
+
         var ready = server.WaitUntilReadyAsync(TimeSpan.FromSeconds(90)).GetAwaiter().GetResult();
 
         if (!ready)
@@ -75,6 +83,48 @@ internal static class Program
 
         window.WaitForClose();
         updates.ApplyWhenClosed();
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Loopback only, or every interface. Worth being blunt about what the second one means: this
+    /// runs as the user, with their files and their CLI logins, and the seeded account is
+    /// admin/admin until somebody changes it.
+    /// </summary>
+    private static int SetNetworkAccess(bool listenOnLocalNetwork)
+    {
+        if (NetworkSettings.IsForcedByEnvironment)
+        {
+            Console.WriteLine(
+                $"{NetworkSettings.OverrideVariable} is set in the environment and overrides the " +
+                "saved setting. Unset it to control this from here.");
+
+            return 1;
+        }
+
+        try
+        {
+            (NetworkSettings.Load() with { ListenOnLocalNetwork = listenOnLocalNetwork }).Save();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Could not save the setting: {ex.Message}");
+            return 1;
+        }
+
+        if (!listenOnLocalNetwork)
+        {
+            Console.WriteLine("devStudio will listen on 127.0.0.1 alone the next time it starts.");
+            return 0;
+        }
+
+        Console.WriteLine(
+            "devStudio will listen on every interface the next time it starts, so anything on this " +
+            "network can reach it. Change the admin password if you have not already.");
+
+        foreach (var address in NetworkSettings.LocalAddresses())
+            Console.WriteLine($"  http://{address}:7080/ (or the port it takes, if 7080 is busy)");
 
         return 0;
     }
