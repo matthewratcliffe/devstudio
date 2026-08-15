@@ -139,6 +139,23 @@ public sealed class OrchestratorOptions
     /// <summary>Repository the update check reads releases from, as <c>owner/name</c>.</summary>
     public string UpdateRepository { get; set; } = "matthewratcliffe/devstudio";
 
+    /// <summary>
+    /// How old a finished session may get before it is archived on its own, in hours. The sessions
+    /// list is a working view of what is happening now, and a machine left running fills it with
+    /// conversations nobody has looked at since yesterday. Zero turns the sweep off entirely.
+    ///
+    /// Only sessions that have stopped are touched — a run still going is by definition current,
+    /// however long it has been at it — and a session somebody has restored from the archive is
+    /// never taken again.
+    /// </summary>
+    public int SessionAutoArchiveHours { get; set; } = 24;
+
+    /// <summary>
+    /// How often the auto-archive sweep runs. Sessions age in hours, so there is nothing to gain
+    /// from looking more often than this.
+    /// </summary>
+    public int SessionArchiveTickMinutes { get; set; } = 15;
+
     /// <summary>Delete ephemeral worktrees when their session finishes.</summary>
     public bool PruneEphemeralWorktrees { get; set; } = false;
 }

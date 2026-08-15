@@ -716,6 +716,8 @@ Everything is under the `Orchestrator` configuration section, overridable with
 | `TurnTimeoutMinutes` | `60` | A turn is abandoned after this long. |
 | `SchedulerTickSeconds` | `20` | How often due schedules are checked. |
 | `QueueTickSeconds` | `10` | How often queues are checked for items to start. This is the delay between an item arriving and work beginning on it. |
+| `SessionAutoArchiveHours` | `24` | How long a finished session stays in the sessions list before it is archived on its own. Running sessions are never taken, however old, and one you restore from the archive by hand is never taken again. `0` switches the sweep off. |
+| `SessionArchiveTickMinutes` | `15` | How often the auto-archive sweep runs. |
 | `UpdateCheckEnabled` | `true` | Ask GitHub every six hours whether a newer release exists, and say so under the sidebar. Nothing is downloaded or installed — a container cannot replace itself. The desktop builds set this false, because they update themselves. |
 | `UpdateRepository` | `matthewratcliffe/devstudio` | Repository the check reads releases from, as `owner/name`. |
 | `PruneEphemeralWorktrees` | `false` | Delete a session's worktree when it finishes. Off, because uncommitted work would go with it. |

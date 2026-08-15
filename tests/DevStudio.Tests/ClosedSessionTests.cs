@@ -134,6 +134,36 @@ public class ClosedSessionTests : IDisposable
         Assert.Null(await _sessions.CloseAsync("no-such-session"));
     }
 
+    [Fact]
+    public async Task Forcing_a_status_settles_the_session_and_is_stored()
+    {
+        var session = await RunAsync();
+
+        var failed = await _sessions.SetStatusAsync(session.Id, SessionStatus.Failed);
+
+        Assert.Equal(SessionStatus.Failed, failed!.Status);
+        Assert.NotNull(failed.EndedAt);
+        Assert.Equal(SessionStatus.Failed, (await _store.GetAsync(session.Id))!.Status);
+    }
+
+    [Fact]
+    public async Task Forcing_a_session_back_to_pending_clears_the_end_time()
+    {
+        var session = await RunAsync();
+        Assert.NotNull(session.EndedAt);
+
+        var pending = await _sessions.SetStatusAsync(session.Id, SessionStatus.Pending);
+
+        Assert.Equal(SessionStatus.Pending, pending!.Status);
+        Assert.Null(pending.EndedAt);
+    }
+
+    [Fact]
+    public async Task Forcing_a_status_on_a_session_that_has_gone_returns_nothing()
+    {
+        Assert.Null(await _sessions.SetStatusAsync("no-such-session", SessionStatus.Cancelled));
+    }
+
     private sealed class StubRegistry : IProviderCliRegistry
     {
         public IReadOnlyList<IProviderCli> All => [];

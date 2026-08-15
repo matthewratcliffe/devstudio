@@ -25,6 +25,8 @@ services:
       Orchestrator__MaxConcurrentSessions: "6"
       Orchestrator__TurnTimeoutMinutes: "60"
       Orchestrator__SchedulerTickSeconds: "20"
+      # Finished sessions archive themselves once they are this old. 0 turns it off.
+      Orchestrator__SessionAutoArchiveHours: "24"
       # Host directories that may be browsed and attached as repositories. This is an allow-list:
       # nothing outside it is reachable from the UI's folder picker. Only useful with the matching
       # bind mount above.
