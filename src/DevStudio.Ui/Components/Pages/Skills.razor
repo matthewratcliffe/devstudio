@@ -74,8 +74,8 @@
 
 @if (_editing is not null)
 {
-    <div class="modal-backdrop" @onclick="() => _editing = null">
-        <div class="modal" @onclick:stopPropagation="true">
+    <div class="modal-backdrop">
+        <div class="modal">
             <h2>@(_isNew ? "New skill" : _editing.Name)</h2>
 
             <div class="form-grid">
@@ -121,8 +121,8 @@
 
 @if (_browsing)
 {
-    <div class="modal-backdrop" @onclick="CloseBrowser">
-        <div class="modal" @onclick:stopPropagation="true">
+    <div class="modal-backdrop">
+        <div class="modal">
             <h2>Browse @Registry.Name</h2>
             <p class="small">
                 The public registry the <code>skills</code> CLI installs from. Importing copies the skill
