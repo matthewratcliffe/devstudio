@@ -224,6 +224,22 @@ public sealed class GitService : IGitService
         return await _repositories.UpsertAsync(repository, ct);
     }
 
+    public async Task<GitRepository> RenameAsync(GitRepository repository, string? name, CancellationToken ct = default)
+    {
+        var all = await _repositories.GetAllAsync(ct);
+        var others = all.Where(r => r.Id != repository.Id).ToList();
+
+        // Blank means "use the folder the checkout actually lives in", which is what attaching does too.
+        var requested = string.IsNullOrWhiteSpace(name) ? Path.GetFileName(repository.LocalPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) : name;
+        var unique = UniqueName(requested, others);
+        if (string.Equals(unique, repository.Name, StringComparison.Ordinal))
+            return repository;
+
+        _logger.LogInformation("Renamed repository {Old} to {New}", repository.Name, unique);
+        repository.Name = unique;
+        return await _repositories.UpsertAsync(repository, ct);
+    }
+
     public async Task<GitCommandOutcome> FetchAsync(GitRepository repository, CancellationToken ct = default)
     {
         var result = await RunGitAsync(repository.LocalPath, ["fetch", "--all", "--prune"], 300, ct);
