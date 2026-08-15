@@ -35,6 +35,14 @@
                 <span class="dot"></span>@_liveCount live
             </span>
             <a class="btn btn-sm btn-ghost" href="/providers">Logins</a>
+            <AuthorizeView>
+                <Authorized>
+                    <span class="pill" title="Signed in">@context.User.Identity?.Name</span>
+                    @* A plain link, not a Blazor navigation: signing out has to be a real request so
+                       the cookie can actually be cleared on the response. *@
+                    <a class="btn btn-sm btn-ghost" href="/logout" data-enhance-nav="false">Sign out</a>
+                </Authorized>
+            </AuthorizeView>
         </header>
 
         <div class="content @(Flush ? "flush" : "")">
