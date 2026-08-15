@@ -224,6 +224,13 @@ public sealed class ChatSession : Entity
     public bool IsArchived { get; set; }
 
     /// <summary>
+    /// Keeps the age-based auto-archive off this session for good. Set when somebody restores it
+    /// from the archive: pulling a conversation back out is a statement that it is still wanted, and
+    /// a sweep that archived it again on the next tick would be arguing with the person who did it.
+    /// </summary>
+    public bool AutoArchiveExempt { get; set; }
+
+    /// <summary>
     /// The conversation is finished and takes no further turns. Set when the work that owned the
     /// session is over — a queue item, whose agent answers to the queue rather than to anyone at the
     /// keyboard — so the transcript stays readable while nobody can restart a CLI behind the

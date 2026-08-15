@@ -420,6 +420,59 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         live.Turns.Writer.TryComplete();
     }
 
+    public async Task<ChatSession?> SetStatusAsync(
+        string sessionId,
+        SessionStatus status,
+        CancellationToken ct = default)
+    {
+        var session = await GetAsync(sessionId, ct);
+        if (session is null)
+            return null;
+
+        // A live pump owns the status while it runs and would write over anything set here, so the
+        // run is stopped and given a moment to land before the operator's choice is applied. The
+        // grace is short: the point is to settle a session, not to wait on a CLI that is not coming
+        // back.
+        if (_live.TryGetValue(sessionId, out var live))
+        {
+            await CancelAsync(sessionId);
+
+            try
+            {
+                // The pump task, not the idle signal: idle only says the queue has drained, and the
+                // pump settles the session as Cancelled on its way out — after this call would have
+                // written the operator's choice if it did not wait for that to happen first.
+                await live.Pump.WaitAsync(TimeSpan.FromSeconds(5), ct);
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogWarning(
+                    "Session {SessionId} did not stop within the grace period; forcing status anyway",
+                    sessionId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // However the run ended is not this call's problem; the status is being replaced.
+                _logger.LogDebug(ex, "Session {SessionId} ended badly while being stopped", sessionId);
+            }
+
+            _live.TryRemove(sessionId, out _);
+        }
+
+        if (session.Status == status)
+            return session;
+
+        session.Status = status;
+
+        if (status is SessionStatus.Completed or SessionStatus.Failed or SessionStatus.Cancelled)
+            session.EndedAt ??= DateTimeOffset.UtcNow;
+        else
+            session.EndedAt = null;
+
+        await PersistAsync(session);
+        return session;
+    }
+
     public async Task<ChatSession?> CloseAsync(string sessionId, string? reason = null, CancellationToken ct = default)
     {
         var session = await GetAsync(sessionId, ct);

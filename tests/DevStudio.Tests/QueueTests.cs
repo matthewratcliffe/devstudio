@@ -682,6 +682,11 @@ public class QueueTests
             return Task.CompletedTask;
         }
 
+        public Task<ChatSession?> SetStatusAsync(
+            string sessionId,
+            SessionStatus status,
+            CancellationToken ct = default) => Task.FromResult<ChatSession?>(null);
+
         public Task SendAsync(string sessionId, string message, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task<GuidanceMessage> SendGuidanceAsync(

@@ -15,8 +15,24 @@
     <div style="flex:1"></div>
     @if (_selected.Count > 0)
     {
-        <button class="btn btn-sm btn-danger" @onclick="DeleteSelectedAsync">Delete @_selected.Count selected</button>
-        <button class="btn btn-sm btn-ghost" @onclick="() => _selected.Clear()">Clear</button>
+        <span class="mono-dim">@_selected.Count selected</span>
+        <select class="select-sm" @key="_bulkStatusKey" value="" @onchange="SetStatusOnSelectedAsync">
+            <option value="">Set status…</option>
+            @foreach (var status in BulkStatuses)
+            {
+                <option value="@status">@status</option>
+            }
+        </select>
+        @if (_filter == "archived")
+        {
+            <button class="btn btn-sm" @onclick="RestoreSelectedAsync">Restore</button>
+        }
+        else
+        {
+            <button class="btn btn-sm" @onclick="ArchiveSelectedAsync">Archive</button>
+        }
+        <button class="btn btn-sm btn-danger" @onclick="DeleteSelectedAsync">Delete</button>
+        <button class="btn btn-sm btn-ghost" @onclick="ClearSelection">Clear</button>
     }
 </div>
 
@@ -33,7 +49,10 @@ else
         <table class="table">
             <thead>
             <tr>
-                <th style="width:2rem"></th>
+                <th style="width:2rem">
+                    <input type="checkbox" title="Select all"
+                           checked="@AllVisibleSelected" @onchange="ToggleSelectAll" />
+                </th>
                 <th>Title</th>
                 <th>Agent</th>
                 <th>Project</th>
@@ -91,6 +110,28 @@ else
     private readonly RenderCoalescer _render = new();
     private string _filter = "all";
 
+    /// <summary>
+    /// Bumped after each bulk status change so the picker is rebuilt on its placeholder. Setting the
+    /// bound value back to empty is not enough on its own: the value Blazor last rendered was empty
+    /// too, so the diff sees no change and leaves the browser showing the option just used.
+    /// </summary>
+    private int _bulkStatusKey;
+
+    /// <summary>
+    /// Statuses worth forcing by hand. The transient ones a run passes through on its way somewhere
+    /// — Starting, Running, AwaitingInput — are left out: setting them would claim a process exists
+    /// when the point of this control is to settle sessions whose process is gone.
+    /// </summary>
+    private static readonly SessionStatus[] BulkStatuses =
+    [
+        SessionStatus.Completed,
+        SessionStatus.Failed,
+        SessionStatus.Cancelled,
+        SessionStatus.Pending,
+    ];
+
+    private bool AllVisibleSelected => _visible.Count > 0 && _visible.All(s => _selected.Contains(s.Id));
+
     protected override async Task OnInitializedAsync()
     {
         SessionManager.SessionUpdated += OnSessionUpdated;
@@ -115,6 +156,9 @@ else
     private void SetFilter(string filter)
     {
         _filter = filter;
+        // Selection is per view: acting on rows the operator can no longer see is how a bulk delete
+        // takes something nobody meant to touch.
+        ClearSelection();
         ApplyFilter();
     }
 
@@ -137,13 +181,87 @@ else
             _selected.Remove(id);
     }
 
+    private void ToggleSelectAll(ChangeEventArgs args)
+    {
+        if (args.Value is true)
+        {
+            foreach (var session in _visible)
+                _selected.Add(session.Id);
+        }
+        else
+        {
+            ClearSelection();
+        }
+    }
+
+    private void ClearSelection()
+    {
+        _selected.Clear();
+        _bulkStatusKey++;
+    }
+
+    private List<ChatSession> SelectedSessions() =>
+        _all.Where(s => _selected.Contains(s.Id)).ToList();
+
+    private async Task SetStatusOnSelectedAsync(ChangeEventArgs args)
+    {
+        // The picker is an action, not a setting: it goes back to its placeholder either way so the
+        // same status can be applied again to a different selection.
+        _bulkStatusKey++;
+
+        if (args.Value?.ToString() is not { Length: > 0 } value
+            || !Enum.TryParse<SessionStatus>(value, out var status))
+            return;
+
+        var sessions = SelectedSessions();
+        var live = sessions.Count(s => s.IsLive);
+
+        foreach (var session in sessions)
+            await SessionManager.SetStatusAsync(session.Id, status);
+
+        Layout.Notify(
+            live > 0
+                ? $"Set {sessions.Count} sessions to {status}, stopping {live} that were running."
+                : $"Set {sessions.Count} sessions to {status}.",
+            "ok");
+
+        ClearSelection();
+        await ReloadAsync();
+    }
+
+    private async Task ArchiveSelectedAsync()
+    {
+        var sessions = SelectedSessions();
+
+        foreach (var session in sessions)
+            await ArchiveAsync(session, reload: false);
+
+        Layout.Notify($"Archived {sessions.Count} sessions.", "ok");
+        ClearSelection();
+        await ReloadAsync();
+    }
+
+    private async Task RestoreSelectedAsync()
+    {
+        var sessions = SelectedSessions();
+
+        foreach (var session in sessions)
+            await RestoreAsync(session, reload: false);
+
+        Layout.Notify($"Restored {sessions.Count} sessions.", "ok");
+        ClearSelection();
+        await ReloadAsync();
+    }
+
     private async Task DeleteSelectedAsync()
     {
+        var count = _selected.Count;
+
         foreach (var id in _selected.ToList())
             await SessionManager.DeleteAsync(id);
 
-        Layout.Notify($"Deleted {_selected.Count} sessions.", "ok");
-        _selected.Clear();
+        Layout.Notify($"Deleted {count} sessions.", "ok");
+        ClearSelection();
         await ReloadAsync();
     }
 
@@ -153,18 +271,25 @@ else
         Layout.Notify("Stopping.");
     }
 
-    private async Task ArchiveAsync(ChatSession session)
+    private async Task ArchiveAsync(ChatSession session, bool reload = true)
     {
         session.IsArchived = true;
         await SessionStore.UpsertAsync(session);
-        await ReloadAsync();
+
+        if (reload)
+            await ReloadAsync();
     }
 
-    private async Task RestoreAsync(ChatSession session)
+    private async Task RestoreAsync(ChatSession session, bool reload = true)
     {
         session.IsArchived = false;
+        // Taking it back out by hand settles the question for good: the age sweep leaves it alone
+        // from here, however long it then sits in the list.
+        session.AutoArchiveExempt = true;
         await SessionStore.UpsertAsync(session);
-        await ReloadAsync();
+
+        if (reload)
+            await ReloadAsync();
     }
 
     private string ProjectName(string? projectId) =>

@@ -405,6 +405,9 @@ input::placeholder, textarea::placeholder { color: #5a628c; }
 textarea { resize: vertical; min-height: 90px; line-height: 1.5; }
 select option { background: var(--bg-1); }
 
+/* A select sitting in a toolbar rather than a form: sized to its content and to match .btn-sm. */
+select.select-sm { width: auto; font-size: 0.72rem; padding: 0.3em 1.6em 0.3em 0.7em; }
+
 .check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--text-1); margin-bottom: 0.5rem; }
 .check input { width: auto; accent-color: var(--cyan); }
 

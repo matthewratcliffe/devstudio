@@ -87,6 +87,15 @@ public interface ISessionManager
     Task CancelAsync(string sessionId);
 
     /// <summary>
+    /// Forces a session onto a status the operator has chosen. This is the manual override for
+    /// conversations the app can no longer speak for — a run left on Running by a process that died
+    /// with the container — and for tidying a long list in bulk. A live session is stopped first and
+    /// given a moment to settle, or its own pump would write its status back over the top. Returns
+    /// null when the session has gone.
+    /// </summary>
+    Task<ChatSession?> SetStatusAsync(string sessionId, SessionStatus status, CancellationToken ct = default);
+
+    /// <summary>
     /// Finishes a conversation for good: the turn queue is closed, the status settles on Completed
     /// unless the run had already failed or been cancelled, and the session becomes read only. Used
     /// when the work that owned the session is over — a queue item — so nothing sends it another

@@ -1,5 +1,6 @@
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
+using DevStudio.Application.Sessions;
 using DevStudio.Application.Teams;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Mcp;
@@ -23,6 +24,7 @@ using DevStudio.Infrastructure.Queues;
 using DevStudio.Infrastructure.Scheduling;
 using DevStudio.Infrastructure.Skills;
 using DevStudio.Infrastructure.Seed;
+using DevStudio.Infrastructure.Sessions;
 using DevStudio.Infrastructure.Teams;
 using DevStudio.Infrastructure.Terminals;
 using DevStudio.Infrastructure.Workspaces;
@@ -130,6 +132,11 @@ public static class DependencyInjection
         services.AddSingleton<QueueDispatcherHostedService>();
         services.AddHostedService(sp => sp.GetRequiredService<QueueDispatcherHostedService>());
         services.AddHostedService<SeedHostedService>();
+
+        // Keeps the sessions list to current work. Resolvable on its own so the UI can sweep on
+        // demand as well.
+        services.AddSingleton<ISessionArchiver, SessionArchiver>();
+        services.AddHostedService<SessionArchiveHostedService>();
 
         return services;
     }
