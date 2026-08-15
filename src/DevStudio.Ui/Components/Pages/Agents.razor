@@ -75,8 +75,8 @@
 
 @if (_editing is not null)
 {
-    <div class="modal-backdrop" @onclick="Cancel">
-        <div class="modal" @onclick:stopPropagation="true">
+    <div class="modal-backdrop">
+        <div class="modal">
             <h2>@(_isNew ? "New agent" : _editing.Name)</h2>
 
             <div class="form-grid">

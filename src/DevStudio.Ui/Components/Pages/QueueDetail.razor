@@ -138,8 +138,8 @@ else
 
 @if (_adding)
 {
-    <div class="modal-backdrop" @onclick="() => _adding = false">
-        <div class="modal" @onclick:stopPropagation="true">
+    <div class="modal-backdrop">
+        <div class="modal">
             <h2>Add an item</h2>
 
             <div class="field">
@@ -174,8 +174,8 @@ else
 
 @if (_previewing is { } preview && _queue is { } queue)
 {
-    <div class="modal-backdrop" @onclick="() => _previewing = null">
-        <div class="modal" @onclick:stopPropagation="true">
+    <div class="modal-backdrop">
+        <div class="modal">
             <h2>What the @(queue.Target == QueueTarget.Agent ? "agent" : "workflow") receives</h2>
 
             <dl class="kv">

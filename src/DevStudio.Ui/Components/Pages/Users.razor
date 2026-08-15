@@ -1,0 +1,269 @@
+@page "/users"
+@inject IUserService UserAccounts
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Users · devStudio</PageTitle>
+
+<div class="btn-row" style="margin-bottom:1.2rem">
+    <button class="btn btn-primary" @onclick="NewUser">New user</button>
+    <span class="mono-dim">
+        Everyone who can sign in. There are no roles — every account here has full access to
+        everything the orchestrator can do.
+    </span>
+</div>
+
+@if (_seedPasswordInUse)
+{
+    <div class="card" style="margin-bottom:1.2rem">
+        <div class="card-head">
+            <h3>Change the default password</h3>
+            <div class="spacer"></div>
+            <span class="pill pill-amber">insecure</span>
+        </div>
+        <p class="small">
+            An account is still on the password <code>@UserService.SeedPassword</code>, which is what
+            a fresh install is created with. Anyone who can reach this app on the network can sign in
+            with it.
+        </p>
+    </div>
+}
+
+<div class="table-wrap">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Username</th>
+                <th>Name</th>
+                <th>Last signed in</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var user in _users)
+            {
+                <tr>
+                    <td>
+                        <code>@user.Username</code>
+                        @if (user.Id == _currentUserId)
+                        {
+                            <span class="pill" style="margin-left:0.4rem">you</span>
+                        }
+                        @if (!user.Enabled)
+                        {
+                            <span class="pill pill-red" style="margin-left:0.4rem">disabled</span>
+                        }
+                    </td>
+                    <td>@user.Name</td>
+                    <td class="mono-dim">
+                        @if (user.LastSignInAt is { } signedIn)
+                        {
+                            <LocalTime Value="@signedIn" Format="weekdaydate" />
+                        }
+                        else
+                        {
+                            <text>never</text>
+                        }
+                    </td>
+                    <td>
+                        <div class="btn-row">
+                            <button class="btn btn-sm" @onclick="() => Edit(user)">Edit</button>
+                            <button class="btn btn-sm btn-ghost" @onclick="() => ResetPassword(user)">Password</button>
+                            <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(user)">Delete</button>
+                        </div>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@if (_editing is not null)
+{
+    <div class="modal-backdrop">
+        <div class="modal">
+            <h2>@(_isNew ? "New user" : _editing.Username)</h2>
+
+            <div class="form-grid">
+                <div class="field">
+                    <label>Username</label>
+                    <input type="text" @bind="_editing.Username" autocomplete="off" />
+                    <span class="hint">What they type to sign in. Not case sensitive.</span>
+                </div>
+                <div class="field">
+                    <label>Display name</label>
+                    <input type="text" @bind="_editing.Name" autocomplete="off" />
+                </div>
+            </div>
+
+            @if (_isNew)
+            {
+                <div class="field">
+                    <label>Password</label>
+                    <input type="password" @bind="_password" autocomplete="new-password" />
+                    <span class="hint">At least @PasswordHasher.MinimumLength characters.</span>
+                </div>
+            }
+            else
+            {
+                <div class="field" style="flex-direction:row;align-items:center;gap:0.5rem">
+                    <input type="checkbox" id="user-enabled" @bind="_editing.Enabled" />
+                    <label for="user-enabled" style="text-transform:none;letter-spacing:0">Enabled</label>
+                </div>
+            }
+
+            <div class="btn-row">
+                <button class="btn btn-primary" @onclick="SaveAsync">Save user</button>
+                <button class="btn btn-ghost" @onclick="Cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_resetting is not null)
+{
+    <div class="modal-backdrop">
+        <div class="modal">
+            <h2>New password for @_resetting.Username</h2>
+
+            <div class="field">
+                <label>Password</label>
+                <input type="password" @bind="_password" autocomplete="new-password" />
+                <span class="hint">
+                    At least @PasswordHasher.MinimumLength characters. Anyone already signed in as
+                    this account stays signed in — only the next sign-in needs the new one.
+                </span>
+            </div>
+
+            <div class="btn-row">
+                <button class="btn btn-primary" @onclick="SavePasswordAsync">Set password</button>
+                <button class="btn btn-ghost" @onclick="Cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private IReadOnlyList<User> _users = [];
+    private User? _editing;
+    private User? _resetting;
+    private bool _isNew;
+    private string _password = string.Empty;
+    private string? _currentUserId;
+    private bool _seedPasswordInUse;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        _currentUserId = state.User.FindFirst(AuthEndpoints.UserIdClaim)?.Value;
+
+        await ReloadAsync();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader("Users", "Who can sign in");
+    }
+
+    private async Task ReloadAsync()
+    {
+        _users = await UserAccounts.GetAllAsync();
+        _seedPasswordInUse = await UserAccounts.UsesSeedPasswordAsync();
+        StateHasChanged();
+    }
+
+    private void NewUser()
+    {
+        _isNew = true;
+        _password = string.Empty;
+        _editing = new User();
+    }
+
+    private void Edit(User user)
+    {
+        _isNew = false;
+
+        // A copy, so abandoning the modal does not leave the edits sitting in the shared store.
+        _editing = new User
+        {
+            Id = user.Id,
+            Username = user.Username,
+            Name = user.Name,
+            Enabled = user.Enabled,
+        };
+    }
+
+    private void ResetPassword(User user)
+    {
+        _password = string.Empty;
+        _resetting = user;
+    }
+
+    private void Cancel()
+    {
+        _editing = null;
+        _resetting = null;
+        _password = string.Empty;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_editing is null)
+            return;
+
+        try
+        {
+            if (_isNew)
+                await UserAccounts.CreateAsync(_editing.Username, _editing.Name, _password);
+            else
+                await UserAccounts.UpdateAsync(_editing.Id, _editing.Username, _editing.Name, _editing.Enabled);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Layout.Notify(ex.Message, "err");
+            return;
+        }
+
+        Cancel();
+        await ReloadAsync();
+        Layout.Notify("User saved.", "ok");
+    }
+
+    private async Task SavePasswordAsync()
+    {
+        if (_resetting is null)
+            return;
+
+        try
+        {
+            await UserAccounts.SetPasswordAsync(_resetting.Id, _password);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Layout.Notify(ex.Message, "err");
+            return;
+        }
+
+        Cancel();
+        await ReloadAsync();
+        Layout.Notify("Password changed.", "ok");
+    }
+
+    private async Task DeleteAsync(User user)
+    {
+        try
+        {
+            await UserAccounts.DeleteAsync(user.Id);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Layout.Notify(ex.Message, "err");
+            return;
+        }
+
+        await ReloadAsync();
+        Layout.Notify($"Deleted {user.Username}.", "ok");
+    }
+}

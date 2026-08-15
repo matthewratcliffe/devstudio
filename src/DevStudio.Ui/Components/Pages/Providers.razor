@@ -355,8 +355,8 @@
 
 @if (_newAccountProvider is not null)
 {
-    <div class="modal-backdrop" @onclick="() => _newAccountProvider = null">
-        <div class="modal" @onclick:stopPropagation="true">
+    <div class="modal-backdrop">
+        <div class="modal">
             <h2>New account</h2>
             <p class="small">
                 This creates an empty credential directory. Log into it afterwards, then pick it on the
