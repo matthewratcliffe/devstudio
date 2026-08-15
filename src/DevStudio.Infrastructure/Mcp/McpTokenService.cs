@@ -13,6 +13,11 @@ namespace DevStudio.Infrastructure.Mcp;
 ///
 /// Tokens are cached on the server record and refreshed a minute before they lapse, so a long-lived
 /// agent session never hands over a token that expires mid-call.
+///
+/// The built-in servers are the exception: those are this app's own MCP endpoints, and the
+/// credential for them is the managed token from <see cref="IMcpAccessTokenProvider"/> rather than
+/// anything an issuer hands out. It is read here rather than stored on the record so a rotation
+/// takes effect on the next session without the record having to be rewritten.
 /// </summary>
 public sealed class McpTokenService : IMcpTokenService
 {
@@ -21,16 +26,19 @@ public sealed class McpTokenService : IMcpTokenService
 
     private readonly IHttpClientFactory _clients;
     private readonly IEntityStore<McpServer> _servers;
+    private readonly IMcpAccessTokenProvider _localToken;
     private readonly ILogger<McpTokenService> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     public McpTokenService(
         IHttpClientFactory clients,
         IEntityStore<McpServer> servers,
+        IMcpAccessTokenProvider localToken,
         ILogger<McpTokenService> logger)
     {
         _clients = clients;
         _servers = servers;
+        _localToken = localToken;
         _logger = logger;
     }
 
@@ -46,6 +54,9 @@ public sealed class McpTokenService : IMcpTokenService
 
     public async Task<McpTokenResult> AcquireAsync(McpServer server, CancellationToken ct = default)
     {
+        if (server.IsBuiltIn)
+            return new McpTokenResult(true, _localToken.Current, "Using this app's own managed MCP token.");
+
         switch (server.AuthMode)
         {
             case McpAuthMode.None:
@@ -100,6 +111,9 @@ public sealed class McpTokenService : IMcpTokenService
 
     public async Task<McpTokenResult> TestAsync(McpServer server, CancellationToken ct = default)
     {
+        if (server.IsBuiltIn)
+            return new McpTokenResult(true, _localToken.Current, "This app manages its own token for this server.");
+
         if (server.AuthMode == McpAuthMode.BearerToken)
         {
             return string.IsNullOrWhiteSpace(server.AccessToken)

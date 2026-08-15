@@ -15,6 +15,9 @@ public class McpTokenServiceTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "devstudio-mcp-" + Guid.NewGuid().ToString("n"));
     private readonly JsonEntityStore<McpServer> _servers;
 
+    /// <summary>Stands in for the app's own MCP token, which the built-in servers are handed.</summary>
+    private static readonly IMcpAccessTokenProvider LocalToken = new StubLocalToken("ds_local");
+
     public McpTokenServiceTests() =>
         _servers = new JsonEntityStore<McpServer>(
             Options.Create(new OrchestratorOptions { DataPath = _root }),
@@ -23,7 +26,7 @@ public class McpTokenServiceTests : IDisposable
     private (McpTokenService Service, TokenHandler Handler) Create(string body = """{"access_token":"tok-1","expires_in":3600}""")
     {
         var handler = new TokenHandler(body);
-        return (new McpTokenService(new StubFactory(handler), _servers, NullLogger<McpTokenService>.Instance), handler);
+        return (new McpTokenService(new StubFactory(handler), _servers, LocalToken, NullLogger<McpTokenService>.Instance), handler);
     }
 
     private static McpServer OAuthServer() => new()
@@ -111,7 +114,7 @@ public class McpTokenServiceTests : IDisposable
     public async Task A_rejected_grant_reports_the_status_and_yields_no_token()
     {
         var handler = new TokenHandler("""{"error":"invalid_client"}""", HttpStatusCode.Unauthorized);
-        var service = new McpTokenService(new StubFactory(handler), _servers, NullLogger<McpTokenService>.Instance);
+        var service = new McpTokenService(new StubFactory(handler), _servers, LocalToken, NullLogger<McpTokenService>.Instance);
         var server = await _servers.UpsertAsync(OAuthServer());
 
         var result = await service.TestAsync(server);
@@ -125,7 +128,7 @@ public class McpTokenServiceTests : IDisposable
     public async Task A_response_without_a_token_is_an_error_rather_than_a_silent_pass()
     {
         var handler = new TokenHandler("""{"nothing":"here"}""");
-        var service = new McpTokenService(new StubFactory(handler), _servers, NullLogger<McpTokenService>.Instance);
+        var service = new McpTokenService(new StubFactory(handler), _servers, LocalToken, NullLogger<McpTokenService>.Instance);
 
         var result = await service.TestAsync(OAuthServer());
 
@@ -179,7 +182,7 @@ public class McpTokenServiceTests : IDisposable
     public async Task A_revoked_refresh_token_says_to_sign_in_again()
     {
         var handler = new TokenHandler("""{"error":"invalid_grant"}""", HttpStatusCode.BadRequest);
-        var service = new McpTokenService(new StubFactory(handler), _servers, NullLogger<McpTokenService>.Instance);
+        var service = new McpTokenService(new StubFactory(handler), _servers, LocalToken, NullLogger<McpTokenService>.Instance);
         var server = await _servers.UpsertAsync(new McpServer
         {
             Name = "rovo",
@@ -212,6 +215,24 @@ public class McpTokenServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_built_in_server_is_handed_this_app_s_own_token()
+    {
+        var (service, handler) = Create();
+
+        var result = await service.AcquireAsync(new McpServer
+        {
+            Name = "orchestrator",
+            Transport = McpTransport.Http,
+            Url = "http://localhost:7080/mcp",
+            IsBuiltIn = true,
+        });
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("ds_local", result.Token);
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
     public async Task Acquiring_for_a_server_with_no_auth_succeeds_with_no_token()
     {
         var (service, _) = Create();
@@ -220,6 +241,17 @@ public class McpTokenServiceTests : IDisposable
 
         Assert.True(result.Succeeded);
         Assert.Null(result.Token);
+    }
+
+    private sealed class StubLocalToken(string token) : IMcpAccessTokenProvider
+    {
+        public string Current => token;
+
+        public DateTimeOffset? RetiredValidUntil => null;
+
+        public bool Matches(string? presented) => presented == token;
+
+        public McpTokenRotation Rotate(bool immediately = false) => new(token, null);
     }
 
     private sealed class TokenHandler(string body, HttpStatusCode status = HttpStatusCode.OK) : HttpMessageHandler

@@ -46,6 +46,9 @@ public static class McpEndpoint
     {
         app.MapPost(path, async (HttpContext context, IServiceProvider services, CancellationToken ct) =>
         {
+            if (!IsAuthorised(context))
+                return Unauthorised(context);
+
             JsonNode? body;
             try
             {
@@ -78,7 +81,52 @@ public static class McpEndpoint
         });
 
         // Some clients probe with GET before opening a stream; answer politely rather than 404.
-        app.MapGet(path, () => Results.Json(new { name = serverName, protocolVersion = ProtocolVersion }));
+        app.MapGet(path, (HttpContext context) => IsAuthorised(context)
+            ? Results.Json(new { name = serverName, protocolVersion = ProtocolVersion })
+            : Unauthorised(context));
+    }
+
+    /// <summary>
+    /// These endpoints steer other agents and read their transcripts, so they are not left open on
+    /// the port. The credential is the app's own managed token, written into every session's
+    /// <c>.mcp.json</c> when the workspace is provisioned — no person ever types it, and no agent
+    /// has to be told about it. Anyone signed in to the app in this browser is let through as well,
+    /// which is what makes the endpoint pokeable from the UI's own tooling without pasting secrets.
+    /// </summary>
+    private static bool IsAuthorised(HttpContext context)
+    {
+        if (context.User.Identity?.IsAuthenticated == true)
+            return true;
+
+        var tokens = context.RequestServices.GetRequiredService<IMcpAccessTokenProvider>();
+
+        return tokens.Matches(Presented(context.Request));
+    }
+
+    /// <summary>
+    /// The bearer token out of the Authorization header, falling back to the header MCP clients that
+    /// cannot set Authorization use instead.
+    /// </summary>
+    private static string? Presented(HttpRequest request)
+    {
+        var header = request.Headers.Authorization.ToString();
+
+        if (header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            return header["Bearer ".Length..].Trim();
+
+        return request.Headers.TryGetValue("X-Mcp-Token", out var value) ? value.ToString().Trim() : null;
+    }
+
+    /// <summary>
+    /// A 401 carrying the challenge, which is what an MCP client reads to decide it needs a
+    /// credential rather than that the server is broken. The body is a JSON-RPC error too, because
+    /// some clients surface that text and a bare status code tells the operator nothing.
+    /// </summary>
+    private static IResult Unauthorised(HttpContext context)
+    {
+        context.Response.Headers.WWWAuthenticate = "Bearer realm=\"devstudio\"";
+
+        return Results.Json(Error(null, -32001, "Unauthorised: this MCP endpoint requires the orchestrator's token."), statusCode: 401);
     }
 
     private static async Task<JsonNode?> HandleAsync(

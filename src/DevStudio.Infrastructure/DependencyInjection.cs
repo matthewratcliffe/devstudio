@@ -71,6 +71,9 @@ public static class DependencyInjection
         // Used to replay OAuth callbacks to the CLI's own loopback listener.
         services.AddHttpClient();
         services.AddSingleton<ILoopbackCallbackForwarder, LoopbackCallbackForwarder>();
+        // The secret guarding this app's own MCP endpoints. Registered before the token service,
+        // which hands it to agents as the credential for the built-in servers.
+        services.AddSingleton<IMcpAccessTokenProvider, McpAccessTokenProvider>();
         services.AddSingleton<IMcpTokenService, McpTokenService>();
         services.AddSingleton<IMcpProbeService, McpProbeService>();
         services.AddSingleton<IMcpAuthDiscovery, McpAuthDiscoveryService>();

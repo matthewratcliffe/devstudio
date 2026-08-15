@@ -5,6 +5,7 @@
 @inject IMcpProbeService McpProbe
 @inject IMcpAuthDiscovery McpAuth
 @inject IMcpOAuthService McpOAuth
+@inject IMcpAccessTokenProvider McpAccessToken
 @inject NavigationManager Nav
 
 <PageTitle>MCP servers · devStudio</PageTitle>
@@ -16,6 +17,35 @@
         agent's transcript, leave notes, start sessions and run workflows. Attach the built-in
         <code>orchestrator</code> server below to any agent that should see its colleagues' work.
     </p>
+    <p class="small">
+        The endpoint only answers requests carrying this app's own token, so nothing else that can
+        reach the port can steer your agents. Nobody has to hand it out: it is written into each
+        session's <code>.mcp.json</code> when the workspace is prepared, and refreshed from here on
+        every turn. Rotating is safe while work is running: the config is rewritten before each turn,
+        so only a turn already in flight is still holding the old token, and that one keeps being
+        accepted until it could not possibly still be running. Cut it off instead if the token itself
+        has leaked — that stops the old value dead, and any turn mid-flight loses its MCP tools.
+    </p>
+    <div class="btn-row">
+        <button class="btn btn-sm" @onclick="() => _tokenShown = !_tokenShown">
+            @(_tokenShown ? "Hide token" : "Show token")
+        </button>
+        <button class="btn btn-sm" @onclick="() => RotateAccessToken(immediately: false)">Rotate token</button>
+        <button class="btn btn-sm btn-danger" @onclick="() => RotateAccessToken(immediately: true)">
+            Rotate and cut off now
+        </button>
+        @if (_tokenShown)
+        {
+            <code class="mono-dim">@McpAccessToken.Current</code>
+        }
+    </div>
+    @if (McpAccessToken.RetiredValidUntil is { } until)
+    {
+        <p class="hint">
+            The token this one replaced is still accepted until @until.ToLocalTime().ToString("HH:mm"),
+            so turns that were already running finish with their tools.
+        </p>
+    }
 </div>
 
 <div class="btn-row" style="margin-bottom:1.2rem">
@@ -49,7 +79,11 @@
                 {
                     <span class="pill">on every agent</span>
                 }
-                @if (server.AuthMode != McpAuthMode.None)
+                @if (server.IsBuiltIn)
+                {
+                    <span class="pill pill-amber"><span class="dot"></span>managed token</span>
+                }
+                else if (server.AuthMode != McpAuthMode.None)
                 {
                     <span class="pill pill-amber"><span class="dot"></span>@(server.AuthMode == McpAuthMode.ClientCredentials ? "oauth" : "token")</span>
                 }
@@ -216,7 +250,16 @@
                 </div>
             }
 
-            @if (_editing.Transport != McpTransport.Stdio)
+            @if (_editing.IsBuiltIn)
+            {
+                <div class="divider"></div>
+                <div class="section-tag">Authentication</div>
+                <p class="hint">
+                    This is one of this app's own endpoints, so it authenticates itself: the managed
+                    token is attached whenever a workspace is prepared and there is nothing to set up.
+                </p>
+            }
+            else if (_editing.Transport != McpTransport.Stdio)
             {
                 <div class="divider"></div>
                 <div class="section-tag">Authentication</div>
@@ -431,7 +474,25 @@
     private McpToolCallResult? _toolResult;
     private bool _toolRunning;
 
+    private bool _tokenShown;
+
     private string McpUrl => Nav.BaseUri.TrimEnd('/') + "/mcp";
+
+    /// <summary>
+    /// Issues a new token. Nothing else has to be rewritten — the built-in servers do not store it,
+    /// they are handed the current one each time a session's config is written.
+    /// </summary>
+    private void RotateAccessToken(bool immediately)
+    {
+        var rotation = McpAccessToken.Rotate(immediately);
+        _tokenShown = false;
+
+        Layout.Notify(
+            rotation.RetiredValidUntil is { } until
+                ? $"A new MCP token is in use. The old one is accepted until {until.ToLocalTime():HH:mm} so running turns finish."
+                : "A new MCP token is in use and the old one has been cut off. Any turn mid-flight has lost its MCP tools.",
+            "ok");
+    }
 
     private string PairsText => string.Join('\n', (_editing!.Transport == McpTransport.Stdio
             ? _editing.Environment
