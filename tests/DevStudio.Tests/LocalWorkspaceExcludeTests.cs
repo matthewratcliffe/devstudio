@@ -118,6 +118,9 @@ public class LocalWorkspaceExcludeTests : IDisposable
         public Task<GitRepository> AttachLocalAsync(string path, string? name, CancellationToken ct = default) =>
             throw new NotSupportedException();
 
+        public Task<GitRepository> RenameAsync(GitRepository repository, string? name, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
         public Task<GitRepository> CloneAsync(string remoteUrl, string? name, SourceControlProvider sourceControl = SourceControlProvider.GitHub, CancellationToken ct = default) =>
             throw new NotSupportedException();
 

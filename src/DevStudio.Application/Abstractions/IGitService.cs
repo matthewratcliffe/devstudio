@@ -42,6 +42,12 @@ public interface IGitService
     /// </summary>
     Task<GitRepository> AttachLocalAsync(string path, string? name, CancellationToken ct = default);
 
+    /// <summary>
+    /// Renames a registration. Nothing on disk moves — the name is a label and a prefix for future
+    /// worktree folders, so an empty name falls back to the checkout's own folder name.
+    /// </summary>
+    Task<GitRepository> RenameAsync(GitRepository repository, string? name, CancellationToken ct = default);
+
     Task<GitCommandOutcome> FetchAsync(GitRepository repository, CancellationToken ct = default);
 
     Task<IReadOnlyList<string>> ListBranchesAsync(GitRepository repository, CancellationToken ct = default);

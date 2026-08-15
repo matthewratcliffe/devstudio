@@ -90,15 +90,23 @@ environment:
 
         <div class="form-grid">
             <div class="field">
-                <label>Go to path</label>
+                <label>Path</label>
                 <input type="text" @bind="_jumpPath" @onkeydown="OnJumpKeyDown"
                        placeholder="@JumpPlaceholder" />
-                <span class="hint">Paste a path instead of clicking down to it. Enter to open.</span>
+                <span class="hint">Follows the folder you are browsing. Paste a path and press Enter to open it.</span>
             </div>
             <div class="field">
                 <label>Name (optional)</label>
                 <input type="text" @bind="_localName" placeholder="the folder name" />
             </div>
+        </div>
+
+        <div class="btn-row" style="margin-bottom:0.6rem">
+            <button class="btn btn-primary" disabled="@(_attaching || _browsing || string.IsNullOrWhiteSpace(_jumpPath))"
+                    @onclick="() => AttachAsync(_jumpPath.Trim())">
+                @(_attaching ? "Saving…" : "Save")
+            </button>
+            <span class="mono-dim">Attaches the folder in Path. Leave Name empty to use the folder's own name.</span>
         </div>
 
         @if (_browse is { Entries.Count: 0 })
@@ -183,8 +191,26 @@ environment:
             }
             <button class="btn btn-sm btn-ghost" @onclick="() => ToggleBranchesAsync(repository)">Branches</button>
             <button class="btn btn-sm btn-ghost" @onclick="() => NewWorktreeAsync(repository)">New worktree</button>
+            <button class="btn btn-sm btn-ghost" @onclick="() => ToggleEdit(repository)">@(_editingId == repository.Id ? "Cancel" : "Edit")</button>
             <button class="btn btn-sm btn-danger" @onclick="() => ForgetAsync(repository)">@(repository.IsLocal ? "Detach" : "Forget")</button>
         </div>
+
+        @if (_editingId == repository.Id)
+        {
+            <div class="form-grid" style="margin-bottom:0.8rem">
+                <div class="field">
+                    <label>Name</label>
+                    <input type="text" @bind="_editName" placeholder="@FolderNameOf(repository)" />
+                    <span class="hint">Empty falls back to the folder name. Nothing on disk is renamed or moved.</span>
+                </div>
+            </div>
+            <div class="btn-row" style="margin-bottom:0.8rem">
+                <button class="btn btn-sm btn-primary" disabled="@_savingEdit" @onclick="() => SaveEditAsync(repository)">
+                    @(_savingEdit ? "Saving…" : "Save")
+                </button>
+                <button class="btn btn-sm btn-ghost" disabled="@_savingEdit" @onclick="CancelEdit">Cancel</button>
+            </div>
+        }
 
         @if (_branchesFor == repository.Id)
         {
@@ -237,6 +263,10 @@ environment:
     private bool _attaching;
     private string _localName = string.Empty;
     private string _jumpPath = string.Empty;
+
+    private string? _editingId;
+    private string _editName = string.Empty;
+    private bool _savingEdit;
 
     /// <summary>An example in the shape of this machine's paths, not a hard-coded Windows one.</summary>
     private string JumpPlaceholder => _roots.Count > 0
@@ -305,8 +335,9 @@ environment:
         {
             _browse = await Git.BrowseLocalAsync(path);
 
-            // Cleared only on success, so a rejected path stays on screen to be corrected.
-            _jumpPath = string.Empty;
+            // Only on success, so a rejected path stays on screen to be corrected. The field then
+            // mirrors where the browser actually is, which is what Save acts on.
+            _jumpPath = _browse.Path ?? string.Empty;
         }
         catch (Exception ex)
         {
@@ -403,10 +434,55 @@ environment:
         await ReloadAsync();
     }
 
+    /// <summary>The folder the checkout sits in, which is the name a blank rename falls back to.</summary>
+    private static string FolderNameOf(GitRepository repository) =>
+        Path.GetFileName(repository.LocalPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+    private void ToggleEdit(GitRepository repository)
+    {
+        if (_editingId == repository.Id)
+        {
+            CancelEdit();
+            return;
+        }
+
+        _editingId = repository.Id;
+        _editName = repository.Name;
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+        _editName = string.Empty;
+    }
+
+    private async Task SaveEditAsync(GitRepository repository)
+    {
+        _savingEdit = true;
+        try
+        {
+            var renamed = await Git.RenameAsync(repository, string.IsNullOrWhiteSpace(_editName) ? null : _editName.Trim());
+            CancelEdit();
+            await ReloadAsync();
+            Layout.Notify($"Saved as {renamed.Name}.", "ok");
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify(ex.Message, "err");
+        }
+        finally
+        {
+            _savingEdit = false;
+        }
+    }
+
     private async Task ForgetAsync(GitRepository repository)
     {
         // Only the registration goes; the clone stays on the volume so nothing is lost by accident.
         var wasLocal = repository.IsLocal;
+        if (_editingId == repository.Id)
+            CancelEdit();
+
         await RepositoryStore.DeleteAsync(repository.Id);
         await ReloadAsync();
 

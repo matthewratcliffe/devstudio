@@ -161,6 +161,9 @@ public class SystemPromptLayeringTests : IDisposable
         public Task<GitRepository> AttachLocalAsync(string path, string? name, CancellationToken ct = default) =>
             throw new NotSupportedException();
 
+        public Task<GitRepository> RenameAsync(GitRepository repository, string? name, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
         public Task<GitCommandOutcome> FetchAsync(GitRepository repository, CancellationToken ct = default) =>
             throw new NotSupportedException();
 
