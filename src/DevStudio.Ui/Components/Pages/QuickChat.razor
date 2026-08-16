@@ -3,6 +3,7 @@
 @inject IQuickChatService QuickChats
 @inject ISessionManager Sessions
 @inject IEntityStore<McpServer> McpStore
+@inject IEntityStore<GlobalSettings> SettingsStore
 @inject IEntityStore<CliProvider> CliProviderStore
 @inject Microsoft.Extensions.Options.IOptions<OrchestratorOptions> Options
 @inject IJSRuntime Js
@@ -141,7 +142,7 @@
     /// Chosen for the chat itself: a quick chat has no agent anyone configured, so there is nothing
     /// above it to inherit from and nothing to follow.
     /// </summary>
-    private TokenTactics _tokenMinimisation = TokenTactics.None;
+    private TokenTactics _tokenMinimisation = new GlobalSettings().DefaultTokenMinimisation;
     private IReadOnlyList<string> _models = [];
     private IReadOnlyList<string> _efforts = [];
 
@@ -164,6 +165,8 @@
         _clis = await Clis.GetAllAsync();
         _cliProviders = await CliProviderStore.GetAllAsync();
         _mcpServers = (await McpStore.GetAllAsync()).Where(s => s.Enabled).ToList();
+        _tokenMinimisation = (await SettingsStore.GetAsync(GlobalSettings.WellKnownId))?.DefaultTokenMinimisation
+                             ?? _tokenMinimisation;
         _selected = _clis.Count > 0 ? Key(_clis[0]) : string.Empty;
         LoadModelChoices();
 

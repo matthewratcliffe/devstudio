@@ -1,5 +1,6 @@
 @page "/agents"
 @inject IEntityStore<Agent> AgentStore
+@inject IEntityStore<GlobalSettings> SettingsStore
 @inject IEntityStore<Skill> SkillStore
 @inject IEntityStore<McpServer> McpStore
 @inject IEntityStore<Project> ProjectStore
@@ -14,7 +15,7 @@
 <PageTitle>Agents · devStudio</PageTitle>
 
 <div class="btn-row" style="margin-bottom:1.2rem">
-    <button class="btn btn-primary" @onclick="() => Edit(new Agent())">New agent</button>
+    <button class="btn btn-primary" @onclick="() => Edit(NewAgent())">New agent</button>
     <span class="mono-dim">Each agent is bound to one CLI. Add as many as you like.</span>
 </div>
 
@@ -383,6 +384,7 @@
     private IReadOnlyList<GitRepository> _repositories = [];
     private IReadOnlyList<ProviderAccount> _accounts = [];
     private IReadOnlyList<CliProvider> _cliProviders = [];
+    private TokenTactics _defaultTokenMinimisation = new GlobalSettings().DefaultTokenMinimisation;
 
     private Agent? _editing;
     private bool _isNew;
@@ -408,7 +410,11 @@
         _repositories = await RepositoryStore.GetAllAsync();
         _accounts = await AccountStore.GetAllAsync();
         _cliProviders = await CliProviderStore.GetAllAsync();
+        _defaultTokenMinimisation = (await SettingsStore.GetAsync(GlobalSettings.WellKnownId))?.DefaultTokenMinimisation
+                                    ?? _defaultTokenMinimisation;
     }
+
+    private Agent NewAgent() => new() { TokenMinimisation = _defaultTokenMinimisation };
 
     /// <summary>Model choices for the agent's provider, from configuration or the CLI definition.</summary>
     private IReadOnlyList<string> ModelsFor(Agent agent) => agent.Provider switch

@@ -22,6 +22,12 @@ public sealed record TokenTactic(TokenTactics Flag, string Label, string Hint, s
 public static class TokenMinimisation
 {
     /// <summary>
+    /// Safe defaults for newly created agents and quick chats. They reduce repetition and
+    /// exploration without weakening verification or moving work to another model.
+    /// </summary>
+    public const TokenTactics RecommendedDefaults = TokenTacticsDefaults.Recommended;
+
+    /// <summary>
     /// Every tactic in the order it is offered, roughly from what it changes about answering to what
     /// it changes about the work itself.
     /// </summary>
@@ -124,6 +130,34 @@ public static class TokenMinimisation
             + "move to the cheaper model by writing [CHANGE MODEL] on a line of its own. Only do it "
             + "once the decisions are made: the model that takes over will carry them out, not "
             + "revisit them."),
+
+        new(TokenTactics.ReuseContext,
+            "Reuse established context",
+            "Carry forward facts already established instead of asking again.",
+            "Treat facts, paths and results already established in this conversation as available "
+            + "context. Do not ask the user or call a tool to rediscover them unless they may have "
+            + "changed or the existing evidence is insufficient."),
+
+        new(TokenTactics.AvoidSpeculativeWork,
+            "Avoid speculative work",
+            "Follow evidence and the request, not hypothetical branches.",
+            "Do not investigate hypothetical bugs, edge cases, refactors or improvements without "
+            + "evidence they matter or a request to handle them. Finish the evidenced path first "
+            + "and mention adjacent risks briefly instead of exploring them."),
+
+        new(TokenTactics.MinimalToolInputs,
+            "Minimise tool inputs",
+            "Send only the paths, fields and arguments this call needs.",
+            "Keep tool inputs narrow. Pass only the paths, fields, arguments and context needed for "
+            + "this call; avoid broad globs, duplicate arguments and embedding information already "
+            + "available to the tool."),
+
+        new(TokenTactics.PreferDeltas,
+            "Prefer deltas",
+            "Ask for changes and summaries instead of unchanged full content.",
+            "When context is large, prefer a diff, status, summary or incremental range over the "
+            + "unchanged full file, transcript or log. Carry forward the unchanged baseline and "
+            + "request only what has changed."),
     ];
 
     /// <summary>

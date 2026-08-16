@@ -19,7 +19,7 @@ only credential involved is the login you complete in the web UI.
 | **Concurrent chats** | Sessions run in parallel up to a configurable cap. Each session queues its own turns, so you can keep typing while an agent is working. |
 | **Team settings** | One git repository holding the team's agents, workflows, skills, schedules and standards. Point every install at it and they all get the same definitions, reviewed and versioned like code instead of retyped on each machine. Anything you make in the UI stays local and is never touched by a sync ([how](#team-settings)). |
 | **Model handover** | An agent, or one chat, can open on a strong model and hand over to a cheaper one after N turns — `fable` at high effort to work the plan out, `sonnet` at low to carry it out. The agent can also call the handover itself, the moment the thinking is done, by writing `[CHANGE MODEL]` ([how](#asking-for-the-handover)). |
-| **Token minimisation** | Fourteen switchable tactics — terse replies, narrow reads, delegated searching, batched tool calls, scoped tests, staying in scope, failing fast — composed into the prompt as a section telling the agent how to go about the work. Set on the agent, overridable by any chat, and switchable mid-conversation ([how](#token-minimisation)). |
+| **Token minimisation** | Eighteen switchable tactics — terse replies, narrow reads, delegated searching, batched tool calls, scoped tests, staying in scope, failing fast and delta-focused context — composed into the prompt as a section telling the agent how to go about the work. Defaults are configurable in Settings, set per agent, overridable by any chat, and switchable mid-conversation ([how](#token-minimisation)). |
 | **Standards** | Global instructions and reference files — setup notes, coding standards — that every agent inherits, staged into each workspace as `./global-files`. |
 | **Projects** | Instructions plus uploaded files that reach every agent, session, workflow and schedule in the project. Files are staged into `./project-files` in the workspace. Also where you set the account and the summarisation policy. |
 | **Guidance** | Steer an agent that is already working, instead of queueing a turn behind it. Optionally interrupt the turn in flight so the steer lands now. |
@@ -707,7 +707,7 @@ settles *how* it is carried out, in a section of its own appended after them and
 
     Team standards  →  Standards  →  Project instructions  →  Agent instructions  →  Token minimisation  →  Guidance
 
-Ten tactics, each switched on or off on its own:
+Eighteen tactics, each switched on or off on its own:
 
 | Tactic | What the agent is told |
 | --- | --- |
@@ -725,13 +725,18 @@ Ten tactics, each switched on or off on its own:
 | **Recommend, don't survey** | Give the recommendation and the reason for it, not every option you discarded. |
 | **Fail fast** | Two failed goes at the same problem, then report — a retry loop is the most expensive thing a conversation can do. |
 | **Hand over when mechanical** | Ask for the cheaper model with `[CHANGE MODEL]` once the decisions are made. |
+| **Reuse established context** | Carry forward facts already established instead of asking or reading for them again. |
+| **Avoid speculative work** | Follow evidence and the request, not hypothetical branches or improvements. |
+| **Minimise tool inputs** | Send only the paths, fields and arguments the call needs. |
+| **Prefer deltas** | Ask for diffs, status and summaries instead of unchanged full content. |
 
 They are instructions, not enforcement — nothing here truncates a prompt or blocks a tool call. The
 block that carries them says so, and says what they may not buy: the saving comes out of narration,
 re-reading and rework, never out of skipping a step, dropping a requirement or guessing at something
 the agent could have read.
 
-An agent carries a default selection, set in its editor. A chat starts out following it and can take
+An agent carries a default selection, set in its editor. Application settings select the defaults for
+new agents and quick chats; existing agents keep their own selection. A chat starts out following it and can take
 the selection over for itself from the panel on the right, at any point while it runs — the prompt is
 composed fresh for every turn, so a tactic switched on or off applies from your next message and
 leaves a turn already running under the rules it started with. Ticking **follow the agent** again
