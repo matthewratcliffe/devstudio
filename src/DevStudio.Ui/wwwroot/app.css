@@ -593,6 +593,17 @@ select.select-sm { width: auto; font-size: 0.72rem; padding: 0.3em 1.6em 0.3em 0
 .toast.err { border-left-color: var(--red); }
 .toast.info { border-left-color: var(--cyan); }
 
+.pwa-install-banner {
+    position: fixed; left: 1.2rem; right: 1.2rem; bottom: 1.2rem; z-index: 1500;
+    margin-left: auto; margin-right: auto; max-width: 480px;
+    display: flex; align-items: center; justify-content: space-between; gap: 0.9rem;
+    background: var(--bg-2); border: 1px solid var(--border); border-left: 3px solid var(--cyan);
+    border-radius: var(--radius); padding: 0.7rem 0.9rem;
+    box-shadow: 0 12px 30px #000a;
+    font-size: 0.82rem; color: var(--text-1);
+}
+.pwa-install-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+
 .modal-backdrop {
     position: fixed; inset: 0; background: #02040ccc; backdrop-filter: blur(3px);
     display: grid; place-items: center; z-index: 90; padding: 1rem;
