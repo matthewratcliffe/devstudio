@@ -600,6 +600,14 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                         await PersistAsync(session);
                         live.Idle.TrySetResult();
                     }
+
+                    // The agent asked to end the conversation, and the turn that asked has now
+                    // finished streaming: close the session so nothing further gets queued into it.
+                    if (session.AgentEndConversationRequested && !session.IsClosed)
+                    {
+                        await CloseAsync(session.Id, "Ended by the agent.");
+                        return;
+                    }
                 }
             }
         }
@@ -738,6 +746,9 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                         if (!session.HandoverRequested && WantsHandover(assistant.Content))
                             ApplyHandoverRequest(session, agent, choice);
 
+                        if (!session.AgentEndConversationRequested && WantsEndConversation(assistant.Content))
+                            session.AgentEndConversationRequested = true;
+
                         Notify(session);
                         break;
 
@@ -812,6 +823,9 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                         // again rather than only in the streamed prose.
                         if (!session.HandoverRequested && WantsHandover(assistant.Content))
                             ApplyHandoverRequest(session, agent, choice);
+
+                        if (!session.AgentEndConversationRequested && WantsEndConversation(assistant.Content))
+                            session.AgentEndConversationRequested = true;
 
                         break;
 
@@ -1067,6 +1081,16 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
     /// <summary>Whether an answer carries the change-model marker.</summary>
     private static bool WantsHandover(string text) =>
         text.Contains(HandoverMarker, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// What an agent writes when the task is genuinely finished and nothing further is expected from
+    /// either side. Matched the same way as <see cref="HandoverMarker"/>, for the same reason.
+    /// </summary>
+    public const string EndConversationMarker = "[END CONVERSATION]";
+
+    /// <summary>Whether an answer carries the end-conversation marker.</summary>
+    private static bool WantsEndConversation(string text) =>
+        text.Contains(EndConversationMarker, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The cheaper model this conversation could move to on request, or null when there is nowhere
