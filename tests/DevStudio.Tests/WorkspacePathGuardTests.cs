@@ -24,7 +24,9 @@ public sealed class WorkspacePathGuardTests : IDisposable
     [Fact]
     public void A_relative_parent_path_is_not_inside_the_workspace()
     {
-        Assert.False(WorkspacePathGuard.TryResolveWithin(_workspace, "..\\workspace-other\\secret.txt", out _));
+        var sibling = Path.Combine("..", "workspace-other", "secret.txt");
+
+        Assert.False(WorkspacePathGuard.TryResolveWithin(_workspace, sibling, out _));
     }
 
     [Fact]
