@@ -379,13 +379,25 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         return pending;
     }
 
-    private async Task QueueGuidanceTurnAsync(LiveSession live)
+    private async Task QueueGuidanceTurnAsync(LiveSession live) =>
+        await QueueContinuationAsync(live, GuidanceContinuationPrompt);
+
+    /// <summary>Prompt used to carry the conversation on once a handover has just taken effect.</summary>
+    private const string HandoverContinuationPrompt =
+        "The model handover just took effect. Carry on with the conversation on the new model.";
+
+    /// <summary>
+    /// Queues a turn with no message of its own — guidance arriving idle, or a handover that just
+    /// took effect — so the session keeps going rather than sitting there waiting for the person to
+    /// send something.
+    /// </summary>
+    private async Task QueueContinuationAsync(LiveSession live, string prompt)
     {
         Interlocked.Increment(ref live.QueuedTurns);
         if (live.Idle.Task.IsCompleted)
             live.Idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        await live.Turns.Writer.WriteAsync(GuidanceContinuationPrompt, CancellationToken.None);
+        await live.Turns.Writer.WriteAsync(prompt, CancellationToken.None);
     }
 
     /// <summary>Moves outstanding guidance to the top of the prompt about to be sent.</summary>
@@ -572,7 +584,15 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             {
                 while (live.Turns.Reader.TryRead(out var prompt))
                 {
+                    var handoverAlreadyRequested = session.HandoverRequested;
                     await RunTurnAsync(live, prompt);
+
+                    // The agent asked to change model mid-turn: the switch only takes effect on the
+                    // next turn, so queue one straight away rather than leaving the conversation
+                    // sitting there until the person sends something themselves.
+                    if (!handoverAlreadyRequested && session.HandoverRequested)
+                        await QueueContinuationAsync(live, HandoverContinuationPrompt);
+
                     if (Interlocked.Decrement(ref live.QueuedTurns) <= 0)
                     {
                         if (session.Status is not (SessionStatus.Failed or SessionStatus.Cancelled))

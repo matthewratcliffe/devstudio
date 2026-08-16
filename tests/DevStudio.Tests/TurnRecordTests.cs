@@ -124,7 +124,10 @@ public class TurnRecordTests : IDisposable
 
         _registry.Answer = "The plan is settled. [CHANGE MODEL]";
         var session = await _sessions.StartAsync(new StartSessionRequest { AgentId = agent.Id, Prompt = "one" });
-        await WaitForTurnsAsync(session, 3);
+
+        // The handover carries the conversation straight on by itself, with nobody sending
+        // anything, so by the time either turn is done both have usually already run.
+        await WaitForTurnsAsync(session, 6);
 
         Assert.True(session.HandoverRequested);
         Assert.Contains(session.Messages, m =>
@@ -132,9 +135,6 @@ public class TurnRecordTests : IDisposable
 
         // The turn that asked still ran on the opening model, and the next one does not.
         Assert.Equal("fable", session.Messages.First(m => m.Role == MessageRole.Agent).Model);
-
-        await _sessions.SendAsync(session.Id, "two");
-        await WaitForTurnsAsync(session, 6);
 
         Assert.Equal("sonnet", session.ModelInUse);
         Assert.Contains(session.Messages, m =>
@@ -152,13 +152,12 @@ public class TurnRecordTests : IDisposable
 
         _registry.Answer = "[change model]";
         var session = await _sessions.StartAsync(new StartSessionRequest { AgentId = agent.Id, Prompt = "one" });
-        await WaitForTurnsAsync(session, 3);
 
-        Assert.Equal("sonnet", session.Model);
-
-        await _sessions.SendAsync(session.Id, "two");
+        // The handover carries the conversation straight on by itself, with nobody sending
+        // anything, so by the time either turn is done both have usually already run.
         await WaitForTurnsAsync(session, 6);
 
+        Assert.Equal("sonnet", session.Model);
         Assert.Equal("sonnet", session.ModelInUse);
     }
 
