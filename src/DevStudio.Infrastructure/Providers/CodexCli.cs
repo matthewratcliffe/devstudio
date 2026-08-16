@@ -34,6 +34,40 @@ public sealed class CodexCli : IProviderCli
         TurnRequest request,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
+        var buffered = new List<AgentEvent>();
+        var meaningful = false;
+        var failed = false;
+
+        await foreach (var evt in RunTurnOnceAsync(request, ct))
+        {
+            buffered.Add(evt);
+            meaningful |= evt.Kind is AgentEventKind.Text or AgentEventKind.Tool or AgentEventKind.Result;
+            failed |= evt.Kind == AgentEventKind.Error;
+        }
+
+        if (failed && !meaningful && !string.IsNullOrWhiteSpace(request.FallbackHomeDirectory))
+        {
+            yield return AgentEvent.Log("Primary Codex account failed before producing output; trying the backup account.");
+
+            await foreach (var evt in RunTurnOnceAsync(request with
+            {
+                ResumeSessionId = null,
+                HomeDirectory = request.FallbackHomeDirectory,
+                FallbackHomeDirectory = null,
+            }, ct))
+                yield return evt;
+
+            yield break;
+        }
+
+        foreach (var evt in buffered)
+            yield return evt;
+    }
+
+    private async IAsyncEnumerable<AgentEvent> RunTurnOnceAsync(
+        TurnRequest request,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
         var channel = Channel.CreateUnbounded<AgentEvent>();
         var arguments = BuildArguments(request);
 

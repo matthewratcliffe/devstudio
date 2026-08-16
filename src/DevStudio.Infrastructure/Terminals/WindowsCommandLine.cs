@@ -91,8 +91,26 @@ public static class WindowsCommandLine
             ? [fileName]
             : extensions.Select(extension => fileName + extension).Prepend(fileName);
 
-        foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
-                     .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        var directories = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        // Windows npm installs global command shims in %APPDATA%\npm. Desktop applications can
+        // retain the PATH from before Node/npm was installed, so include npm's standard per-user
+        // bin directory even when it is missing from the inherited environment.
+        if (OperatingSystem.IsWindows())
+        {
+            var npmBin = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm");
+
+            if (!string.IsNullOrWhiteSpace(npmBin) &&
+                !directories.Any(path => string.Equals(path.TrimEnd('\\', '/'), npmBin.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)))
+            {
+                directories.Add(npmBin);
+            }
+        }
+
+        foreach (var directory in directories)
         {
             foreach (var candidate in candidates)
             {

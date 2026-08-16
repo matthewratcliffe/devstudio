@@ -267,6 +267,20 @@
                 <span class="hint">A project's own choice wins over this when the session runs in one.</span>
             </div>
 
+            <div class="field">
+                <label>Fallback account</label>
+                <select @bind="_editing.FallbackAccountId">
+                    <option value="">Automatic fallback</option>
+                    @foreach (var account in _accounts.Where(a => a.Provider == _editing.Provider
+                        && a.Id != _editing.AccountId
+                        && (_editing.Provider != AiProvider.Custom || a.CliProviderId == _editing.CliProviderId)))
+                    {
+                        <option value="@account.Id">@account.Name</option>
+                    }
+                </select>
+                <span class="hint">Used when the primary account fails before producing an answer.</span>
+            </div>
+
             <div class="form-grid">
                 <div class="field">
                     <label>Base branch</label>
@@ -619,6 +633,7 @@
         TokenMinimisation = agent.TokenMinimisation,
         ProjectId = agent.ProjectId,
         AccountId = agent.AccountId,
+        FallbackAccountId = agent.FallbackAccountId,
         RepositoryId = agent.RepositoryId,
         BaseBranch = agent.BaseBranch,
         UseWorktree = agent.UseWorktree,

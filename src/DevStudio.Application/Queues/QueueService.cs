@@ -36,8 +36,20 @@ public sealed class QueueService : IQueueService
 
     public event Action<QueueItem>? ItemChanged;
 
-    public Task<IReadOnlyList<WorkQueue>> GetQueuesAsync(CancellationToken ct = default) =>
-        _queues.GetAllAsync(ct);
+    public async Task<IReadOnlyList<WorkQueue>> GetQueuesAsync(CancellationToken ct = default)
+    {
+        var queues = await _queues.GetAllAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+
+        foreach (var queue in queues.Where(q => q.SuspendedUntil is not null && q.SuspendedUntil <= now))
+        {
+            queue.SuspendedUntil = null;
+            queue.SuspensionReason = null;
+            await _queues.UpsertAsync(queue, ct);
+        }
+
+        return queues;
+    }
 
     public Task<WorkQueue?> GetQueueAsync(string queueId, CancellationToken ct = default) =>
         _queues.GetAsync(queueId, ct);
@@ -171,6 +183,10 @@ public sealed class QueueService : IQueueService
         await _claimLock.WaitAsync(ct);
         try
         {
+            var queue = await _queues.GetAsync(queueId, ct);
+            if (queue is null || !queue.Enabled || queue.SuspendedUntil > DateTimeOffset.UtcNow)
+                return [];
+
             var now = DateTimeOffset.UtcNow;
 
             var due = (await _items.GetAllAsync(ct))
@@ -211,6 +227,27 @@ public sealed class QueueService : IQueueService
             return;
 
         var queue = await _queues.GetAsync(stored.QueueId, ct);
+
+        if (queue is not null && outcome.SuspendUntil is { } suspendUntil && suspendUntil > DateTimeOffset.UtcNow)
+        {
+            queue.SuspendedUntil = queue.SuspendedUntil is { } existing && existing > suspendUntil
+                ? existing
+                : suspendUntil;
+            queue.SuspensionReason = outcome.Error;
+            await _queues.UpsertAsync(queue, ct);
+
+            stored.Status = QueueItemStatus.Pending;
+            stored.AvailableAt = suspendUntil;
+            stored.FinishedAt = null;
+            stored.LastError = outcome.Error;
+            stored.SessionId = outcome.SessionId ?? stored.SessionId;
+            stored.Output = outcome.Output ?? stored.Output;
+
+            await _items.UpsertAsync(stored, ct);
+            ItemChanged?.Invoke(stored);
+            _logger.LogWarning("Suspended queue {QueueId} until {Until}: {Reason}", stored.QueueId, suspendUntil, outcome.Error);
+            return;
+        }
 
         stored.SessionId = outcome.SessionId ?? stored.SessionId;
         stored.WorkflowRunId = outcome.WorkflowRunId ?? stored.WorkflowRunId;
