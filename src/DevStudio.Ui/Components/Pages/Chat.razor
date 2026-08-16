@@ -258,6 +258,11 @@ else
                     @_session.TurnCount
                     <span class="hint">Messages either way, not counting tool calls.</span>
                 </dd>
+                <dt>Tool calls</dt>
+                <dd>
+                    @_session.ToolCallCount
+                    <span class="hint">Every call the agent made, counted as it happened.</span>
+                </dd>
                 <dt>Tokens</dt>
                 <dd>
                     @Tokens(_session.TotalTokens)
@@ -294,7 +299,14 @@ else
                              DefaultLabel="Agent default" InUse="@ModelNow" OpeningInUse="@HandoverPending" />
                 <div class="mono-dim">
                     Applies from your next message.
-                    @if (OpeningTurns > 0)
+                    @if (_session.HandoverRequested)
+                    {
+                        <text>
+                            The agent asked to change model itself, so the opening is over however
+                            many turns were set for it.
+                        </text>
+                    }
+                    else if (OpeningTurns > 0)
                     {
                         <text>
                             @_session.TurnCount message@(_session.TurnCount == 1 ? "" : "s") exchanged of the
@@ -304,6 +316,14 @@ else
                     }
                 </div>
             }
+
+            <div class="divider"></div>
+            <div class="section-tag">Token minimisation</div>
+            <TokenMinimisationPicker Value="_session.TokenMinimisation"
+                                     Inherited="@(_agent?.TokenMinimisation ?? TokenTactics.None)"
+                                     Disabled="@(!_session.AcceptsInput)"
+                                     ValueChanged="SetTokenMinimisationAsync" />
+            <div class="mono-dim">Applies from your next message.</div>
 
             @if (!string.IsNullOrWhiteSpace(_session.Summary))
             {
@@ -637,6 +657,26 @@ else
 
         await SessionStore.UpsertAsync(_session);
         Layout.Notify("MCP servers updated — they apply from your next message.", "ok");
+    }
+
+    /// <summary>
+    /// Sets the token-saving tactics for this conversation, or clears them back to the agent's. The
+    /// system prompt is composed at the start of every turn, so this lands on the next message and
+    /// leaves a turn already running with the rules it started under.
+    /// </summary>
+    private async Task SetTokenMinimisationAsync(TokenTactics? tactics)
+    {
+        if (_session is null)
+            return;
+
+        _session.TokenMinimisation = tactics;
+        await SessionStore.UpsertAsync(_session);
+
+        var state = tactics is null
+            ? $"following the agent ({TokenMinimisation.Describe(_agent?.TokenMinimisation ?? TokenTactics.None)})"
+            : TokenMinimisation.Describe(tactics.Value);
+
+        Layout.Notify($"Token minimisation {state} — applies from your next message.", "ok");
     }
 
     /// <summary>

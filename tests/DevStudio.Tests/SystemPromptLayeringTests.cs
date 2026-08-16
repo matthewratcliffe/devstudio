@@ -98,6 +98,51 @@ public class SystemPromptLayeringTests : IDisposable
         Assert.Contains("PROJECT-RULE", prompt);
     }
 
+    /// <summary>
+    /// The tactics qualify the instructions, so they come after them — and before guidance, which
+    /// overrides everything.
+    /// </summary>
+    [Fact]
+    public async Task Token_minimisation_sits_between_the_instructions_and_the_guidance()
+    {
+        var agent = new Agent { SystemPrompt = "AGENT-RULE" };
+
+        var prompt = await _service.ComposeSystemPromptAsync(
+            agent, null, "session-1", TokenTactics.TerseReplies);
+
+        Assert.Contains("## Token minimisation", prompt);
+        Assert.True(prompt.IndexOf("AGENT-RULE", StringComparison.Ordinal)
+            < prompt.IndexOf("## Token minimisation", StringComparison.Ordinal));
+        Assert.True(prompt.IndexOf("## Token minimisation", StringComparison.Ordinal)
+            < prompt.IndexOf("## Guidance", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task No_tactics_leaves_no_token_minimisation_section()
+    {
+        var prompt = await _service.ComposeSystemPromptAsync(new Agent(), null, "session-1");
+
+        Assert.DoesNotContain("Token minimisation", prompt);
+    }
+
+    /// <summary>
+    /// The marker is only explained when there is a cheaper model to move to. Telling an agent it
+    /// can hand over when nothing would happen is an instruction that silently does nothing.
+    /// </summary>
+    [Fact]
+    public async Task The_change_model_marker_is_only_offered_with_somewhere_to_go()
+    {
+        var offered = await _service.ComposeSystemPromptAsync(
+            new Agent(), null, "session-1", TokenTactics.None, "sonnet");
+
+        Assert.Contains("[CHANGE MODEL]", offered);
+        Assert.Contains("sonnet", offered);
+
+        var silent = await _service.ComposeSystemPromptAsync(new Agent(), null, "session-1");
+
+        Assert.DoesNotContain("CHANGE MODEL", silent);
+    }
+
     [Fact]
     public async Task Global_files_are_listed_for_the_agent_to_find()
     {

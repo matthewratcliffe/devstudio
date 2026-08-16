@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using DevStudio.Application.Abstractions;
+using DevStudio.Application.Agents;
 using DevStudio.Application.Common;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Globals;
@@ -411,6 +412,8 @@ public sealed class WorkspaceService : IWorkspaceService
         Agent agent,
         string? projectId,
         string? sessionId = null,
+        TokenTactics tactics = TokenTactics.None,
+        string? handoverModel = null,
         CancellationToken ct = default)
     {
         projectId ??= agent.ProjectId;
@@ -494,6 +497,32 @@ public sealed class WorkspaceService : IWorkspaceService
         {
             builder.AppendLine("## Agent instructions");
             builder.AppendLine(agent.SystemPrompt);
+            builder.AppendLine();
+        }
+
+        // After the instructions it qualifies and before guidance, which overrides everything: how
+        // to go about the work, once what the work is has been settled.
+        if (TokenMinimisation.Compose(tactics) is { Length: > 0 } minimisation)
+        {
+            builder.AppendLine(minimisation);
+        }
+
+        // Only offered when there is somewhere cheaper to go: an agent told it can hand over, on a
+        // conversation with no second model, would spend the marker on nothing.
+        if (!string.IsNullOrWhiteSpace(handoverModel))
+        {
+            builder.AppendLine("## Changing model");
+            builder.AppendLine(
+                $"This conversation can move to `{handoverModel}`, which costs less than what you "
+                + "are running on now. When the work left is mechanical — carrying out an approach "
+                + "already settled, applying a decision already made — write `[CHANGE MODEL]` in "
+                + "your answer and the change takes effect from the next turn.");
+            builder.AppendLine();
+            builder.AppendLine(
+                "Ask only once the thinking is done: the model that takes over is there to carry "
+                + "the plan out, not to revisit it, and nothing you say afterwards moves the "
+                + "conversation back. Say in a line what is left to do, so it starts from something "
+                + "rather than from the marker alone.");
             builder.AppendLine();
         }
 

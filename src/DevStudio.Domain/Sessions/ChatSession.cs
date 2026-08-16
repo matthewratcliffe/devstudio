@@ -190,6 +190,28 @@ public sealed class ChatSession : Entity
     public int? OpeningTurns { get; set; }
 
     /// <summary>
+    /// Token-saving tactics chosen for this conversation, overriding the agent's. Null — what every
+    /// untouched chat holds — keeps the agent's selection. The prompt is composed fresh each turn,
+    /// so switching one on or off mid-conversation applies from the next message.
+    /// </summary>
+    public TokenTactics? TokenMinimisation { get; set; }
+
+    /// <summary>
+    /// The agent asked to move to the cheaper model itself, by writing the change-model marker in an
+    /// answer. It ends the opening early — a handover is otherwise a distance in turns, and the
+    /// agent is better placed than a turn count to know when the thinking is finished. It is not
+    /// undone by anything the agent does afterwards; only a person changing the model can.
+    /// </summary>
+    public bool HandoverRequested { get; set; }
+
+    /// <summary>
+    /// Tool calls made across the whole conversation. Counted as they happen rather than totted up
+    /// from the transcript, which a compaction empties — the same reason the token counters live
+    /// here.
+    /// </summary>
+    public int ToolCallCount { get; set; }
+
+    /// <summary>
     /// The model the last turn actually ran on, recorded so the chat can say which side of a handover
     /// it is on rather than making the reader work it out.
     /// </summary>

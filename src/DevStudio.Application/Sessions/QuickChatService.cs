@@ -37,6 +37,7 @@ public sealed class QuickChatService : IQuickChatService
         IReadOnlyList<string>? mcpServerIds = null,
         PermissionMode? permissionMode = null,
         SessionModelSettings? model = null,
+        TokenTactics? tokenMinimisation = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(prompt))
@@ -50,6 +51,7 @@ public sealed class QuickChatService : IQuickChatService
             Prompt = prompt.Trim(),
             McpServerIds = mcpServerIds ?? [],
             Model = model,
+            TokenMinimisation = tokenMinimisation,
             // An explicit choice wins. Otherwise: plan mode refuses every MCP tool call, so a chat
             // with servers attached cannot be left in it.
             PermissionMode = permissionMode

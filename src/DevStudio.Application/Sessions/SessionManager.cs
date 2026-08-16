@@ -98,6 +98,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             Provider = agent.Provider,
             CliProviderId = agent.CliProviderId,
             PermissionMode = request.PermissionMode ?? agent.PermissionMode,
+            TokenMinimisation = request.TokenMinimisation,
             Trigger = request.Trigger,
             ProjectId = request.ProjectId ?? agent.ProjectId,
             McpServerIds = [.. request.McpServerIds],
@@ -200,6 +201,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             SystemPrompt = agent.SystemPrompt,
             DefaultPrompt = agent.DefaultPrompt,
             PermissionMode = agent.PermissionMode,
+            TokenMinimisation = agent.TokenMinimisation,
             ProjectId = agent.ProjectId,
             AccountId = agent.AccountId,
             RepositoryId = agent.RepositoryId,
@@ -678,7 +680,11 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
 
             var cli = await _clis.ResolveAsync(agent.Provider, agent.CliProviderId, turnCts.Token);
             session.CliProviderName = agent.Provider == AiProvider.Custom ? cli.DisplayName : null;
-            var systemPrompt = await _workspaces.ComposeSystemPromptAsync(agent, session.ProjectId, session.Id, turnCts.Token);
+            // Composed per turn, so token tactics switched on or off mid-conversation are in force
+            // from the next message without anything being restarted.
+            var systemPrompt = await _workspaces.ComposeSystemPromptAsync(
+                agent, session.ProjectId, session.Id, TokenMinimisation.For(agent, session),
+                HandoverTarget(agent, session, choice), turnCts.Token);
 
             // Re-resolved each turn so moving a project onto another account takes effect straight away.
             var account = await _accounts.ResolveAsync(agent, session.ProjectId, turnCts.Token);
@@ -706,6 +712,12 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                 {
                     case AgentEventKind.Text:
                         assistant.Content += evt.Text;
+
+                        // Checked against the whole line so far, because the marker arrives split
+                        // across however many chunks the CLI streams it in.
+                        if (!session.HandoverRequested && WantsHandover(assistant.Content))
+                            ApplyHandoverRequest(session, agent, choice);
+
                         Notify(session);
                         break;
 
@@ -714,6 +726,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                             ? evt.Text
                             : $"{evt.ToolName} {evt.Text}".Trim());
                         tool.ToolCallId = evt.ToolCallId;
+                        session.ToolCallCount++;
 
                         // A call that writes to a file carries the change itself, which is worth
                         // showing in brief: what an agent did to the code is the part of a turn a
@@ -774,6 +787,12 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                     case AgentEventKind.Result:
                         if (assistant.Content.Length == 0 && !string.IsNullOrWhiteSpace(evt.Text))
                             assistant.Content = evt.Text;
+
+                        // Some CLIs only ever report the answer here, so the marker is looked for
+                        // again rather than only in the streamed prose.
+                        if (!session.HandoverRequested && WantsHandover(assistant.Content))
+                            ApplyHandoverRequest(session, agent, choice);
+
                         break;
 
                     case AgentEventKind.Error:
@@ -1018,6 +1037,69 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
     /// the other; either way, two answers written by different models sit next to each other with
     /// nothing to tell them apart unless the change is recorded where it happened.
     /// </summary>
+    /// <summary>
+    /// What an agent writes to move itself onto the cheaper model. Matched case-insensitively, and
+    /// anywhere in an answer: a model asked for a marker on its own line will sometimes put it at
+    /// the end of a sentence, and refusing that would make the feature unreliable for no gain.
+    /// </summary>
+    public const string HandoverMarker = "[CHANGE MODEL]";
+
+    /// <summary>Whether an answer carries the change-model marker.</summary>
+    private static bool WantsHandover(string text) =>
+        text.Contains(HandoverMarker, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The cheaper model this conversation could move to on request, or null when there is nowhere
+    /// to go. First choice is the handover somebody configured — that pair is a stated intent about
+    /// this agent. Failing that, the next model down the list configured for the CLI, which is
+    /// written strongest first. A conversation on the CLI's own default model has neither, and is
+    /// left alone rather than moved somewhere nobody chose.
+    /// </summary>
+    private string? HandoverTarget(Agent agent, ChatSession session, ModelChoice choice)
+    {
+        if (session.HandoverRequested)
+            return null;
+
+        var settled = ModelSchedule.Settled(agent, session);
+        if (choice.IsOpening && settled.Model is { Length: > 0 } && settled.Model != choice.Model)
+            return settled.Model;
+
+        return ModelSchedule.NextDown(choice.Model, ModelsFor(agent));
+    }
+
+    private IReadOnlyList<string> ModelsFor(Agent agent) => agent.Provider switch
+    {
+        AiProvider.Claude => _options.ClaudeModels,
+        AiProvider.Codex => _options.CodexModels,
+        // A user-defined CLI keeps its models on its own definition, which this does not read. Its
+        // agents can still hand over, through a handover configured on the agent.
+        _ => [],
+    };
+
+    /// <summary>
+    /// Moves the conversation onto the cheaper model because the agent asked. The turn saying so is
+    /// already running on the model it is running on and cannot be switched under it, so this lands
+    /// on the next turn — which the transcript says, rather than letting the reader assume the
+    /// answer they are reading came from the cheaper one.
+    /// </summary>
+    private void ApplyHandoverRequest(ChatSession session, Agent agent, ModelChoice choice)
+    {
+        if (HandoverTarget(agent, session, choice) is not { } target)
+            return;
+
+        session.HandoverRequested = true;
+
+        // Ending the opening is enough when a handover was configured. When it was not, the target
+        // came from the model list and has to be written down, or nothing would change.
+        if (ModelSchedule.For(agent, session).Model != target)
+            session.Model = target;
+
+        AppendMessage(session, MessageRole.System,
+            $"The agent asked to change model. The rest of the conversation runs on {target}, from the next turn.");
+
+        _logger.LogInformation("Session {SessionId} handed over to {Model} at the agent's request", session.Id, target);
+    }
+
     private static void AnnounceModelChange(ChatSession session, ModelChoice choice)
     {
         if (session.TurnCount == 0)

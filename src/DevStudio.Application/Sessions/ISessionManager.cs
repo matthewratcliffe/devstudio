@@ -28,6 +28,12 @@ public sealed record StartSessionRequest
     /// </summary>
     public SessionModelSettings? Model { get; init; }
 
+    /// <summary>
+    /// Token-saving tactics for this conversation only, overriding the agent's. Null — the ordinary
+    /// case — follows the agent, including any change made to it later.
+    /// </summary>
+    public TokenTactics? TokenMinimisation { get; init; }
+
     public SessionTrigger Trigger { get; init; } = SessionTrigger.Manual;
     public string? WorkflowRunId { get; init; }
     public string? ScheduleId { get; init; }

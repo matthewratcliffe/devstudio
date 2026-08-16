@@ -305,6 +305,17 @@
 
             <div class="divider"></div>
 
+            <div class="section-tag">Token minimisation</div>
+            <p class="mono-dim">
+                How this agent should go about the work when tokens are worth saving. Each one is an
+                instruction carried in every turn's prompt, not something enforced here, and any chat
+                can change the selection for itself while it runs.
+            </p>
+            <TokenMinimisationPicker Value="_editing.TokenMinimisation"
+                                     ValueChanged="v => _editing.TokenMinimisation = v ?? TokenTactics.None" />
+
+            <div class="divider"></div>
+
             <div class="grid grid-2">
                 <div>
                     <div class="section-tag">Skills</div>
@@ -605,6 +616,7 @@
         SystemPrompt = agent.SystemPrompt,
         DefaultPrompt = agent.DefaultPrompt,
         PermissionMode = agent.PermissionMode,
+        TokenMinimisation = agent.TokenMinimisation,
         ProjectId = agent.ProjectId,
         AccountId = agent.AccountId,
         RepositoryId = agent.RepositoryId,

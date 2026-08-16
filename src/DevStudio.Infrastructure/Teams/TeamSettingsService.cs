@@ -314,6 +314,17 @@ public sealed class TeamSettingsService : ITeamSettingsService
             agent.OpeningEffort = Blank(definition.OpeningEffort);
             agent.OpeningTurns = Math.Max(0, definition.OpeningTurns);
             agent.PermissionMode = definition.PermissionMode;
+            agent.TokenMinimisation = TokenTactics.None;
+
+            foreach (var name in definition.TokenMinimisation)
+            {
+                if (Enum.TryParse<TokenTactics>(name?.Trim(), ignoreCase: true, out var tactic)
+                    && tactic != TokenTactics.None)
+                    agent.TokenMinimisation |= tactic;
+                else
+                    log.Add($"{relative}: no token minimisation tactic called '{name}'.");
+            }
+
             agent.SystemPrompt = definition.SystemPrompt;
             agent.DefaultPrompt = definition.DefaultPrompt;
             agent.UseWorktree = definition.UseWorktree;
@@ -658,6 +669,7 @@ public sealed class TeamSettingsService : ITeamSettingsService
               "permissionMode": "AcceptEdits",
               "systemPrompt": "You are working inside an isolated git worktree. Make focused changes and explain what you did.",
               "useWorktree": true,
+              "tokenMinimisation": ["PlanFirst", "NarrowReads", "StayInScope"],
               "skills": ["conventional-commits"],
               "accent": "cyan"
             }
