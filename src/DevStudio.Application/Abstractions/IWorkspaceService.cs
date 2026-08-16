@@ -50,10 +50,22 @@ public interface IWorkspaceService
     /// Agent instructions with the project's instructions layered on top. When a session id is
     /// supplied the agent is also told how to pull guidance for that session over MCP.
     /// </summary>
+    /// <param name="tactics">
+    /// Token-saving tactics in force for the turn, resolved from the agent and whatever the
+    /// conversation has overridden. Passed per turn rather than read off the agent so a tactic
+    /// switched on mid-chat lands on the next message.
+    /// </param>
+    /// <param name="handoverModel">
+    /// The cheaper model the agent may move itself onto, when there is one and it has not already
+    /// asked. Null leaves the marker unmentioned, because a marker with nowhere to go is an
+    /// instruction that would quietly do nothing.
+    /// </param>
     Task<string> ComposeSystemPromptAsync(
         Agent agent,
         string? projectId,
         string? sessionId = null,
+        TokenTactics tactics = TokenTactics.None,
+        string? handoverModel = null,
         CancellationToken ct = default);
 
     /// <summary>

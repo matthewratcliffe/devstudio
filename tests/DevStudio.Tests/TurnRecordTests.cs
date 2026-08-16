@@ -103,6 +103,102 @@ public class TurnRecordTests : IDisposable
             m.Content == "Model has changed from fable (high) to sonnet (low).");
     }
 
+    /// <summary>
+    /// The turn count is one way onto the cheaper model; the agent saying so is the other. The
+    /// answer carrying the marker was written by the model that was already running, so the change
+    /// lands on the turn after it.
+    /// </summary>
+    [Fact]
+    public async Task An_agent_can_ask_for_the_handover_before_the_turn_count_reaches_it()
+    {
+        var agent = await _agents.UpsertAsync(new Agent
+        {
+            Name = "Handover",
+            Model = "sonnet",
+            Effort = "low",
+            OpeningModel = "fable",
+            OpeningEffort = "high",
+            // Far enough out that nothing but the marker could end the opening.
+            OpeningTurns = 99,
+        });
+
+        _registry.Answer = "The plan is settled. [CHANGE MODEL]";
+        var session = await _sessions.StartAsync(new StartSessionRequest { AgentId = agent.Id, Prompt = "one" });
+        await WaitForTurnsAsync(session, 3);
+
+        Assert.True(session.HandoverRequested);
+        Assert.Contains(session.Messages, m =>
+            m.Role == MessageRole.System && m.Content.StartsWith("The agent asked to change model"));
+
+        // The turn that asked still ran on the opening model, and the next one does not.
+        Assert.Equal("fable", session.Messages.First(m => m.Role == MessageRole.Agent).Model);
+
+        await _sessions.SendAsync(session.Id, "two");
+        await WaitForTurnsAsync(session, 6);
+
+        Assert.Equal("sonnet", session.ModelInUse);
+        Assert.Contains(session.Messages, m =>
+            m.Role == MessageRole.System && m.Content == "Model has changed from fable (high) to sonnet (low).");
+    }
+
+    /// <summary>
+    /// With no handover configured there is still somewhere to go: the next model down the list
+    /// configured for the CLI, which is written strongest first.
+    /// </summary>
+    [Fact]
+    public async Task Asking_with_no_handover_configured_drops_to_the_next_model_down()
+    {
+        var agent = await _agents.UpsertAsync(new Agent { Name = "Solo", Provider = AiProvider.Claude, Model = "opus" });
+
+        _registry.Answer = "[change model]";
+        var session = await _sessions.StartAsync(new StartSessionRequest { AgentId = agent.Id, Prompt = "one" });
+        await WaitForTurnsAsync(session, 3);
+
+        Assert.Equal("sonnet", session.Model);
+
+        await _sessions.SendAsync(session.Id, "two");
+        await WaitForTurnsAsync(session, 6);
+
+        Assert.Equal("sonnet", session.ModelInUse);
+    }
+
+    /// <summary>Nothing to drop to, so the marker leaves the conversation where it is.</summary>
+    [Fact]
+    public async Task Asking_on_the_cheapest_model_changes_nothing()
+    {
+        var agent = await _agents.UpsertAsync(new Agent { Name = "Cheapest", Provider = AiProvider.Claude, Model = "fable" });
+
+        _registry.Answer = "[CHANGE MODEL]";
+        var session = await _sessions.StartAsync(new StartSessionRequest { AgentId = agent.Id, Prompt = "one" });
+        await WaitForTurnsAsync(session, 3);
+
+        Assert.False(session.HandoverRequested);
+
+        // Nothing written onto the conversation, so it keeps running on the agent's own model.
+        Assert.Null(session.Model);
+        Assert.Equal("fable", session.ModelInUse);
+    }
+
+    /// <summary>
+    /// Counted as they happen, because a compaction empties the transcript they would otherwise be
+    /// counted from.
+    /// </summary>
+    [Fact]
+    public async Task Tool_calls_are_counted_across_the_conversation()
+    {
+        var agent = await _agents.UpsertAsync(new Agent { Name = "Busy", Model = "sonnet" });
+        var session = await _sessions.StartAsync(new StartSessionRequest { AgentId = agent.Id, Prompt = "one" });
+
+        await WaitForTurnsAsync(session, 3);
+        Assert.Equal(1, session.ToolCallCount);
+
+        await _sessions.SendAsync(session.Id, "two");
+        await WaitForTurnsAsync(session, 6);
+
+        var stored = await _sessions.GetAsync(session.Id);
+        Assert.Equal(2, stored!.ToolCallCount);
+    }
+
     [Fact]
     public async Task Staying_on_one_model_says_nothing()
     {
@@ -215,6 +311,9 @@ public class TurnRecordTests : IDisposable
     {
         public bool Silent { get; init; }
 
+        /// <summary>What the second answer of the turn says, for testing markers in an answer.</summary>
+        public string Answer { get; init; } = "done";
+
         public AiProvider Provider => AiProvider.Claude;
         public string DisplayName => "stub";
         public IReadOnlyList<LoginMethod> SupportedLoginMethods => [];
@@ -237,7 +336,7 @@ public class TurnRecordTests : IDisposable
                 Edit = new FileEdit("src/App.cs", "old line", "new line"),
             };
             yield return new AgentEvent(AgentEventKind.Usage, string.Empty) { Usage = new TokenUsage(100, 10, 20, 10) };
-            yield return AgentEvent.Text_("done");
+            yield return AgentEvent.Text_(Answer);
         }
 
         public Task<ProviderAuthStatus> GetAuthStatusAsync(string? homePath = null, CancellationToken ct = default) =>
@@ -254,11 +353,14 @@ public class TurnRecordTests : IDisposable
         /// <summary>Hands back a CLI that answers with nothing at all.</summary>
         public bool Silent { get; set; }
 
+        /// <summary>What every answer says, so a turn can carry a marker.</summary>
+        public string Answer { get; set; } = "done";
+
         public IReadOnlyList<IProviderCli> All => [];
-        public IProviderCli Get(AiProvider provider) => new ReportingCli { Silent = Silent };
+        public IProviderCli Get(AiProvider provider) => new ReportingCli { Silent = Silent, Answer = Answer };
 
         public Task<IProviderCli> ResolveAsync(AiProvider provider, string? cliProviderId, CancellationToken ct = default) =>
-            Task.FromResult<IProviderCli>(new ReportingCli { Silent = Silent });
+            Task.FromResult<IProviderCli>(new ReportingCli { Silent = Silent, Answer = Answer });
 
         public Task<IReadOnlyList<IProviderCli>> GetAllAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<IProviderCli>>([]);
@@ -292,7 +394,7 @@ public class TurnRecordTests : IDisposable
         public Task MaterialiseProjectFilesAsync(string projectId, string workspacePath, CancellationToken ct = default) => Task.CompletedTask;
         public Task MaterialiseGlobalFilesAsync(string workspacePath, CancellationToken ct = default) => Task.CompletedTask;
 
-        public Task<string> ComposeSystemPromptAsync(Agent agent, string? projectId, string? sessionId = null, CancellationToken ct = default) =>
+        public Task<string> ComposeSystemPromptAsync(Agent agent, string? projectId, string? sessionId = null, TokenTactics tactics = TokenTactics.None, string? handoverModel = null, CancellationToken ct = default) =>
             Task.FromResult(string.Empty);
 
         public Task WriteGuidanceAsync(string workspacePath, IEnumerable<GuidanceMessage> guidance, CancellationToken ct = default) =>

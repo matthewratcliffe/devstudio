@@ -63,6 +63,13 @@ public sealed class Agent : Entity
 
     public PermissionMode PermissionMode { get; set; } = PermissionMode.AcceptEdits;
 
+    /// <summary>
+    /// Cost-saving ways of working this agent is told to adopt, composed into the system prompt as
+    /// its own section. None — the default — leaves the CLI to work however it normally would. A
+    /// conversation can override the selection for itself at any point.
+    /// </summary>
+    public TokenTactics TokenMinimisation { get; set; } = TokenTactics.None;
+
     /// <summary>Project the agent belongs to. Its instructions and files travel with every session.</summary>
     public string? ProjectId { get; set; }
 

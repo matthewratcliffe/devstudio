@@ -93,6 +93,11 @@
         <div class="section-tag">Model</div>
         <ModelPicker @bind-Value="_model" Models="_models" Efforts="_efforts" />
 
+        <div class="divider"></div>
+        <div class="section-tag">Token minimisation</div>
+        <TokenMinimisationPicker Value="_tokenMinimisation"
+                                 ValueChanged="v => _tokenMinimisation = v ?? TokenTactics.None" />
+
         @if (_mcpServers.Count > 0)
         {
             <div class="divider"></div>
@@ -131,6 +136,12 @@
     private readonly HashSet<string> _selectedMcp = [];
 
     private SessionModelSettings _model = new();
+
+    /// <summary>
+    /// Chosen for the chat itself: a quick chat has no agent anyone configured, so there is nothing
+    /// above it to inherit from and nothing to follow.
+    /// </summary>
+    private TokenTactics _tokenMinimisation = TokenTactics.None;
     private IReadOnlyList<string> _models = [];
     private IReadOnlyList<string> _efforts = [];
 
@@ -220,7 +231,8 @@
             var (provider, cliProviderId) = Resolve();
 
             var session = await QuickChats.StartAsync(
-                provider, cliProviderId, _prompt, _selectedMcp.ToList(), _permissionMode, _model);
+                provider, cliProviderId, _prompt, _selectedMcp.ToList(), _permissionMode, _model,
+                _tokenMinimisation);
 
             Nav.NavigateTo($"/chat/{session.Id}");
         }

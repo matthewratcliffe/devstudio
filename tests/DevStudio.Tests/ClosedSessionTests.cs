@@ -230,7 +230,7 @@ public class ClosedSessionTests : IDisposable
         public Task MaterialiseProjectFilesAsync(string projectId, string workspacePath, CancellationToken ct = default) => Task.CompletedTask;
         public Task MaterialiseGlobalFilesAsync(string workspacePath, CancellationToken ct = default) => Task.CompletedTask;
 
-        public Task<string> ComposeSystemPromptAsync(Agent agent, string? projectId, string? sessionId = null, CancellationToken ct = default) =>
+        public Task<string> ComposeSystemPromptAsync(Agent agent, string? projectId, string? sessionId = null, TokenTactics tactics = TokenTactics.None, string? handoverModel = null, CancellationToken ct = default) =>
             Task.FromResult(string.Empty);
 
         public Task WriteGuidanceAsync(string workspacePath, IEnumerable<GuidanceMessage> guidance, CancellationToken ct = default) =>

@@ -32,13 +32,37 @@ public static class ModelSchedule
         var openingEffort = Blank(session.OpeningEffort) ?? Blank(agent.OpeningEffort);
 
         // A handover needs a number of turns and something to differ in. Naming neither is the
-        // ordinary case: one model for the whole conversation.
-        if (openingTurns <= 0 || completedTurns >= openingTurns || (openingModel is null && openingEffort is null))
+        // ordinary case: one model for the whole conversation. The agent asking for the change
+        // itself ends the opening wherever the count had got to.
+        if (session.HandoverRequested
+            || openingTurns <= 0
+            || completedTurns >= openingTurns
+            || (openingModel is null && openingEffort is null))
             return new ModelChoice(model, effort, false);
 
         // Either half of the opening can be left blank to change only the other — "the same model,
         // thinking harder to begin with" is as reasonable as swapping the model outright.
         return new ModelChoice(openingModel ?? model, openingEffort ?? effort, true);
+    }
+
+    /// <summary>What the conversation settles on once its opening is over, however that happens.</summary>
+    public static ModelChoice Settled(Agent agent, ChatSession session) =>
+        For(agent, session, int.MaxValue);
+
+    /// <summary>
+    /// The next model down <paramref name="models"/> from <paramref name="current"/> — the lists are
+    /// written strongest first, so the one after it is the cheaper one. Null when the current model
+    /// is unknown, is not in the list, or is already the last of them: guessing at a model nobody
+    /// configured would be worse than leaving the conversation where it is.
+    /// </summary>
+    public static string? NextDown(string? current, IReadOnlyList<string> models)
+    {
+        if (Blank(current) is not { } model)
+            return null;
+
+        var index = models.ToList().FindIndex(m => string.Equals(m, model, StringComparison.OrdinalIgnoreCase));
+
+        return index >= 0 && index + 1 < models.Count ? models[index + 1] : null;
     }
 
     /// <summary>

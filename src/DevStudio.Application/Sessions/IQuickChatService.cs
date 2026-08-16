@@ -18,6 +18,7 @@ public interface IQuickChatService
         IReadOnlyList<string>? mcpServerIds = null,
         PermissionMode? permissionMode = null,
         SessionModelSettings? model = null,
+        TokenTactics? tokenMinimisation = null,
         CancellationToken ct = default);
 
     /// <summary>

@@ -22,6 +22,7 @@ public class ProjectProviderPinTests : IDisposable
     private readonly JsonEntityStore<Agent> _agents;
     private readonly JsonEntityStore<Project> _projects;
     private readonly RecordingRegistry _registry = new();
+    private readonly StubWorkspace _workspace;
     private readonly SessionManager _sessions;
 
     public ProjectProviderPinTests()
@@ -35,7 +36,7 @@ public class ProjectProviderPinTests : IDisposable
             Store<ChatSession>(options),
             _agents,
             _registry,
-            new StubWorkspace(_root),
+            _workspace = new StubWorkspace(_root),
             new StubAccounts(_root),
             _projects,
             options,
@@ -62,6 +63,55 @@ public class ProjectProviderPinTests : IDisposable
 
         Assert.Equal(AiProvider.Codex, session.Provider);
         Assert.Equal(AiProvider.Codex, _registry.LastResolved);
+    }
+
+    /// <summary>
+    /// The agent is rebuilt to run on the project's CLI, and everything else about it has to survive
+    /// that — token minimisation included, or a pinned project would quietly drop it.
+    /// </summary>
+    [Fact]
+    public async Task Token_minimisation_survives_a_projects_provider_override()
+    {
+        var agent = await _agents.UpsertAsync(new Agent
+        {
+            Name = "Claude agent",
+            Provider = AiProvider.Claude,
+            TokenMinimisation = TokenTactics.TerseReplies | TokenTactics.NarrowReads,
+        });
+        var project = await _projects.UpsertAsync(new Project { Name = "Codex shop", Provider = AiProvider.Codex });
+
+        await _sessions.StartAsync(new StartSessionRequest
+        {
+            AgentId = agent.Id,
+            Prompt = "hello",
+            ProjectId = project.Id,
+        });
+
+        await WaitForTurnAsync();
+
+        Assert.Equal(TokenTactics.TerseReplies | TokenTactics.NarrowReads, _workspace.LastTactics);
+    }
+
+    /// <summary>A chat's own selection wins over the agent's, from its very first turn.</summary>
+    [Fact]
+    public async Task A_sessions_own_tactics_override_the_agents()
+    {
+        var agent = await _agents.UpsertAsync(new Agent
+        {
+            Name = "Claude agent",
+            TokenMinimisation = TokenTactics.TerseReplies,
+        });
+
+        await _sessions.StartAsync(new StartSessionRequest
+        {
+            AgentId = agent.Id,
+            Prompt = "hello",
+            TokenMinimisation = TokenTactics.ScopedTests,
+        });
+
+        await WaitForTurnAsync();
+
+        Assert.Equal(TokenTactics.ScopedTests, _workspace.LastTactics);
     }
 
     [Fact]
@@ -187,8 +237,14 @@ public class ProjectProviderPinTests : IDisposable
         public Task MaterialiseProjectFilesAsync(string projectId, string workspacePath, CancellationToken ct = default) => Task.CompletedTask;
         public Task MaterialiseGlobalFilesAsync(string workspacePath, CancellationToken ct = default) => Task.CompletedTask;
 
-        public Task<string> ComposeSystemPromptAsync(Agent agent, string? projectId, string? sessionId = null, CancellationToken ct = default) =>
-            Task.FromResult(string.Empty);
+        /// <summary>What the last turn was told to save tokens with.</summary>
+        public TokenTactics LastTactics { get; private set; }
+
+        public Task<string> ComposeSystemPromptAsync(Agent agent, string? projectId, string? sessionId = null, TokenTactics tactics = TokenTactics.None, string? handoverModel = null, CancellationToken ct = default)
+        {
+            LastTactics = tactics;
+            return Task.FromResult(string.Empty);
+        }
 
         public Task WriteGuidanceAsync(string workspacePath, IEnumerable<GuidanceMessage> guidance, CancellationToken ct = default) =>
             Task.CompletedTask;

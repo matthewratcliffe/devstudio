@@ -101,6 +101,13 @@ public sealed class TeamAgentFile
     public int OpeningTurns { get; set; }
 
     public PermissionMode PermissionMode { get; set; } = PermissionMode.AcceptEdits;
+
+    /// <summary>
+    /// Token-saving tactics by name — <c>TerseReplies</c>, <c>NarrowReads</c> and the rest of
+    /// <see cref="TokenTactics"/>. Anything unrecognised is reported in the sync log and skipped.
+    /// </summary>
+    public List<string> TokenMinimisation { get; set; } = [];
+
     public string SystemPrompt { get; set; } = string.Empty;
     public string DefaultPrompt { get; set; } = string.Empty;
     public bool UseWorktree { get; set; } = true;
