@@ -92,6 +92,43 @@ public class ClaudeArgumentTests : IDisposable
     }
 
     [Fact]
+    public async Task The_cli_home_environment_selects_the_account_on_windows()
+    {
+        await ArgumentsFor(Turn());
+
+        var environment = _runner.LastRequest!.Environment!;
+        Assert.Equal(_root, environment["HOME"]);
+
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal(_root, environment["USERPROFILE"]);
+            Assert.Equal(Path.GetPathRoot(_root)![..2], environment["HOMEDRIVE"]);
+            Assert.Equal(
+                Path.DirectorySeparatorChar + _root[Path.GetPathRoot(_root)!.Length..],
+                environment["HOMEPATH"]);
+        }
+    }
+
+    [Fact]
+    public async Task Auth_status_uses_the_selected_account_home()
+    {
+        var options = Options.Create(new OrchestratorOptions { HomePath = _root, DataPath = _root });
+        var cli = new ClaudeCli(
+            _runner,
+            new StubProbe(),
+            new JsonEntityStore<McpServer>(options, NullLogger<JsonEntityStore<McpServer>>.Instance),
+            options,
+            NullLogger<ClaudeCli>.Instance);
+
+        await cli.GetAuthStatusAsync(_root);
+
+        var environment = _runner.LastRequest!.Environment!;
+        Assert.Equal(_root, environment["HOME"]);
+        if (OperatingSystem.IsWindows())
+            Assert.Equal(_root, environment["USERPROFILE"]);
+    }
+
+    [Fact]
     public async Task Running_outside_a_container_leaves_the_clis_own_sandbox_alone()
     {
         await ArgumentsFor(Turn(), alreadySandboxed: false);

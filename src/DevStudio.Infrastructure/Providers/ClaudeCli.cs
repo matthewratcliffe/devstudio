@@ -320,12 +320,9 @@ public sealed class ClaudeCli : IProviderCli
 
     private Dictionary<string, string> BuildEnvironment(TurnRequest request)
     {
-        var environment = new Dictionary<string, string>
-        {
-            // HOME is how an account is selected — the CLI reads its credentials from there.
-            ["HOME"] = request.HomeDirectory ?? _options.HomePath,
-            ["CLAUDE_CODE_NONINTERACTIVE"] = "1",
-        };
+        var home = request.HomeDirectory ?? _options.HomePath;
+        var environment = BuildHomeEnvironment(home);
+        environment["CLAUDE_CODE_NONINTERACTIVE"] = "1";
 
         // The CLI otherwise wraps each command in bubblewrap, which cannot create its namespace
         // where unprivileged user namespaces are disabled: bwrap fails and the command dies before
@@ -340,6 +337,35 @@ public sealed class ClaudeCli : IProviderCli
 
         foreach (var pair in request.Environment)
             environment[pair.Key] = pair.Value;
+
+        return environment;
+    }
+
+    private static Dictionary<string, string> BuildHomeEnvironment(string home)
+    {
+        var environment = new Dictionary<string, string>
+        {
+            // Unix uses HOME. On Windows Node resolves its home from USERPROFILE, so both must
+            // point at the selected account or every account shares the process owner's .claude.
+            ["HOME"] = home,
+        };
+
+        if (OperatingSystem.IsWindows())
+        {
+            environment["USERPROFILE"] = home;
+
+            var root = Path.GetPathRoot(home);
+            if (!string.IsNullOrEmpty(root) && root.Length >= 2 && root[1] == ':')
+            {
+                environment["HOMEDRIVE"] = root[..2];
+                var relative = home[root.Length..];
+                environment["HOMEPATH"] = relative.Length == 0
+                    ? Path.DirectorySeparatorChar.ToString()
+                    : relative.StartsWith(Path.DirectorySeparatorChar)
+                        ? relative
+                        : Path.DirectorySeparatorChar + relative;
+            }
+        }
 
         return environment;
     }
@@ -678,7 +704,7 @@ public sealed class ClaudeCli : IProviderCli
 
         var version = await _runner.RunAsync(
             new ProcessRequest(_options.ClaudeExecutable, ["--version"], TimeoutSeconds: 30,
-                Environment: new Dictionary<string, string> { ["HOME"] = home }),
+                Environment: BuildHomeEnvironment(home)),
             ct);
 
         if (!version.Succeeded)
@@ -688,7 +714,7 @@ public sealed class ClaudeCli : IProviderCli
         // fallback for older CLI builds that lack the subcommand.
         var status = await _runner.RunAsync(
             new ProcessRequest(_options.ClaudeExecutable, ["auth", "status"], TimeoutSeconds: 30,
-                Environment: new Dictionary<string, string> { ["HOME"] = home }),
+                Environment: BuildHomeEnvironment(home)),
             ct);
 
         bool? loggedIn = null;

@@ -602,6 +602,24 @@
                 ["CODEX_HOME"] = Path.Combine(home, ".codex"),
             };
 
+        // Node resolves os.homedir() from USERPROFILE on Windows. Keep it aligned with HOME so
+        // Claude's credentials are written to the selected account directory during login too.
+        if (environment is not null && OperatingSystem.IsWindows())
+        {
+            environment["USERPROFILE"] = home!;
+            var root = Path.GetPathRoot(home!);
+            if (!string.IsNullOrEmpty(root) && root.Length >= 2 && root[1] == ':')
+            {
+                environment["HOMEDRIVE"] = root[..2];
+                var relative = home![root.Length..];
+                environment["HOMEPATH"] = relative.Length == 0
+                    ? Path.DirectorySeparatorChar.ToString()
+                    : relative.StartsWith(Path.DirectorySeparatorChar)
+                        ? relative
+                        : Path.DirectorySeparatorChar + relative;
+            }
+        }
+
         // A token flow is not interactive: the CLI reads standard input to the end and needs to see
         // it close, which a pseudo-terminal cannot do. Everything else wants the terminal.
         _session = await Terminals.StartAsync(
