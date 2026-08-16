@@ -499,7 +499,27 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         // Completing the writer rather than cancelling: the pump drains what it has, ends its loop
         // normally and hands the workspace back, where a cancel would settle the run as Cancelled.
         if (_live.TryRemove(sessionId, out var live))
+        {
             live.Turns.Writer.TryComplete();
+
+            // A turn in flight still owns session.Status until it lands, and would otherwise write
+            // over the closed state set below the moment it finishes — the same race SetStatusAsync
+            // guards against. Waited for here, with the same short grace, rather than cancelled, so
+            // the run is allowed to actually finish instead of settling as Cancelled.
+            try
+            {
+                await live.Pump.WaitAsync(TimeSpan.FromSeconds(5), ct);
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogWarning(
+                    "Session {SessionId} did not stop within the grace period; closing anyway", sessionId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogDebug(ex, "Session {SessionId} ended badly while being closed", sessionId);
+            }
+        }
 
         // A run that fell over keeps saying so. Everything else has now finished, whatever the pump
         // left it on while it waited for input that is never coming.
