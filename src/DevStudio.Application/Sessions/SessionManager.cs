@@ -37,6 +37,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
     }
 
     private readonly ConcurrentDictionary<string, LiveSession> _live = new();
+    private readonly ConcurrentDictionary<string, byte> _deleting = new();
     private readonly IEntityStore<ChatSession> _sessions;
     private readonly IEntityStore<Agent> _agents;
     private readonly IProviderCliRegistry _clis;
@@ -564,9 +565,28 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
 
     public async Task<bool> DeleteAsync(string sessionId, CancellationToken ct = default)
     {
-        await CancelAsync(sessionId);
+        if (_live.TryGetValue(sessionId, out var live))
+        {
+            _deleting[sessionId] = 0;
+            await CancelAsync(sessionId);
+
+            try
+            {
+                await live.Pump.WaitAsync(TimeSpan.FromSeconds(5), ct);
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogWarning("Session {SessionId} did not stop before deletion", sessionId);
+            }
+        }
+
         _live.TryRemove(sessionId, out _);
-        return await _sessions.DeleteAsync(sessionId, ct);
+        var deleted = await _sessions.DeleteAsync(sessionId, ct);
+
+        if (live is null || live.Pump.IsCompleted)
+            _deleting.TryRemove(sessionId, out _);
+
+        return deleted;
     }
 
     public async Task<ChatSession> RunToCompletionAsync(
@@ -649,6 +669,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         {
             live.Idle.TrySetResult();
             await ReleaseWorkspaceAsync(live);
+            _deleting.TryRemove(session.Id, out _);
         }
     }
 
@@ -1232,6 +1253,9 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
 
     private async Task PersistAsync(ChatSession session)
     {
+        if (_deleting.ContainsKey(session.Id))
+            return;
+
         try
         {
             session.UpdatedAt = DateTimeOffset.UtcNow;

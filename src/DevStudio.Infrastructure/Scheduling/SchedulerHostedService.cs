@@ -89,7 +89,7 @@ public sealed class SchedulerHostedService : BackgroundService
             if (next > now)
                 continue;
 
-            if (schedule.SkipIfRunning && _running.ContainsKey(schedule.Id))
+            if (schedule.SkipIfRunning && IsPreviousRunStillGoing(schedule))
             {
                 _logger.LogInformation("Schedule {Name} is still running; skipping this slot", schedule.Name);
                 schedule.NextRunAt = ComputeNext(schedule, now);
@@ -106,8 +106,19 @@ public sealed class SchedulerHostedService : BackgroundService
         }
     }
 
+    private bool IsPreviousRunStillGoing(Schedule schedule) =>
+        _running.ContainsKey(schedule.Id) ||
+        _sessions.Live.Any(session =>
+            session.ScheduleId == schedule.Id && session.IsWorking);
+
     /// <summary>Runs a schedule immediately, outside its normal timing. Used by the "Run now" button.</summary>
-    public Task TriggerAsync(Schedule schedule) => FireAsync(schedule);
+    public async Task TriggerAsync(Schedule schedule)
+    {
+        schedule.LastRunAt = DateTimeOffset.UtcNow;
+        schedule.RunCount++;
+        await _schedules.UpsertAsync(schedule);
+        await FireAsync(schedule);
+    }
 
     private async Task FireAsync(Schedule schedule)
     {

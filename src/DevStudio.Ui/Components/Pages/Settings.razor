@@ -1,0 +1,82 @@
+@page "/settings"
+@inject IEntityStore<GlobalSettings> SettingsStore
+@inject WorkspacePathPolicy PathPolicy
+
+<PageTitle>Settings · devStudio</PageTitle>
+
+<div class="card" style="margin-bottom:1.2rem">
+    <div class="section-tag">Workspace security</div>
+    <p class="small">
+        These controls apply to agent file tools, ACP file callbacks and workspace downloads. The
+        secure defaults keep every path inside its assigned workspace and reject symlinks.
+    </p>
+</div>
+
+<div class="card">
+    <div class="field-row">
+        <div>
+            <label for="validate-paths">Validate workspace paths</label>
+            <div class="hint">
+                Refuse paths outside the session workspace after normalisation. Disabling this lets
+                agents and browser downloads address any path they can reach.
+            </div>
+        </div>
+        <input id="validate-paths" type="checkbox" @bind="_settings.ValidateWorkspacePaths" />
+    </div>
+
+    <div class="field-row">
+        <div>
+            <label for="follow-symlinks">Follow workspace symlinks</label>
+            <div class="hint">
+                Allow existing symlinks while resolving workspace paths. With validation enabled,
+                their final target must still remain inside the workspace.
+            </div>
+        </div>
+        <input id="follow-symlinks" type="checkbox" @bind="_settings.FollowWorkspaceSymlinks" />
+    </div>
+
+    @if (!_settings.ValidateWorkspacePaths)
+    {
+        <div class="card" style="margin-top:1rem;border-color:var(--red,#f56565)">
+            <strong>Warning:</strong> path validation is disabled. Agents can read and write outside
+            their workspaces.
+        </div>
+    }
+    else if (_settings.FollowWorkspaceSymlinks)
+    {
+        <div class="card" style="margin-top:1rem;border-color:var(--amber,#f6c85f)">
+            Symlinks are enabled. Links to locations outside a workspace are still rejected while
+            path validation remains on.
+        </div>
+    }
+
+    <div class="btn-row" style="margin-top:1.2rem">
+        <button class="btn btn-primary" @onclick="SaveAsync">Save settings</button>
+        <span class="mono-dim">Applies to new and existing sessions immediately.</span>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private GlobalSettings _settings = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await SettingsStore.GetAsync(GlobalSettings.WellKnownId) ?? new GlobalSettings();
+        PathPolicy.Apply(_settings);
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader("Settings", "Security and application behaviour");
+    }
+
+    private async Task SaveAsync()
+    {
+        await SettingsStore.UpsertAsync(_settings);
+        PathPolicy.Apply(_settings);
+        Layout.Notify("Settings saved.", "ok");
+    }
+}

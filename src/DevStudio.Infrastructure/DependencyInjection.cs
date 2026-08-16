@@ -56,6 +56,8 @@ public static class DependencyInjection
 
         // Persistence — one JSON collection per entity type on the mounted volume.
         services.AddSingleton(typeof(IEntityStore<>), typeof(JsonEntityStore<>));
+        services.AddSingleton<WorkspacePathPolicy>();
+        services.AddHostedService<WorkspacePathPolicyLoader>();
 
         services.AddSingleton<IProcessRunner, ProcessRunner>();
 

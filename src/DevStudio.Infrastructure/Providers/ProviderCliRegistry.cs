@@ -3,6 +3,7 @@ using DevStudio.Application.Common;
 using DevStudio.Domain.Providers;
 using DevStudio.Infrastructure.Providers.Acp;
 using DevStudio.Infrastructure.Providers.OpenAi;
+using DevStudio.Infrastructure.Workspaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -19,6 +20,7 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
     private readonly IImageGenerationService _images;
     private readonly OrchestratorOptions _options;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly WorkspacePathPolicy _policy;
 
     public ProviderCliRegistry(
         IEnumerable<IProviderCli> clis,
@@ -29,7 +31,8 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
         ConversationStore conversations,
         IImageGenerationService images,
         IOptions<OrchestratorOptions> options,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        WorkspacePathPolicy policy)
     {
         _byProvider = clis.ToDictionary(c => c.Provider);
         _definitions = definitions;
@@ -40,6 +43,7 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
         _images = images;
         _options = options.Value;
         _loggerFactory = loggerFactory;
+        _policy = policy;
 
         All = _byProvider.Values.OrderBy(c => c.Provider).ToList();
     }
@@ -84,14 +88,15 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
     /// </summary>
     private IProviderCli Build(CliProvider definition) => definition.Transport switch
     {
-        CliTransport.Acp => new AcpCli(definition, _acp, _options, _loggerFactory.CreateLogger<AcpCli>()),
+        CliTransport.Acp => new AcpCli(definition, _acp, _options, _loggerFactory.CreateLogger<AcpCli>(), _policy),
         CliTransport.OpenAiCompatible => new OpenAiCompatibleCli(
             definition,
             _httpClients,
             _runner,
             _conversations,
             _images,
-            _loggerFactory.CreateLogger<OpenAiCompatibleCli>()),
+            _loggerFactory.CreateLogger<OpenAiCompatibleCli>(),
+            _policy),
         _ => new CustomCli(definition, _runner, _options, _loggerFactory.CreateLogger<CustomCli>()),
     };
 }
