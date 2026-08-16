@@ -205,6 +205,13 @@ public sealed class ChatSession : Entity
     public bool HandoverRequested { get; set; }
 
     /// <summary>
+    /// The agent asked to end the conversation itself, by writing the end-conversation marker in an
+    /// answer. Closing the session mid-stream would cut the answer off, so this only records the
+    /// request; the pump closes the session once the turn that made it has finished.
+    /// </summary>
+    public bool AgentEndConversationRequested { get; set; }
+
+    /// <summary>
     /// Tool calls made across the whole conversation. Counted as they happen rather than totted up
     /// from the transcript, which a compaction empties — the same reason the token counters live
     /// here.

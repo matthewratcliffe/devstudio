@@ -526,6 +526,14 @@ public sealed class WorkspaceService : IWorkspaceService
             builder.AppendLine();
         }
 
+        builder.AppendLine("## Ending the conversation");
+        builder.AppendLine(
+            "When the task is genuinely finished and nothing further is expected from either side, "
+            + "write `[END CONVERSATION]` in your answer. The session closes once your answer has "
+            + "finished streaming and becomes read only from then on, so say what was done and why "
+            + "it is complete before writing the marker — not after.");
+        builder.AppendLine();
+
         if (!string.IsNullOrWhiteSpace(sessionId))
         {
             builder.AppendLine("## Guidance");
