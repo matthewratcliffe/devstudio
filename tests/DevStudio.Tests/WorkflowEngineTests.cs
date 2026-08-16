@@ -61,13 +61,11 @@ public class WorkflowEngineTests
 
         var engine = new WorkflowEngine(workflows, runs, sessions, NullLogger<WorkflowEngine>.Instance);
 
-        var started = DateTimeOffset.UtcNow;
         var run = await engine.RunAsync(workflow.Id, new Dictionary<string, string>(), "test");
-        var elapsed = DateTimeOffset.UtcNow - started;
 
         Assert.Equal(RunStatus.Succeeded, run.Status);
-        // Sequentially this would take at least 600ms.
-        Assert.True(elapsed < TimeSpan.FromMilliseconds(500), $"took {elapsed.TotalMilliseconds}ms");
+        // If the steps ran sequentially, no more than one would ever be in flight at once.
+        Assert.Equal(3, sessions.MaxConcurrent);
     }
 
     [Fact]
@@ -152,13 +150,22 @@ public class WorkflowEngineTests
 
         public event Action<ChatSession>? SessionUpdated;
 
+        private int _inFlight;
+        public int MaxConcurrent { get; private set; }
+
         public async Task<ChatSession> StartAsync(StartSessionRequest request, CancellationToken ct = default)
         {
             lock (Prompts)
                 Prompts.Add(request.Prompt);
 
+            var inFlight = Interlocked.Increment(ref _inFlight);
+            lock (Prompts)
+                MaxConcurrent = Math.Max(MaxConcurrent, inFlight);
+
             if (Delay > TimeSpan.Zero)
                 await Task.Delay(Delay, ct);
+
+            Interlocked.Decrement(ref _inFlight);
 
             var failed = FailPrompts.Contains(request.Prompt);
             var session = new ChatSession
