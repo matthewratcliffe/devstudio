@@ -31,5 +31,14 @@ public sealed class GlobalSettings : Entity
     /// </summary>
     public List<StoredFile> Files { get; set; } = [];
 
+    /// <summary>Whether agent and browser workspace paths must stay inside their workspace.</summary>
+    public bool ValidateWorkspacePaths { get; set; } = true;
+
+    /// <summary>
+    /// Whether existing symlinks may be resolved while validating workspace paths. Even when this
+    /// is enabled, a resolved target must still remain inside the workspace.
+    /// </summary>
+    public bool FollowWorkspaceSymlinks { get; set; }
+
     public GlobalSettings() => Id = WellKnownId;
 }

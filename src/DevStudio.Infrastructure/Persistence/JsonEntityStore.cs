@@ -78,7 +78,6 @@ public sealed class JsonEntityStore<T> : IEntityStore<T> where T : class, IEntit
             entity.Id = Guid.NewGuid().ToString("n");
 
         entity.UpdatedAt = DateTimeOffset.UtcNow;
-        _cache[entity.Id] = entity;
 
         await _writeLock.WaitAsync(ct);
         try
@@ -91,6 +90,7 @@ public sealed class JsonEntityStore<T> : IEntityStore<T> where T : class, IEntit
             }
             // Replace atomically so a crash mid-write cannot leave a truncated file behind.
             File.Move(temp, path, overwrite: true);
+            _cache[entity.Id] = entity;
         }
         finally
         {
@@ -105,7 +105,7 @@ public sealed class JsonEntityStore<T> : IEntityStore<T> where T : class, IEntit
     {
         await EnsureLoadedAsync(ct);
 
-        if (!_cache.TryRemove(id, out var removed))
+        if (!_cache.TryGetValue(id, out var removed))
             return false;
 
         await _writeLock.WaitAsync(ct);
@@ -114,6 +114,8 @@ public sealed class JsonEntityStore<T> : IEntityStore<T> where T : class, IEntit
             var path = PathFor(id);
             if (File.Exists(path))
                 File.Delete(path);
+
+            _cache.TryRemove(id, out _);
         }
         finally
         {

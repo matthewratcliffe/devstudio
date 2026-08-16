@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using DevStudio.Application.Abstractions;
 using DevStudio.Domain.Providers;
+using DevStudio.Infrastructure.Workspaces;
 using Microsoft.Extensions.Logging;
 
 namespace DevStudio.Infrastructure.Providers.OpenAi;
@@ -24,6 +25,7 @@ public sealed class OpenAiCompatibleCli : IProviderCli
     private readonly ConversationStore _conversations;
     private readonly IImageGenerationService? _images;
     private readonly ILogger _logger;
+    private readonly WorkspacePathPolicy _policy;
 
     public OpenAiCompatibleCli(
         CliProvider definition,
@@ -31,7 +33,8 @@ public sealed class OpenAiCompatibleCli : IProviderCli
         IProcessRunner runner,
         ConversationStore conversations,
         IImageGenerationService? images,
-        ILogger logger)
+        ILogger logger,
+        WorkspacePathPolicy? policy = null)
     {
         _definition = definition;
         _clients = clients;
@@ -39,6 +42,7 @@ public sealed class OpenAiCompatibleCli : IProviderCli
         _conversations = conversations;
         _images = images;
         _logger = logger;
+        _policy = policy ?? new WorkspacePathPolicy();
     }
 
     public AiProvider Provider => AiProvider.Custom;
@@ -113,7 +117,7 @@ public sealed class OpenAiCompatibleCli : IProviderCli
         // A forgotten session starts over rather than resuming half a conversation.
         var sessionId = request.ResumeSessionId ?? Guid.NewGuid().ToString("n");
 
-        var tools = new WorkspaceTools(request.WorkingDirectory, request.PermissionMode, _runner, _images, sessionId);
+        var tools = new WorkspaceTools(request.WorkingDirectory, request.PermissionMode, _runner, _images, sessionId, _policy);
         var messages = _conversations.Get(request.ResumeSessionId);
 
         var toolDefinitions = tools.Definitions();

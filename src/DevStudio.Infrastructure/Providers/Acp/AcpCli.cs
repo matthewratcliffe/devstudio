@@ -5,6 +5,7 @@ using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Providers;
+using DevStudio.Infrastructure.Workspaces;
 using Microsoft.Extensions.Logging;
 
 namespace DevStudio.Infrastructure.Providers.Acp;
@@ -24,17 +25,20 @@ public sealed class AcpCli : IProviderCli
     private readonly IAcpConnectionFactory _connections;
     private readonly OrchestratorOptions _options;
     private readonly ILogger _logger;
+    private readonly WorkspacePathPolicy _policy;
 
     public AcpCli(
         CliProvider definition,
         IAcpConnectionFactory connections,
         OrchestratorOptions options,
-        ILogger logger)
+        ILogger logger,
+        WorkspacePathPolicy? policy = null)
     {
         _definition = definition;
         _connections = connections;
         _options = options;
         _logger = logger;
+        _policy = policy ?? new WorkspacePathPolicy();
     }
 
     public AiProvider Provider => AiProvider.Custom;
@@ -75,7 +79,7 @@ public sealed class AcpCli : IProviderCli
                     BuildEnvironment(request),
                     ct);
 
-                await new Turn(connection, request, _definition, events.Writer, _logger).RunAsync(ct);
+                await new Turn(connection, request, _definition, events.Writer, _logger, _policy).RunAsync(ct);
             }
             catch (OperationCanceledException)
             {
@@ -128,9 +132,11 @@ public sealed class AcpCli : IProviderCli
         TurnRequest request,
         CliProvider definition,
         ChannelWriter<AgentEvent> events,
-        ILogger logger)
+        ILogger logger,
+        WorkspacePathPolicy policy)
     {
         private readonly Dictionary<int, TaskCompletionSource<JsonNode?>> _pending = [];
+        private readonly WorkspacePathPolicy _policy = policy;
         private int _nextId;
 
         public async Task RunAsync(CancellationToken ct)
@@ -574,10 +580,12 @@ public sealed class AcpCli : IProviderCli
             if (string.IsNullOrWhiteSpace(path))
                 throw new InvalidOperationException("No path was given.");
 
-            var root = Path.GetFullPath(request.WorkingDirectory);
-            var full = Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(root, path));
-
-            if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            if (!WorkspacePathGuard.TryResolveWithin(
+                    request.WorkingDirectory,
+                    path,
+                    out var full,
+                    _policy.ValidatePaths,
+                    _policy.FollowSymlinks))
                 throw new InvalidOperationException("That path is outside the workspace.");
 
             return full;

@@ -49,31 +49,93 @@ public sealed class FileLibraryService : IFileLibraryService
             throw new ArgumentException("A file name is required.", nameof(fileName));
 
         var files = await GetListAsync(scope, ct);
+        var originalFiles = files.ToList();
 
         var directory = GetFilesPath(scope);
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, safeName);
+        var tempPath = path + "." + Guid.NewGuid().ToString("n") + ".tmp";
+        var backupPath = path + "." + Guid.NewGuid().ToString("n") + ".bak";
 
-        await using (var target = File.Create(path))
+        await using (var target = File.Create(tempPath))
         {
             await content.CopyToAsync(target, ct);
         }
 
-        var info = new FileInfo(path);
-        var file = new StoredFile
+        var hadOriginal = File.Exists(path);
+
+        try
         {
-            FileName = safeName,
-            ContentType = contentType,
-            SizeBytes = info.Length,
-            IsText = TextExtensions.Contains(Path.GetExtension(safeName).ToLowerInvariant()),
-        };
+            if (hadOriginal)
+                File.Move(path, backupPath);
+            File.Move(tempPath, path);
 
-        // Re-uploading the same name replaces the entry rather than duplicating it.
-        files.RemoveAll(f => string.Equals(f.FileName, safeName, StringComparison.OrdinalIgnoreCase));
-        files.Add(file);
-        await SaveListAsync(scope, ct);
+            var info = new FileInfo(path);
+            var file = new StoredFile
+            {
+                FileName = safeName,
+                ContentType = contentType,
+                SizeBytes = info.Length,
+                IsText = TextExtensions.Contains(Path.GetExtension(safeName).ToLowerInvariant()),
+            };
 
-        return file;
+            // Re-uploading the same name replaces the entry rather than duplicating it.
+            files.RemoveAll(f => string.Equals(f.FileName, safeName, StringComparison.OrdinalIgnoreCase));
+            files.Add(file);
+
+            try
+            {
+                await SaveListAsync(scope, ct);
+            }
+            catch
+            {
+                files.Clear();
+                files.AddRange(originalFiles);
+                try
+                {
+                    await SaveListAsync(scope, CancellationToken.None);
+                }
+                catch
+                {
+                    // Preserve the original failure; the physical file is still restored below.
+                }
+
+                RestoreOriginalFile(path, backupPath, hadOriginal);
+                throw;
+            }
+
+            try
+            {
+                if (File.Exists(backupPath))
+                    File.Delete(backupPath);
+            }
+            catch
+            {
+                // The new file and metadata are committed; a failed cleanup is harmless and can
+                // be removed on a later upload.
+            }
+
+            return file;
+        }
+        catch
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+
+            if (File.Exists(backupPath))
+                RestoreOriginalFile(path, backupPath, hadOriginal);
+
+            throw;
+        }
+    }
+
+    private static void RestoreOriginalFile(string path, string backupPath, bool hadOriginal)
+    {
+        if (File.Exists(path))
+            File.Delete(path);
+
+        if (hadOriginal && File.Exists(backupPath))
+            File.Move(backupPath, path);
     }
 
     public async Task<bool> DeleteAsync(FileScope scope, string fileId, CancellationToken ct = default)

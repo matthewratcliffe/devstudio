@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using DevStudio.Application.Abstractions;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Images;
+using DevStudio.Infrastructure.Workspaces;
 
 namespace DevStudio.Infrastructure.Providers.OpenAi;
 
@@ -28,19 +29,22 @@ public sealed class WorkspaceTools
     private readonly IProcessRunner _runner;
     private readonly IImageGenerationService? _images;
     private readonly string? _sessionId;
+    private readonly WorkspacePathPolicy _policy;
 
     public WorkspaceTools(
         string workspace,
         PermissionMode mode,
         IProcessRunner runner,
         IImageGenerationService? images = null,
-        string? sessionId = null)
+        string? sessionId = null,
+        WorkspacePathPolicy? policy = null)
     {
         _root = Path.GetFullPath(workspace);
         _mode = mode;
         _runner = runner;
         _images = images;
         _sessionId = sessionId;
+        _policy = policy ?? new WorkspacePathPolicy();
     }
 
     /// <summary>
@@ -252,9 +256,12 @@ public sealed class WorkspaceTools
     /// <summary>Keeps every tool inside the session's own workspace.</summary>
     private string Resolve(string path)
     {
-        var full = Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(_root, path));
-
-        if (!full.StartsWith(_root, StringComparison.OrdinalIgnoreCase))
+        if (!WorkspacePathGuard.TryResolveWithin(
+                _root,
+                path,
+                out var full,
+                _policy.ValidatePaths,
+                _policy.FollowSymlinks))
             throw new InvalidOperationException("that path is outside the workspace");
 
         return full;

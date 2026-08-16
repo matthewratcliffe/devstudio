@@ -155,7 +155,10 @@ public sealed class WorkspaceService : IWorkspaceService
 
         foreach (var skill in selected)
         {
-            var slug = string.IsNullOrWhiteSpace(skill.Slug) ? TemplateRenderer.Slugify(skill.Name) : skill.Slug;
+            var slug = TemplateRenderer.Slugify(
+                string.IsNullOrWhiteSpace(skill.Slug) ? skill.Name : skill.Slug);
+            if (slug.Length == 0)
+                slug = skill.Id;
             var directory = Path.Combine(skillsRoot, slug);
             Directory.CreateDirectory(directory);
 

@@ -46,11 +46,16 @@ public sealed class WorkspaceFileService : IWorkspaceFileService
 
     private readonly IEntityStore<ChatSession> _sessions;
     private readonly ILogger<WorkspaceFileService> _logger;
+    private readonly WorkspacePathPolicy _policy;
 
-    public WorkspaceFileService(IEntityStore<ChatSession> sessions, ILogger<WorkspaceFileService> logger)
+    public WorkspaceFileService(
+        IEntityStore<ChatSession> sessions,
+        ILogger<WorkspaceFileService> logger,
+        WorkspacePathPolicy? policy = null)
     {
         _sessions = sessions;
         _logger = logger;
+        _policy = policy ?? new WorkspacePathPolicy();
     }
 
     public async Task<IReadOnlyList<WorkspaceFile>> ListAsync(string sessionId, int limit = 200, CancellationToken ct = default)
@@ -61,7 +66,7 @@ public sealed class WorkspaceFileService : IWorkspaceFileService
 
         try
         {
-            return EnumerateFiles(root)
+            return EnumerateFiles(root, _policy)
                 .Select(path => new FileInfo(path))
                 .OrderByDescending(file => file.LastWriteTimeUtc)
                 .Take(Math.Clamp(limit, 1, 1000))
@@ -96,13 +101,12 @@ public sealed class WorkspaceFileService : IWorkspaceFileService
         if (root is null || string.IsNullOrWhiteSpace(relativePath))
             return null;
 
-        // Resolve, then prove the result is still inside the workspace.
-        var candidate = Path.GetFullPath(Path.Combine(root, relativePath));
-        var rootWithSeparator = root.EndsWith(Path.DirectorySeparatorChar)
-            ? root
-            : root + Path.DirectorySeparatorChar;
-
-        if (!candidate.StartsWith(rootWithSeparator, PathComparison))
+        if (!WorkspacePathGuard.TryResolveWithin(
+                root,
+                relativePath,
+                out var candidate,
+                _policy.ValidatePaths,
+                _policy.FollowSymlinks))
         {
             _logger.LogWarning("Refused a workspace path outside session {SessionId}", sessionId);
             return null;
@@ -130,7 +134,7 @@ public sealed class WorkspaceFileService : IWorkspaceFileService
         return Directory.Exists(root) ? root : null;
     }
 
-    private static IEnumerable<string> EnumerateFiles(string root)
+    private static IEnumerable<string> EnumerateFiles(string root, WorkspacePathPolicy policy)
     {
         var queue = new Queue<string>();
         queue.Enqueue(root);
@@ -151,6 +155,15 @@ public sealed class WorkspaceFileService : IWorkspaceFileService
 
             foreach (var child in children)
             {
+                if (IsLink(child) && (!policy.FollowSymlinks ||
+                    !WorkspacePathGuard.TryResolveWithin(
+                        root,
+                        child,
+                        out _,
+                        policy.ValidatePaths,
+                        policy.FollowSymlinks)))
+                    continue;
+
                 var name = Path.GetFileName(child);
                 if (SkippedDirectories.Contains(name, StringComparer.OrdinalIgnoreCase))
                     continue;
@@ -169,7 +182,35 @@ public sealed class WorkspaceFileService : IWorkspaceFileService
             }
 
             foreach (var file in files)
-                yield return file;
+            {
+                if (!IsLink(file) || (policy.FollowSymlinks &&
+                    WorkspacePathGuard.TryResolveWithin(
+                        root,
+                        file,
+                        out _,
+                        policy.ValidatePaths,
+                        policy.FollowSymlinks)))
+                    yield return file;
+            }
+        }
+    }
+
+    private static bool IsLink(string path)
+    {
+        try
+        {
+            FileSystemInfo info = Directory.Exists(path)
+                ? new DirectoryInfo(path)
+                : new FileInfo(path);
+            return info.LinkTarget is not null;
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
         }
     }
 }
