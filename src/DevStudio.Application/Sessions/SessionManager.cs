@@ -748,6 +748,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                 SystemPrompt = systemPrompt,
                 ResumeSessionId = session.ProviderSessionId,
                 HomeDirectory = account.HomePath,
+                FallbackHomeDirectory = account.Fallback?.HomePath,
                 McpServerNames = mcpServerNames,
                 AllowedTools = AllowedTools(session),
                 Environment = agent.Environment,

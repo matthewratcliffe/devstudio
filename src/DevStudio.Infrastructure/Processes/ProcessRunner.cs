@@ -123,9 +123,10 @@ public sealed class ProcessRunner : IProcessRunner
 
     private static Process Create(ProcessRequest request)
     {
+        var executable = ResolveExecutable(request.FileName);
         var info = new ProcessStartInfo
         {
-            FileName = request.FileName,
+            FileName = executable.FileName,
             WorkingDirectory = request.WorkingDirectory ?? Environment.CurrentDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -136,8 +137,23 @@ public sealed class ProcessRunner : IProcessRunner
             StandardErrorEncoding = Encoding.UTF8,
         };
 
-        foreach (var argument in request.Arguments)
-            info.ArgumentList.Add(argument);
+        if (executable.IsWindowsScript)
+        {
+            // npm installs CLI entry points as .cmd shims on Windows. They are resolved by a
+            // shell, but cannot be launched directly by CreateProcess with UseShellExecute=false.
+            info.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
+            info.ArgumentList.Add("/d");
+            info.ArgumentList.Add("/s");
+            info.ArgumentList.Add("/c");
+            info.ArgumentList.Add(string.Join(" ",
+                new[] { QuoteCommandArgument(executable.FileName) }
+                    .Concat(request.Arguments.Select(QuoteCommandArgument))));
+        }
+        else
+        {
+            foreach (var argument in request.Arguments)
+                info.ArgumentList.Add(argument);
+        }
 
         if (request.Environment is not null)
         {
@@ -146,6 +162,43 @@ public sealed class ProcessRunner : IProcessRunner
         }
 
         return new Process { StartInfo = info, EnableRaisingEvents = true };
+    }
+
+    private static (string FileName, bool IsWindowsScript) ResolveExecutable(string fileName)
+    {
+        if (!OperatingSystem.IsWindows() || Path.IsPathFullyQualified(fileName) || fileName.Contains(Path.DirectorySeparatorChar))
+            return (fileName, IsWindowsScript(fileName));
+
+        var extensions = (Environment.GetEnvironmentVariable("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD")
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Prepend(string.Empty);
+        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+
+        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var extension in extensions)
+        {
+            var candidate = Path.Combine(directory.Trim('"'), fileName + extension);
+            if (File.Exists(candidate))
+                return (candidate, IsWindowsScript(candidate));
+        }
+
+        return (fileName, IsWindowsScript(fileName));
+    }
+
+    private static bool IsWindowsScript(string fileName) =>
+        OperatingSystem.IsWindows() &&
+        (fileName.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) ||
+         fileName.EndsWith(".bat", StringComparison.OrdinalIgnoreCase));
+
+    private static string QuoteCommandArgument(string argument)
+    {
+        if (argument.Length == 0)
+            return "\"\"";
+
+        if (!argument.Any(char.IsWhiteSpace) && !argument.Contains('"'))
+            return argument;
+
+        return $"\"{argument.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
     }
 
     private static void TryKill(Process process)

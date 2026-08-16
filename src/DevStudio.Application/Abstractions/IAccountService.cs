@@ -4,7 +4,11 @@ using DevStudio.Domain.Providers;
 namespace DevStudio.Application.Abstractions;
 
 /// <summary>The account a session will run under, and the home directory that makes it so.</summary>
-public sealed record ResolvedAccount(string? AccountId, string Name, string HomePath);
+public sealed record ResolvedAccount(
+    string? AccountId,
+    string Name,
+    string HomePath,
+    ResolvedAccount? Fallback = null);
 
 /// <summary>
 /// Picks which logged-in identity a CLI runs as. Precedence: the project's choice for that provider,

@@ -35,6 +35,8 @@ public sealed record TurnRequest
     /// container default.
     /// </summary>
     public string? HomeDirectory { get; init; }
+    /// <summary>Optional second account to try when the primary CLI invocation fails before producing output.</summary>
+    public string? FallbackHomeDirectory { get; init; }
 
     public IReadOnlyDictionary<string, string> Environment { get; init; } =
         new Dictionary<string, string>();

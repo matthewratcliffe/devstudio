@@ -57,6 +57,49 @@ public sealed class ClaudeCli : IProviderCli
         TurnRequest request,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
+        var buffered = new List<AgentEvent>();
+        var meaningful = false;
+        var failed = false;
+
+        await foreach (var evt in RunTurnOnceAsync(request, ct))
+        {
+            buffered.Add(evt);
+            meaningful |= evt.Kind is AgentEventKind.Text or AgentEventKind.Tool or AgentEventKind.Result;
+            failed |= evt.Kind == AgentEventKind.Error;
+        }
+
+        if (failed && !meaningful && !string.IsNullOrWhiteSpace(request.FallbackHomeDirectory))
+        {
+            yield return AgentEvent.Log("Primary Claude account failed before producing output; trying the backup account.");
+
+            await foreach (var evt in RunTurnOnceAsync(new TurnRequest
+            {
+                Prompt = request.Prompt,
+                WorkingDirectory = request.WorkingDirectory,
+                PermissionMode = request.PermissionMode,
+                Model = request.Model,
+                Effort = request.Effort,
+                SystemPrompt = request.SystemPrompt,
+                ResumeSessionId = null,
+                HomeDirectory = request.FallbackHomeDirectory,
+                McpServerNames = request.McpServerNames,
+                AllowedTools = request.AllowedTools,
+                Environment = request.Environment,
+                ExtraArguments = request.ExtraArguments,
+            }, ct))
+                yield return evt;
+
+            yield break;
+        }
+
+        foreach (var evt in buffered)
+            yield return evt;
+    }
+
+    private async IAsyncEnumerable<AgentEvent> RunTurnOnceAsync(
+        TurnRequest request,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
         var channel = Channel.CreateUnbounded<AgentEvent>();
         var arguments = BuildArguments(request);
 
