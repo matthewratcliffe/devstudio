@@ -1,19 +1,10 @@
 @* Which token-saving tactics are in force, for an agent or for one conversation. *@
 
-@if (Inherited is { } inherited)
-{
-    <label class="check">
-        <input type="checkbox" checked="@(Value is null)" disabled="@Disabled"
-               @onchange="e => FollowAsync(e.Value is true, inherited)" />
-        <span>Follow the agent (@TokenMinimisation.Describe(inherited))</span>
-    </label>
-}
-
 @foreach (var tactic in TokenMinimisation.All)
 {
     <label class="check" title="@tactic.Instruction">
         <input type="checkbox" checked="@TokenMinimisation.Has(Effective, tactic.Flag)"
-               disabled="@(Disabled || Following)"
+               disabled="@Disabled"
                @onchange="e => ToggleAsync(tactic.Flag, e.Value is true)" />
         <span>
             @tactic.Label
@@ -53,17 +44,8 @@
 
     [Parameter] public bool Disabled { get; set; }
 
-    private bool Following => Inherited is not null && Value is null;
-
     /// <summary>What is actually in force: the override when there is one, otherwise the agent's.</summary>
     private TokenTactics Effective => Value ?? Inherited ?? TokenTactics.None;
-
-    /// <summary>
-    /// Breaking away from the agent starts from what the agent already had rather than from nothing,
-    /// so a single tick does not silently switch every tactic off.
-    /// </summary>
-    private Task FollowAsync(bool follow, TokenTactics inherited) =>
-        EmitAsync(follow ? null : inherited);
 
     private Task ToggleAsync(TokenTactics tactic, bool on) =>
         EmitAsync(TokenMinimisation.With(Effective, tactic, on));
