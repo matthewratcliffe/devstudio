@@ -29,9 +29,11 @@ public static partial class UsageLimitBackoff
                 DateTimeStyles.AllowWhiteSpaces,
                 out var parsed))
         {
-            var local = now.ToLocalTime();
-            var reset = new DateTimeOffset(local.Date.Add(parsed.TimeOfDay), local.Offset);
-            if (reset <= local)
+            // The reset time is reported in the same wall-clock context as the
+            // timestamp supplied by the caller. Do not use the host machine's
+            // local timezone; CI and production hosts may run in UTC.
+            var reset = new DateTimeOffset(now.Date.Add(parsed.TimeOfDay), now.Offset);
+            if (reset <= now)
                 reset = reset.AddDays(1);
 
             until = reset.AddMinutes(1);
