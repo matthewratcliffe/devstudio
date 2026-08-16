@@ -90,7 +90,8 @@ public class ClosedSessionTests : IDisposable
 
         Assert.Contains("read only", thrown.Message);
         Assert.Contains("Merge requests", thrown.Message);
-        Assert.Equal(1, (await _store.GetAsync(session.Id))!.TurnCount);
+        // Your message and the answer to it, which is what one exchange counts as.
+        Assert.Equal(2, (await _store.GetAsync(session.Id))!.TurnCount);
     }
 
     [Fact]

@@ -1,7 +1,12 @@
 @* Model choices for one conversation, including a handover from an opening model to a cheaper one. *@
 
+@if (InUse is { Length: > 0 })
+{
+    <div class="in-use">Running now: <strong>@InUse</strong></div>
+}
+
 <div class="field">
-    <label>Model</label>
+    <label>Model @if (Marked && !OpeningInUse) { <span class="in-use-tag">in use</span> }</label>
     <select value="@(Value.Model ?? string.Empty)"
             @onchange="e => EmitAsync(Value with { Model = Blank(e.Value?.ToString()) })">
         <option value="">@DefaultLabel</option>
@@ -13,7 +18,7 @@
 </div>
 
 <div class="field">
-    <label>Thinking level</label>
+    <label>Thinking level @if (Marked && !OpeningInUse) { <span class="in-use-tag">in use</span> }</label>
     <select value="@(Value.Effort ?? string.Empty)"
             @onchange="e => EmitAsync(Value with { Effort = Blank(e.Value?.ToString()) })">
         <option value="">@DefaultLabel</option>
@@ -32,7 +37,7 @@
 @if (_handover)
 {
     <div class="field">
-        <label>Opening model</label>
+        <label>Opening model @if (Marked && OpeningInUse) { <span class="in-use-tag">in use</span> }</label>
         <select value="@(Value.OpeningModel ?? string.Empty)"
                 @onchange="e => EmitAsync(Value with { OpeningModel = Blank(e.Value?.ToString()) })">
             <option value="">Same as above</option>
@@ -44,7 +49,7 @@
     </div>
 
     <div class="field">
-        <label>Opening thinking level</label>
+        <label>Opening thinking level @if (Marked && OpeningInUse) { <span class="in-use-tag">in use</span> }</label>
         <select value="@(Value.OpeningEffort ?? string.Empty)"
                 @onchange="e => EmitAsync(Value with { OpeningEffort = Blank(e.Value?.ToString()) })">
             <option value="">Same as above</option>
@@ -76,7 +81,23 @@
     /// <summary>What the empty option falls back to — the CLI's own default, or the agent's choice.</summary>
     [Parameter] public string DefaultLabel { get; set; } = "CLI default";
 
+    /// <summary>
+    /// What the next turn will actually run on, spelled out above the fields. A handover means two
+    /// pairs of dropdowns, only one of which is in force at any moment, and reading the rule off
+    /// four selects and a turn count is work the panel can do for the reader instead.
+    /// </summary>
+    [Parameter] public string? InUse { get; set; }
+
+    /// <summary>True while the opening pair is the one in force, so the right pair is marked.</summary>
+    [Parameter] public bool OpeningInUse { get; set; }
+
     private bool _handover;
+
+    /// <summary>
+    /// Only a session in flight has a model in use; the same picker on a form for a chat that has
+    /// not started yet marks nothing, because nothing is running.
+    /// </summary>
+    private bool Marked => InUse is { Length: > 0 } && _handover;
 
     /// <summary>
     /// Opened by settings that already have a handover, and left open once the box is ticked so the
@@ -84,7 +105,11 @@
     /// </summary>
     protected override void OnParametersSet() => _handover |= Value.OpeningTurns is > 0;
 
-    /// <summary>Two model fields and a turn count do not read as one rule, so it is spelled out.</summary>
+    /// <summary>
+    /// Two model fields and a turn count do not read as one rule, so it is spelled out — including
+    /// what a turn is, because a number that counts your message and the answer separately is read
+    /// wrong by everyone who assumes it counts exchanges.
+    /// </summary>
     private string Summary
     {
         get
@@ -93,7 +118,8 @@
             var opening = Describe(Value.OpeningModel ?? Value.Model, Value.OpeningEffort ?? Value.Effort);
             var rest = Describe(Value.Model, Value.Effort);
 
-            return $"Turn{(turns == 1 ? "" : "s")} 1{(turns == 1 ? "" : $"–{turns}")} on {opening}, everything after on {rest}.";
+            return $"The first {turns} message{(turns == 1 ? "" : "s")} on {opening}, everything after on {rest}. " +
+                   "Your message and the answer are one each, so an exchange is two.";
         }
     }
 

@@ -87,6 +87,28 @@ public class PortSelectionTests
         }
     }
 
+    [Fact]
+    public void Listening_on_the_local_network_is_never_less_fussy_than_loopback()
+    {
+        // The wildcard bind is checked as well when the setting is on. Whether that catches a
+        // conflict depends on the platform — Windows lets 0.0.0.0 and a specific address share a
+        // port, Linux does not — but it can only ever rule a port out, never back in.
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+
+        try
+        {
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+            Assert.False(PortSelection.IsFree(port));
+            Assert.False(PortSelection.IsFree(port, allInterfaces: true));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
     private static bool CanBindIpv4(int port)
     {
         try

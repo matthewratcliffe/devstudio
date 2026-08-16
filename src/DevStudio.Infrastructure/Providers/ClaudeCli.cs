@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
@@ -63,6 +64,11 @@ public sealed class ClaudeCli : IProviderCli
         // connects from here and reports what the server actually said.
         var diagnoses = new ConcurrentBag<Task>();
 
+        // The CLI repeats one response's usage on every assistant event it splits that response
+        // into, so the message id each one carries is what keeps the same tokens from being
+        // counted several times over.
+        var counted = new HashSet<string>();
+
         DisableBashSandbox(request.HomeDirectory ?? _options.HomePath);
 
         var pump = Task.Run(async () =>
@@ -89,6 +95,9 @@ public sealed class ClaudeCli : IProviderCli
 
                         foreach (var evt in Translate(line, isError))
                         {
+                            if (evt.Kind == AgentEventKind.Usage && evt.Text.Length > 0 && !counted.Add(evt.Text))
+                                continue;
+
                             await channel.Writer.WriteAsync(evt, CancellationToken.None);
 
                             if (evt.Kind == AgentEventKind.Tool
@@ -367,9 +376,17 @@ public sealed class ClaudeCli : IProviderCli
                                 {
                                     ToolName = name,
                                     ToolCallId = block.TryGetProperty("id", out var callId) ? callId.GetString() : null,
+                                    Edit = DescribeEdit(name, block),
                                 };
                             }
                         }
+
+                        // Usage is reported per request to the model, so a turn that calls tools
+                        // reports it several times over as the conversation goes back and forth.
+                        // The id of the response it belongs to rides along, so a repeat of the same
+                        // response can be told apart from a new one.
+                        if (ReadUsage(message) is { IsEmpty: false } spent)
+                            yield return new AgentEvent(AgentEventKind.Usage, Text(message, "id") ?? string.Empty) { Usage = spent };
                     }
                     break;
 
@@ -510,6 +527,89 @@ public sealed class ClaudeCli : IProviderCli
 
         return input.ToString();
     }
+
+    /// <summary>
+    /// The change behind a tool call that writes to a file. Edit and MultiEdit swap one piece of
+    /// text for another, and Write hands over a whole file with nothing to compare it against, so
+    /// all of it counts as added.
+    /// </summary>
+    private static FileEdit? DescribeEdit(string? tool, JsonElement block)
+    {
+        if (!block.TryGetProperty("input", out var input) || input.ValueKind != JsonValueKind.Object)
+            return null;
+
+        var path = Text(input, "file_path") ?? Text(input, "path") ?? Text(input, "notebook_path");
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        switch (tool)
+        {
+            case "Edit":
+            case "NotebookEdit":
+                return new FileEdit(path, Text(input, "old_string") ?? Text(input, "old_source"),
+                    Text(input, "new_string") ?? Text(input, "new_source"));
+
+            case "Write":
+                return new FileEdit(path, After: Text(input, "content"));
+
+            case "MultiEdit":
+                // Every edit in one call is one change to one file, so they are shown as one diff.
+                if (!input.TryGetProperty("edits", out var edits) || edits.ValueKind != JsonValueKind.Array)
+                    return new FileEdit(path);
+
+                var before = new StringBuilder();
+                var after = new StringBuilder();
+
+                foreach (var edit in edits.EnumerateArray())
+                {
+                    if (edit.ValueKind != JsonValueKind.Object)
+                        continue;
+
+                    Append(before, Text(edit, "old_string"));
+                    Append(after, Text(edit, "new_string"));
+                }
+
+                return new FileEdit(path, before.ToString(), after.ToString());
+
+            default:
+                return null;
+        }
+
+        static void Append(StringBuilder builder, string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return;
+
+            if (builder.Length > 0)
+                builder.Append('\n');
+
+            builder.Append(text);
+        }
+    }
+
+    private static string? Text(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    /// <summary>
+    /// Tokens for one request, from the usage block the CLI attaches to a message. Cached tokens
+    /// are reported apart from ordinary input and are kept that way.
+    /// </summary>
+    private static TokenUsage? ReadUsage(JsonElement message)
+    {
+        if (!message.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
+            return null;
+
+        return new TokenUsage(
+            Number(usage, "input_tokens"),
+            Number(usage, "output_tokens"),
+            Number(usage, "cache_read_input_tokens"),
+            Number(usage, "cache_creation_input_tokens"));
+    }
+
+    private static int Number(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.TryGetInt32(out var number) ? number : 0;
 
     private static string DescribeToolInput(JsonElement block)
     {

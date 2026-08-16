@@ -21,7 +21,22 @@ public sealed class ServerProcess : IDisposable
 
     public int Port { get; private set; }
 
+    /// <summary>How this run is listening. Read once at start, because that is when it was applied.</summary>
+    public NetworkSettings Network { get; private set; } = new();
+
+    /// <summary>
+    /// Always loopback: the window and the health check are on this machine, and addressing the
+    /// server by its LAN address from here would only add a hop and a firewall to be refused by.
+    /// </summary>
     public string Url => $"http://127.0.0.1:{Port}/";
+
+    /// <summary>
+    /// What to hand somebody on another machine, when the setting is on. Empty when it is off, or
+    /// when this machine has no live network interface to be reached on.
+    /// </summary>
+    public IReadOnlyList<string> NetworkUrls => Network.ListenOnLocalNetwork
+        ? NetworkSettings.LocalAddresses().Select(address => $"http://{address}:{Port}/").ToList()
+        : [];
 
     public string Log
     {
@@ -33,7 +48,8 @@ public sealed class ServerProcess : IDisposable
     public void Start()
     {
         var executable = Locate();
-        Port = PortSelection.Choose(PreferredPort);
+        Network = NetworkSettings.Load();
+        Port = PortSelection.Choose(PreferredPort, Network.ListenOnLocalNetwork);
 
         var info = new ProcessStartInfo
         {
@@ -47,7 +63,7 @@ public sealed class ServerProcess : IDisposable
             StandardErrorEncoding = Encoding.UTF8,
         };
 
-        foreach (var pair in DesktopPaths.ServerEnvironment(Port))
+        foreach (var pair in DesktopPaths.ServerEnvironment(Port, Network.ListenOnLocalNetwork))
             info.Environment[pair.Key] = pair.Value;
 
         Directory.CreateDirectory(DesktopPaths.DataRoot);

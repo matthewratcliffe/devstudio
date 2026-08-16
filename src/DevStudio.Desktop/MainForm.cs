@@ -26,6 +26,7 @@ internal sealed class MainForm : Form
     private readonly NotifyIcon _tray;
     private readonly UpdateWatcher _updates = new();
     private ToolStripItem? _updateItem;
+    private ToolStripMenuItem? _networkItem;
     private readonly System.Windows.Forms.Timer _watchdog = new() { Interval = 4000 };
 
     private bool _quitting;
@@ -286,6 +287,21 @@ internal sealed class MainForm : Form
         menu.Items.Add("Reload the window (Ctrl+Shift+R)", null, async (_, _) => await HardReloadAsync());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Check tools…", null, (_, _) => ShowPreflight());
+
+        // The one piece of the server's configuration a desktop user has a reason to change, so it
+        // is here rather than in a settings file they would have to be told about.
+        _networkItem = new ToolStripMenuItem("Listen on local network", null, (_, _) => ToggleLocalNetwork())
+        {
+            Checked = _server.Network.ListenOnLocalNetwork,
+            // The environment variable is the last word, and a tick that cannot be changed is worse
+            // than no tick at all.
+            Enabled = !NetworkSettings.IsForcedByEnvironment,
+            ToolTipText = NetworkSettings.IsForcedByEnvironment
+                ? $"Set by {NetworkSettings.OverrideVariable}."
+                : "Reach devStudio from a phone or another machine on this network.",
+        };
+
+        menu.Items.Add(_networkItem);
         menu.Items.Add("Open data folder", null, (_, _) => OpenInBrowser(DesktopPaths.DataRoot));
         menu.Items.Add("Show server log", null, (_, _) => ShowLog());
         menu.Items.Add("Show update log", null, (_, _) => OpenInBrowser(UpdateLog.Path));
@@ -294,6 +310,76 @@ internal sealed class MainForm : Form
         menu.Items.Add("Quit", null, (_, _) => Quit());
 
         return menu;
+    }
+
+    /// <summary>
+    /// Turns network access on or off. It is applied when the server child starts, so the change
+    /// lands on the next launch rather than now: restarting the server here would take every agent
+    /// mid-turn with it, which is a steep price for a menu tick.
+    /// </summary>
+    private void ToggleLocalNetwork()
+    {
+        var current = NetworkSettings.Load();
+        var wanted = !current.ListenOnLocalNetwork;
+
+        if (wanted)
+        {
+            // Worth saying plainly. This is a desktop install: it runs as the user, reaches every
+            // drive on the machine, and the seeded account is still admin/admin until somebody
+            // changes it. On loopback none of that is reachable by anyone else.
+            var answer = Say(
+                "devStudio will listen on every network interface, so anything on this network can " +
+                "reach it — and it runs as you, with your files and your CLI logins." +
+                Environment.NewLine + Environment.NewLine +
+                "Change the admin password first if you have not already, and expect the firewall to " +
+                "ask whether to allow the connection." +
+                Environment.NewLine + Environment.NewLine +
+                "Turn it on? It takes effect the next time devStudio starts.",
+                "devStudio — listen on local network",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            if (answer != DialogResult.Yes)
+                return;
+        }
+
+        try
+        {
+            (current with { ListenOnLocalNetwork = wanted }).Save();
+        }
+        catch (Exception ex)
+        {
+            Say($"Could not save the setting.{Environment.NewLine}{ex.Message}", "devStudio");
+            return;
+        }
+
+        if (_networkItem is not null)
+            _networkItem.Checked = wanted;
+
+        Say(
+            wanted
+                ? "devStudio will listen on this network when it next starts." +
+                  Environment.NewLine + Environment.NewLine +
+                  AddressesToExpect()
+                : "devStudio will listen on 127.0.0.1 alone when it next starts, so only this " +
+                  "machine can reach it.",
+            "devStudio — listen on local network",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
+    }
+
+    /// <summary>
+    /// The URLs another machine would use. The port is the one this run took, which is the one the
+    /// next launch takes too unless something else has claimed it in between.
+    /// </summary>
+    private string AddressesToExpect()
+    {
+        var addresses = NetworkSettings.LocalAddresses();
+
+        return addresses.Count == 0
+            ? "This machine has no active network connection to be reached on yet."
+            : "Other machines will use:" + Environment.NewLine +
+              string.Join(Environment.NewLine, addresses.Select(a => $"  http://{a}:{_server.Port}/"));
     }
 
     private void Quit()

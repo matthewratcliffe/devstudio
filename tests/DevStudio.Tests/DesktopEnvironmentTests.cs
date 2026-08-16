@@ -46,6 +46,25 @@ public class DesktopEnvironmentTests
     }
 
     [Fact]
+    public void Loopback_is_the_default_because_the_shell_runs_as_the_user()
+    {
+        Assert.Equal("http://127.0.0.1:7080", DesktopPaths.ServerEnvironment(7080)["ASPNETCORE_URLS"]);
+    }
+
+    [Fact]
+    public void Asking_for_the_local_network_binds_every_interface()
+    {
+        var environment = DesktopPaths.ServerEnvironment(7080, listenOnLocalNetwork: true);
+
+        Assert.Equal("http://0.0.0.0:7080", environment["ASPNETCORE_URLS"]);
+
+        // Only the bind address changes. The MCP server's own URL is still the port, and everything
+        // else about a desktop install is what it was.
+        Assert.Equal("7080", environment["Orchestrator__HttpPort"]);
+        Assert.Equal("false", environment["Orchestrator__ContainerIsTheSandbox"]);
+    }
+
+    [Fact]
     public void Repositories_under_the_home_directory_are_attachable_without_any_mount()
     {
         var environment = DesktopPaths.ServerEnvironment(7080);

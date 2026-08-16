@@ -66,11 +66,42 @@ public enum AgentEventKind
     /// be given its duration.
     /// </summary>
     ToolCompleted = 7,
+
+    /// <summary>
+    /// Tokens the CLI has just charged for. Reported as a turn runs — once per request to the
+    /// model, so several arrive while tools are being used — and counted up as they come.
+    /// </summary>
+    Usage = 8,
 }
+
+/// <summary>
+/// Tokens one request to the model consumed. Cached reads and writes are kept apart from ordinary
+/// input because they are priced differently and a reader trying to understand a bill needs to see
+/// which is which.
+/// </summary>
+public sealed record TokenUsage(int Input = 0, int Output = 0, int CacheRead = 0, int CacheWrite = 0)
+{
+    public int Total => Input + Output + CacheRead + CacheWrite;
+
+    public bool IsEmpty => Total == 0;
+}
+
+/// <summary>
+/// A change a tool is making to a file, carried alongside the tool call so the transcript can show
+/// the change rather than only the path. CLIs report this two ways: some give the two versions of
+/// the text they are swapping, others a ready-made unified diff, so both are accepted.
+/// </summary>
+public sealed record FileEdit(string Path, string? Before = null, string? After = null, string? UnifiedDiff = null);
 
 public sealed record AgentEvent(AgentEventKind Kind, string Text)
 {
     public string? ToolName { get; init; }
+
+    /// <summary>Set on a tool call that writes to a file; null for every other kind of call.</summary>
+    public FileEdit? Edit { get; init; }
+
+    /// <summary>Set on a Usage event; null on everything else.</summary>
+    public TokenUsage? Usage { get; init; }
 
     /// <summary>The CLI's own id for a tool call, pairing a Tool event with its ToolCompleted.</summary>
     public string? ToolCallId { get; init; }

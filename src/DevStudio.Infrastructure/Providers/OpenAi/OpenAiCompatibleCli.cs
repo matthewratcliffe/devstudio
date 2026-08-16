@@ -154,6 +154,7 @@ public sealed class OpenAiCompatibleCli : IProviderCli
                 {
                     ToolName = call.Name,
                     ToolCallId = call.Id,
+                    Edit = FileWritten(call),
                 }, ct);
 
                 // This transport runs the tool itself, so the timing is measured rather than inferred.
@@ -363,6 +364,35 @@ public sealed class OpenAiCompatibleCli : IProviderCli
         new() { ["role"] = role, ["content"] = content };
 
     private static string Describe(ToolCall call) => Trim(call.Arguments, 200);
+
+    /// <summary>
+    /// The change behind a write_file call, so an edit made over this transport shows up in the
+    /// transcript the same way one made by a CLI does. This tool hands over a whole file with
+    /// nothing to compare it against, so all of it counts as added.
+    /// </summary>
+    private static FileEdit? FileWritten(ToolCall call)
+    {
+        if (call.Name != "write_file")
+            return null;
+
+        try
+        {
+            if (JsonNode.Parse(call.Arguments) is not JsonObject arguments)
+                return null;
+
+            var path = arguments["path"]?.GetValue<string>();
+
+            return string.IsNullOrWhiteSpace(path)
+                ? null
+                : new FileEdit(path, After: arguments["content"]?.GetValue<string>());
+        }
+        catch (JsonException)
+        {
+            // A model that streamed half an argument object is the tool call's problem, not the
+            // transcript's: the call still shows, just without its diff.
+            return null;
+        }
+    }
 
     private static string Trim(string text, int limit = 500) =>
         text.Length <= limit ? text : text[..limit] + "…";
