@@ -145,6 +145,7 @@ public sealed class SeedHostedService : IHostedService
             Description = "General-purpose implementation agent driving the claude CLI.",
             Provider = AiProvider.Claude,
             PermissionMode = PermissionMode.AcceptEdits,
+            TokenMinimisation = TokenTacticsDefaults.Recommended,
             SystemPrompt = "You are working inside an isolated git worktree. Make focused changes and explain what you did.",
             Accent = "cyan",
         }, ct);
@@ -155,6 +156,7 @@ public sealed class SeedHostedService : IHostedService
             Description = "Read-only reviewer driving the codex CLI.",
             Provider = AiProvider.Codex,
             PermissionMode = PermissionMode.Plan,
+            TokenMinimisation = TokenTacticsDefaults.Recommended,
             SystemPrompt = "Review the code you are given. Report concrete problems with file and line references. Do not edit files.",
             Accent = "magenta",
         }, ct);

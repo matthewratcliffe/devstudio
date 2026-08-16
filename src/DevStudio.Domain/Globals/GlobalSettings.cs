@@ -1,4 +1,5 @@
 using DevStudio.Domain.Common;
+using DevStudio.Domain.Agents;
 
 namespace DevStudio.Domain.Globals;
 
@@ -39,6 +40,12 @@ public sealed class GlobalSettings : Entity
     /// is enabled, a resolved target must still remain inside the workspace.
     /// </summary>
     public bool FollowWorkspaceSymlinks { get; set; }
+
+    /// <summary>
+    /// Token minimisation tactics preselected for newly created agents and quick chats. Existing
+    /// agents keep their own selection, and a chat can still override it.
+    /// </summary>
+    public TokenTactics DefaultTokenMinimisation { get; set; } = TokenTacticsDefaults.Recommended;
 
     public GlobalSettings() => Id = WellKnownId;
 }

@@ -55,4 +55,32 @@ public enum TokenTactics
     /// <c>[CHANGE MODEL]</c> marker.
     /// </summary>
     HandOverWhenMechanical = 1 << 13,
+
+    /// <summary>Carry established facts forward instead of asking or reading for them again.</summary>
+    ReuseContext = 1 << 14,
+
+    /// <summary>Do not investigate hypothetical branches or improvements without evidence or a request.</summary>
+    AvoidSpeculativeWork = 1 << 15,
+
+    /// <summary>Pass only the fields, paths and arguments a tool call actually needs.</summary>
+    MinimalToolInputs = 1 << 16,
+
+    /// <summary>Prefer diffs, status and summaries over resending unchanged source or full logs.</summary>
+    PreferDeltas = 1 << 17,
+}
+
+/// <summary>Named token tactic selections shared by settings and seeded agents.</summary>
+public static class TokenTacticsDefaults
+{
+    /// <summary>Safe defaults that reduce repetition without weakening verification.</summary>
+    public const TokenTactics Recommended =
+        TokenTactics.TerseReplies
+        | TokenTactics.NarrowReads
+        | TokenTactics.BatchTools
+        | TokenTactics.QuietCommands
+        | TokenTactics.StayInScope
+        | TokenTactics.SurgicalEdits
+        | TokenTactics.ReuseContext
+        | TokenTactics.MinimalToolInputs
+        | TokenTactics.PreferDeltas;
 }

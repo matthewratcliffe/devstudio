@@ -1,11 +1,23 @@
 using DevStudio.Application.Agents;
 using DevStudio.Domain.Agents;
+using DevStudio.Domain.Globals;
 using DevStudio.Domain.Sessions;
 
 namespace DevStudio.Tests;
 
 public class TokenMinimisationTests
 {
+    [Fact]
+    public void Recommended_defaults_are_catalogued_and_do_not_include_risky_shortcuts()
+    {
+        Assert.NotEqual(TokenTactics.None, TokenMinimisation.RecommendedDefaults);
+        Assert.Equal(TokenTacticsDefaults.Recommended, new GlobalSettings().DefaultTokenMinimisation);
+        Assert.All(TokenMinimisation.Selected(TokenMinimisation.RecommendedDefaults), tactic =>
+            Assert.True(TokenMinimisation.Has(TokenMinimisation.RecommendedDefaults, tactic.Flag)));
+        Assert.False(TokenMinimisation.Has(TokenMinimisation.RecommendedDefaults, TokenTactics.TrustResults));
+        Assert.False(TokenMinimisation.Has(TokenMinimisation.RecommendedDefaults, TokenTactics.HandOverWhenMechanical));
+    }
+
     [Fact]
     public void Nothing_selected_composes_nothing()
     {

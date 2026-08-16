@@ -50,9 +50,18 @@
         </div>
     }
 
+    <div class="divider"></div>
+    <div class="section-tag">Token minimisation defaults</div>
+    <p class="small">
+        These tactics are selected for new agents and quick chats. Existing agents keep their own
+        choices, and each chat can override them.
+    </p>
+    <TokenMinimisationPicker Value="_settings.DefaultTokenMinimisation"
+                             ValueChanged="SetDefaultTokenMinimisation" />
+
     <div class="btn-row" style="margin-top:1.2rem">
         <button class="btn btn-primary" @onclick="SaveAsync">Save settings</button>
-        <span class="mono-dim">Applies to new and existing sessions immediately.</span>
+        <span class="mono-dim">Workspace controls apply immediately; token defaults apply to new agents and quick chats.</span>
     </div>
 </div>
 
@@ -78,5 +87,11 @@
         await SettingsStore.UpsertAsync(_settings);
         PathPolicy.Apply(_settings);
         Layout.Notify("Settings saved.", "ok");
+    }
+
+    private Task SetDefaultTokenMinimisation(TokenTactics? tactics)
+    {
+        _settings.DefaultTokenMinimisation = tactics ?? TokenTactics.None;
+        return Task.CompletedTask;
     }
 }
