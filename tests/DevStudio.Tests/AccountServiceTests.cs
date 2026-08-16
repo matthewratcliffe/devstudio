@@ -78,6 +78,19 @@ public class AccountServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task The_next_account_is_available_as_a_backup()
+    {
+        var primary = await _service.CreateAsync("Personal", AiProvider.Claude);
+        var backup = await _service.CreateAsync("Work", AiProvider.Claude);
+
+        var resolved = await _service.ResolveAsync(new Agent { Provider = AiProvider.Claude }, null);
+
+        Assert.Equal(primary.Id, resolved.AccountId);
+        Assert.Equal(backup.Id, resolved.Fallback!.AccountId);
+        Assert.Equal(backup.HomePath, resolved.Fallback.HomePath);
+    }
+
+    [Fact]
     public async Task A_codex_agent_never_resolves_to_a_claude_account()
     {
         await _service.CreateAsync("Personal", AiProvider.Claude);

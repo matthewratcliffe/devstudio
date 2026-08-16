@@ -53,12 +53,12 @@ public sealed class AccountService : IAccountService
             };
 
             if (chosen is not null && all.FirstOrDefault(a => a.Id == chosen) is { } projectAccount)
-                return await MaterialiseAsync(projectAccount);
+                return await WithFallbackAsync(await MaterialiseAsync(projectAccount), all, agent, projectAccount, ct);
         }
 
         // 2. The agent's own pin, for work outside a project.
         if (agent.AccountId is not null && all.FirstOrDefault(a => a.Id == agent.AccountId) is { } agentAccount)
-            return await MaterialiseAsync(agentAccount);
+            return await WithFallbackAsync(await MaterialiseAsync(agentAccount), all, agent, agentAccount, ct);
 
         // 3. The default account for this provider — for a custom CLI, one of its own accounts.
         bool Matches(ProviderAccount account) =>
@@ -68,8 +68,28 @@ public sealed class AccountService : IAccountService
         var fallback = all.FirstOrDefault(a => Matches(a) && a.IsDefault) ?? all.FirstOrDefault(Matches);
 
         return fallback is not null
-            ? await MaterialiseAsync(fallback)
+            ? await WithFallbackAsync(await MaterialiseAsync(fallback), all, agent, fallback, ct)
             : new ResolvedAccount(null, "container default", _options.HomePath);
+    }
+
+    private async Task<ResolvedAccount> WithFallbackAsync(
+        ResolvedAccount primary,
+        IReadOnlyList<ProviderAccount> all,
+        Agent agent,
+        ProviderAccount primaryAccount,
+        CancellationToken ct)
+    {
+        // The default account is the primary; the next account for the same CLI is the backup.
+        // Explicit project/agent pins still get the same safety net, but never fall back to the
+        // account they already selected.
+        var backup = all.FirstOrDefault(account =>
+            account.Id != primaryAccount.Id &&
+            account.Provider == primaryAccount.Provider &&
+            (agent.Provider != AiProvider.Custom || account.CliProviderId == agent.CliProviderId));
+
+        return backup is null
+            ? primary
+            : primary with { Fallback = await MaterialiseAsync(backup) };
     }
 
     public async Task<string> GetHomePathAsync(string accountId, CancellationToken ct = default)
