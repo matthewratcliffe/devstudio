@@ -136,7 +136,8 @@ public static class DependencyInjection
         // Keeps the sessions list to current work. Resolvable on its own so the UI can sweep on
         // demand as well.
         services.AddSingleton<ISessionArchiver, SessionArchiver>();
-        services.AddHostedService<SessionArchiveHostedService>();
+        services.AddSingleton<ISessionIdleCloser, SessionIdleCloser>();
+        services.AddHostedService<SessionSweepHostedService>();
 
         return services;
     }

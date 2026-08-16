@@ -622,7 +622,26 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         var session = live.Session;
         var agent = live.Agent;
 
-        AppendMessage(session, MessageRole.User, prompt);
+        // The opening turns of a session can run on a different model from the rest, so this is
+        // resolved per turn rather than once when the session started, and before anything is said
+        // so every line of the turn can record what produced it.
+        var choice = ModelSchedule.For(agent, session);
+
+        // Where this turn's lines start, so the answers it produces can be counted at the end of it.
+        var opened = session.Messages.Count;
+
+        AppendMessage(session, MessageRole.User, prompt, model: choice.Model, effort: choice.Effort);
+
+        // Said before the count moves, so the first message of a session — which has nothing behind
+        // it to have changed from — is not announced as a change.
+        AnnounceModelChange(session, choice);
+
+        // A turn is a message: the one you just sent counts now, and whatever the agent says back
+        // counts when it has been said. The model for this turn was chosen a line above, off what
+        // had happened before you sent it.
+        session.TurnCount++;
+        session.ModelInUse = choice.Model;
+        session.EffortInUse = choice.Effort;
         session.Status = SessionStatus.Starting;
         session.StartedAt ??= DateTimeOffset.UtcNow;
         Notify(session);
@@ -646,7 +665,8 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                                """;
         }
 
-        var assistant = AppendMessage(session, MessageRole.Agent, string.Empty, streaming: true);
+        var assistant = AppendMessage(session, MessageRole.Agent, string.Empty, streaming: true,
+            model: choice.Model, effort: choice.Effort);
         session.Status = SessionStatus.Running;
         Notify(session);
 
@@ -664,11 +684,6 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             var account = await _accounts.ResolveAsync(agent, session.ProjectId, turnCts.Token);
             session.AccountId = account.AccountId;
             session.AccountName = account.Name;
-            // The opening turns of a session can run on a different model from the rest, so this is
-            // resolved per turn rather than once when the session started.
-            var choice = ModelSchedule.For(agent, session);
-            session.ModelInUse = choice.Model;
-
             var request = new TurnRequest
             {
                 Prompt = effectivePrompt,
@@ -695,17 +710,33 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                         break;
 
                     case AgentEventKind.Tool:
-                        // Close the current bubble so the tool call lands between prose, not inside it.
-                        if (assistant.Content.Length > 0)
-                        {
-                            assistant.IsStreaming = false;
-                            assistant = AppendMessage(session, MessageRole.Agent, string.Empty, streaming: true);
-                        }
-
                         var tool = AppendMessage(session, MessageRole.Tool, string.IsNullOrEmpty(evt.ToolName)
                             ? evt.Text
                             : $"{evt.ToolName} {evt.Text}".Trim());
                         tool.ToolCallId = evt.ToolCallId;
+
+                        // A call that writes to a file carries the change itself, which is worth
+                        // showing in brief: what an agent did to the code is the part of a turn a
+                        // reader most wants to check, and prose about it is not evidence.
+                        if (evt.Edit is { } edit)
+                        {
+                            var change = FileChangeSummary.Abridge(edit);
+                            tool.FilePath = edit.Path;
+                            tool.LinesAdded = change.Added;
+                            tool.LinesRemoved = change.Removed;
+                            tool.Diff = change.Diff;
+                        }
+
+                        // Close the current bubble so the tool call lands between prose, not inside
+                        // it, and open the next one after the call rather than before it — prose
+                        // that follows a tool call belongs below it in the transcript.
+                        if (assistant.Content.Length > 0)
+                        {
+                            assistant.IsStreaming = false;
+                            assistant = AppendMessage(session, MessageRole.Agent, string.Empty, streaming: true,
+                                model: choice.Model, effort: choice.Effort);
+                        }
+
                         Notify(session);
                         break;
 
@@ -719,6 +750,18 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                         {
                             called.DurationMs = evt.DurationMs
                                 ?? (int)Math.Max(0, (DateTimeOffset.UtcNow - called.Timestamp).TotalMilliseconds);
+                            Notify(session);
+                        }
+
+                        break;
+
+                    case AgentEventKind.Usage:
+                        // One of these arrives per request to the model, so a turn that uses tools
+                        // reports several and they add up rather than replace each other.
+                        if (evt.Usage is { IsEmpty: false } usage)
+                        {
+                            Count(assistant, usage);
+                            Count(session, usage);
                             Notify(session);
                         }
 
@@ -785,10 +828,19 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             live.TurnCancellation = null;
             _concurrency.Release();
             session.EndedAt = DateTimeOffset.UtcNow;
+
+            // The agent's half of the exchange, which is one message per answer it wrote — a turn
+            // interrupted by tool calls is several. Tool calls themselves are not messages and are
+            // not counted, and neither is an answer that never arrived. Counted here rather than
+            // after the persist below it, which used to save — and tell the UI about — a session
+            // whose count was behind what had actually run.
+            session.TurnCount += session.Messages
+                .Skip(opened)
+                .Count(m => m.Role == MessageRole.Agent && m.Content.Length > 0);
+
             await PersistAsync(session);
         }
 
-        session.TurnCount++;
         await SummariseIfDueAsync(live);
     }
 
@@ -808,7 +860,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         if (project is null || project.SummariseAfterTurns <= 0)
             return;
 
-        if (session.TurnCount == 0 || session.TurnCount % project.SummariseAfterTurns != 0)
+        if (session.TurnCount - session.LastSummarisedTurn < project.SummariseAfterTurns)
             return;
 
         var instruction = string.IsNullOrWhiteSpace(project.SummaryPrompt)
@@ -853,7 +905,13 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             {
                 if (evt.Kind is AgentEventKind.Text or AgentEventKind.Result)
                     summary.Append(evt.Text);
+                else if (evt is { Kind: AgentEventKind.Usage, Usage: { IsEmpty: false } used })
+                    Count(session, used);
             }
+
+            // Marked whether or not anything came back, so a summary that fails is not retried on
+            // every turn from here on.
+            session.LastSummarisedTurn = session.TurnCount;
 
             var text = summary.ToString().Trim();
             if (text.Length == 0)
@@ -863,7 +921,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             session.SummaryCount++;
             session.LastSummarisedAt = DateTimeOffset.UtcNow;
 
-            AppendMessage(session, MessageRole.Summary, text);
+            AppendMessage(session, MessageRole.Summary, text, model: choice.Model, effort: choice.Effort);
 
             if (project.CompactAfterSummary)
             {
@@ -871,7 +929,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                 // and the summary above becomes its context.
                 session.ProviderSessionId = null;
                 AppendMessage(session, MessageRole.System,
-                    $"Context compacted after {session.TurnCount} turns. The summary above carries forward.");
+                    $"Context compacted after {session.TurnCount} messages. The summary above carries forward.");
             }
 
             await PersistAsync(session);
@@ -933,11 +991,59 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         return live;
     }
 
-    private static ChatMessage AppendMessage(ChatSession session, MessageRole role, string content, bool streaming = false)
+    private static ChatMessage AppendMessage(
+        ChatSession session,
+        MessageRole role,
+        string content,
+        bool streaming = false,
+        string? model = null,
+        string? effort = null)
     {
-        var message = new ChatMessage { Role = role, Content = content, IsStreaming = streaming };
+        var message = new ChatMessage
+        {
+            Role = role,
+            Content = content,
+            IsStreaming = streaming,
+            Model = model,
+            Effort = effort,
+        };
+
         session.Messages = Published(session, session.Messages, list => list.Add(message));
         return message;
+    }
+
+    /// <summary>
+    /// Says in the transcript when a turn runs on something other than the last one did. The
+    /// handover from an opening model is the usual cause and changing the model mid-conversation is
+    /// the other; either way, two answers written by different models sit next to each other with
+    /// nothing to tell them apart unless the change is recorded where it happened.
+    /// </summary>
+    private static void AnnounceModelChange(ChatSession session, ModelChoice choice)
+    {
+        if (session.TurnCount == 0)
+            return;
+
+        var before = ModelSchedule.Describe(session.ModelInUse, session.EffortInUse);
+        var after = ModelSchedule.Describe(choice.Model, choice.Effort);
+
+        if (before == after)
+            return;
+
+        AppendMessage(session, MessageRole.System, $"Model has changed from {before} to {after}.");
+    }
+
+    private static void Count(ChatMessage message, TokenUsage usage)
+    {
+        message.InputTokens += usage.Input;
+        message.OutputTokens += usage.Output;
+        message.CacheTokens += usage.CacheRead + usage.CacheWrite;
+    }
+
+    private static void Count(ChatSession session, TokenUsage usage)
+    {
+        session.InputTokens += usage.Input;
+        session.OutputTokens += usage.Output;
+        session.CacheTokens += usage.CacheRead + usage.CacheWrite;
     }
 
     /// <summary>

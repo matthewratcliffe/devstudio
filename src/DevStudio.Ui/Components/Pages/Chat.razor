@@ -26,17 +26,34 @@ else
         <div class="chat-main">
             <div class="chat-scroll" @ref="_scrollElement">
             <div class="chat-thread">
+                @{ var runningTool = RunningToolId; }
                 @foreach (var message in _session.Messages)
                 {
                 if (message.Role == MessageRole.Tool)
                 {
-                    <details class="tool-call">
+                    <details class="tool-call @(message.FilePath is { Length: > 0 } ? "tool-edit" : "")" open="@(message.Id == runningTool)">
                         <summary>
                             <span class="caret">▾</span>
-                            <span>Tool call</span>
-                            @if (ToolNameOf(message) is { Length: > 0 } name)
+                            @if (message.FilePath is { Length: > 0 } changed)
                             {
-                                <span class="tool-name">@name</span>
+                                <span>Edited</span>
+                                <span class="tool-name" title="@changed">@FileNameOf(changed)</span>
+                                @if (message.LinesAdded is > 0)
+                                {
+                                    <span class="diff-added">+@message.LinesAdded</span>
+                                }
+                                @if (message.LinesRemoved is > 0)
+                                {
+                                    <span class="diff-removed">−@message.LinesRemoved</span>
+                                }
+                            }
+                            else
+                            {
+                                <span>Tool call</span>
+                                @if (ToolNameOf(message) is { Length: > 0 } name)
+                                {
+                                    <span class="tool-name">@name</span>
+                                }
                             }
                             <span class="mono-dim"><LocalTime Value="@message.Timestamp" Format="time" /></span>
                             @if (message.DurationMs is { } elapsed)
@@ -44,7 +61,19 @@ else
                                 <span class="tool-duration">@Elapsed(elapsed)</span>
                             }
                         </summary>
-                        <div class="body">@ToolDetailOf(message)</div>
+                        @if (message.Diff is { Length: > 0 } diff)
+                        {
+                            <div class="body diff">
+                                @foreach (var line in diff.Split('\n'))
+                                {
+                                    <div class="@DiffLineCss(line)">@line</div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="body">@ToolDetailOf(message)</div>
+                        }
                     </details>
                 }
                 else
@@ -54,7 +83,17 @@ else
                         {
                             <div class="who">
                                 <span>@Who(message)</span>
+                                @* On a user's own line the model that answered it would read as who wrote it. *@
+                                @if (message.Role != MessageRole.User && message.Model is { Length: > 0 }
+                                     && ModelSchedule.Describe(message.Model, message.Effort) is { } ran)
+                                {
+                                    <span class="msg-model" title="The model and thinking level this ran on">@ran</span>
+                                }
                                 <span class="mono-dim"><LocalTime Value="@message.Timestamp" Format="time" /></span>
+                                @if (message.TotalTokens > 0)
+                                {
+                                    <span class="msg-tokens" title="@TokenBreakdown(message)">@Tokens(message.TotalTokens) tok</span>
+                                }
                             </div>
                         }
                         @if (message.Role == MessageRole.Guidance && GuidanceFor(message) is { } guidance)
@@ -213,8 +252,19 @@ else
                     <span class="hint">Applies from your next message.</span>
                 </dd>
                 <dt>Account</dt><dd>@(_session.AccountName ?? "default")</dd>
-                <dt>Model</dt><dd>@(_session.ModelInUse ?? _session.Model ?? _agent?.Model ?? "CLI default")</dd>
-                <dt>Turns</dt><dd>@_session.TurnCount</dd>
+                <dt>Model</dt><dd>@ModelNow</dd>
+                <dt>Turns</dt>
+                <dd>
+                    @_session.TurnCount
+                    <span class="hint">Messages either way, not counting tool calls.</span>
+                </dd>
+                <dt>Tokens</dt>
+                <dd>
+                    @Tokens(_session.TotalTokens)
+                    <span class="hint">
+                        @Tokens(_session.InputTokens) in · @Tokens(_session.OutputTokens) out · @Tokens(_session.CacheTokens) cached
+                    </span>
+                </dd>
                 <dt>Trigger</dt><dd>@_session.Trigger</dd>
                 <dt>Directory</dt><dd>@_session.WorkingDirectory</dd>
                 <dt>Started</dt><dd>@if (_session.StartedAt is { } __t1) { <LocalTime Value="@__t1" Format="daytime" /> } else { <text>—</text> }</dd>
@@ -227,17 +277,29 @@ else
 
             @if (_session.AcceptsInput)
             {
+                <div class="btn-row" style="margin-top:0.8rem">
+                    <button class="btn btn-sm btn-danger" @onclick="EndConversationAsync">End conversation</button>
+                </div>
+                <div class="mono-dim">
+                    Marks it finished and read only — the transcript and its files stay. A
+                    conversation with nothing said in it for @IdleHours hours is finished on its own.
+                </div>
+            }
+
+            @if (_session.AcceptsInput)
+            {
                 <div class="divider"></div>
                 <div class="section-tag">Model</div>
                 <ModelPicker Value="_model" ValueChanged="SetModelAsync" Models="_models" Efforts="_efforts"
-                             DefaultLabel="Agent default" />
+                             DefaultLabel="Agent default" InUse="@ModelNow" OpeningInUse="@HandoverPending" />
                 <div class="mono-dim">
                     Applies from your next message.
                     @if (OpeningTurns > 0)
                     {
                         <text>
-                            @_session.TurnCount turn@(_session.TurnCount == 1 ? "" : "s") done, so the opening
-                            model @(HandoverPending ? "still covers the next one" : "has already handed over").
+                            @_session.TurnCount message@(_session.TurnCount == 1 ? "" : "s") exchanged of the
+                            first @OpeningTurns, so the opening model
+                            @(HandoverPending ? "still covers your next one" : "has already handed over").
                         </text>
                     }
                 </div>
@@ -709,6 +771,32 @@ else
         await SessionStore.UpsertAsync(_session);
     }
 
+    /// <summary>
+    /// How long a conversation may sit idle before it is finished without anyone asking, so the
+    /// panel states the rule rather than leaving it to be discovered.
+    /// </summary>
+    private int IdleHours => Options.Value.SessionIdleFinishHours;
+
+    /// <summary>
+    /// Ends the conversation by hand. There is no reopening it — the workspace it was holding goes
+    /// back — so it is said plainly rather than tucked into a menu, and the transcript stays.
+    /// </summary>
+    private async Task EndConversationAsync()
+    {
+        if (_session is null)
+            return;
+
+        try
+        {
+            _session = await Sessions.CloseAsync(_session.Id, "Ended from the chat.") ?? _session;
+            Layout.Notify("Conversation finished. It is read only from here.", "ok");
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify(ex.Message, "err");
+        }
+    }
+
     private async Task SaveNotesAsync()
     {
         if (_session is null)
@@ -812,6 +900,62 @@ else
     };
 
     /// <summary>A tool event is stored as "name detail", so the name is the first token.</summary>
+    /// <summary>What the conversation is running on right now, named the same way everywhere.</summary>
+    private string ModelNow => _session is null
+        ? "CLI default"
+        : _agent is null
+            ? ModelSchedule.Describe(_session.ModelInUse ?? _session.Model, _session.EffortInUse ?? _session.Effort)
+            : ModelSchedule.Describe(ModelSchedule.For(_agent, _session).Model, ModelSchedule.For(_agent, _session).Effort);
+
+    /// <summary>
+    /// The one tool call worth leaving open: the last one, while it is still running and nothing
+    /// has been said since. Watching what the agent is doing right now is worth the room; a call
+    /// that has finished, been answered, or been followed by another is history and shuts itself.
+    /// Read once per render rather than asked of every line, which would walk the transcript again
+    /// for each of them.
+    /// </summary>
+    private string? RunningToolId
+    {
+        get
+        {
+            if (_session is not { IsLive: true } session)
+                return null;
+
+            for (var i = session.Messages.Count - 1; i >= 0; i--)
+            {
+                var message = session.Messages[i];
+
+                if (message.Role == MessageRole.Tool)
+                    return message.DurationMs is null ? message.Id : null;
+
+                // The empty bubble waiting on the next answer is not something said yet.
+                if (message.Content.Length > 0)
+                    return null;
+            }
+
+            return null;
+        }
+    }
+
+    private static string DiffLineCss(string line) => line.StartsWith('+')
+        ? "diff-line diff-added"
+        : line.StartsWith('-') ? "diff-line diff-removed" : "diff-line";
+
+    /// <summary>The file's own name; the path it sits at is one hover away and too long for a line.</summary>
+    private static string FileNameOf(string path) =>
+        path.Split('/', '\\').LastOrDefault() is { Length: > 0 } name ? name : path;
+
+    /// <summary>Token counts get long quickly, and to the nearest hundred is close enough to read.</summary>
+    private static string Tokens(int count) => count switch
+    {
+        >= 1_000_000 => (count / 1_000_000d).ToString("0.#") + "m",
+        >= 1_000 => (count / 1_000d).ToString("0.#") + "k",
+        _ => count.ToString(),
+    };
+
+    private static string TokenBreakdown(ChatMessage message) =>
+        $"{message.InputTokens} in · {message.OutputTokens} out · {message.CacheTokens} cached";
+
     private static string ToolNameOf(ChatMessage message)
     {
         var space = message.Content.IndexOf(' ');

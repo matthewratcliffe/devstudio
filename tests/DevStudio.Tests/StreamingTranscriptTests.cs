@@ -215,6 +215,76 @@ public class StreamingTranscriptTests : IDisposable
         Assert.Single(events, e => e.Kind == AgentEventKind.Tool);
     }
 
+    [Fact]
+    public async Task Claude_reports_the_change_an_edit_makes_not_just_the_path()
+    {
+        var cli = Claude(
+            """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"src/App.cs","old_string":"var a = 1;","new_string":"var a = 2;"}}]}}""");
+
+        var call = Assert.Single(await EventsOf(cli, Turn()), e => e.Kind == AgentEventKind.Tool);
+
+        Assert.Equal("src/App.cs", call.Edit?.Path);
+        Assert.Equal("var a = 1;", call.Edit?.Before);
+        Assert.Equal("var a = 2;", call.Edit?.After);
+    }
+
+    [Fact]
+    public async Task Claude_treats_a_written_file_as_all_new()
+    {
+        var cli = Claude(
+            """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Write","input":{"file_path":"notes.md","content":"one\ntwo"}}]}}""");
+
+        var call = Assert.Single(await EventsOf(cli, Turn()), e => e.Kind == AgentEventKind.Tool);
+
+        Assert.Null(call.Edit?.Before);
+        Assert.Equal("one\ntwo", call.Edit?.After);
+    }
+
+    [Fact]
+    public async Task A_call_that_touches_no_file_carries_no_change()
+    {
+        var cli = Claude(
+            """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}""");
+
+        Assert.Null(Assert.Single(await EventsOf(cli, Turn()), e => e.Kind == AgentEventKind.Tool).Edit);
+    }
+
+    [Fact]
+    public async Task Claude_reports_the_tokens_a_request_spent()
+    {
+        var cli = Claude(
+            """{"type":"assistant","message":{"content":[],"usage":{"input_tokens":120,"output_tokens":30,"cache_read_input_tokens":900,"cache_creation_input_tokens":40}}}""");
+
+        var usage = Assert.Single(await EventsOf(cli, Turn()), e => e.Kind == AgentEventKind.Usage).Usage;
+
+        Assert.Equal(new TokenUsage(120, 30, 900, 40), usage);
+        Assert.Equal(1090, usage!.Total);
+    }
+
+    [Fact]
+    public async Task Codex_counts_the_last_request_rather_than_the_running_total()
+    {
+        var cli = Codex(
+            """{"msg":{"type":"token_count","info":{"total_token_usage":{"input_tokens":9000,"output_tokens":500},"last_token_usage":{"input_tokens":300,"cached_input_tokens":100,"output_tokens":20}}}}""");
+
+        var usage = Assert.Single(await EventsOf(cli, Turn()), e => e.Kind == AgentEventKind.Usage).Usage;
+
+        // Cached input is counted inside codex's input total, so it is taken back out of it here.
+        Assert.Equal(new TokenUsage(200, 20, 100), usage);
+    }
+
+    [Fact]
+    public async Task Codex_hands_over_the_patch_it_applied()
+    {
+        var cli = Codex(
+            """{"type":"item.completed","item":{"type":"file_change","path":"src/App.cs","unified_diff":"--- a\n+++ b\n-gone\n+arrived"}}""");
+
+        var call = Assert.Single(await EventsOf(cli, Turn()), e => e.Kind == AgentEventKind.Tool);
+
+        Assert.Equal("src/App.cs", call.Edit?.Path);
+        Assert.Contains("+arrived", call.Edit?.UnifiedDiff);
+    }
+
     /// <summary>Replays recorded CLI output instead of starting a process.</summary>
     private sealed class ScriptedRunner(string[] lines) : IProcessRunner
     {

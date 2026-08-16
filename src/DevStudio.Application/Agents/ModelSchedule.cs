@@ -15,8 +15,9 @@ public static class ModelSchedule
 {
     /// <summary>
     /// The choice for the next turn of <paramref name="session"/>. Its own settings win over the
-    /// agent's, and <see cref="ChatSession.TurnCount"/> is the number of turns already finished, so
-    /// an opening of two covers the first and second turns.
+    /// agent's, and <see cref="ChatSession.TurnCount"/> counts the messages already exchanged — one
+    /// for what you send and one for what comes back — so an opening of two covers the first
+    /// exchange, and the turn about to run is chosen on what happened before it.
     /// </summary>
     public static ModelChoice For(Agent agent, ChatSession session) =>
         For(agent, session, session.TurnCount);
@@ -50,6 +51,18 @@ public static class ModelSchedule
         var effort = Blank(session.OpeningEffort) ?? Blank(agent.OpeningEffort);
 
         return turns > 0 && (model is not null || effort is not null);
+    }
+
+    /// <summary>
+    /// A model and the level it thinks at as one phrase — "sonnet (high)" — so the transcript, the
+    /// session panel and the handover notice all name a model the same way.
+    /// </summary>
+    public static string Describe(string? model, string? effort)
+    {
+        var name = Blank(model) ?? "CLI default";
+        var level = Blank(effort);
+
+        return level is null ? name : $"{name} ({level})";
     }
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;

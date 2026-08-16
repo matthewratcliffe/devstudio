@@ -516,6 +516,32 @@ select.select-sm { width: auto; font-size: 0.72rem; padding: 0.3em 1.6em 0.3em 0
     margin: 0.3rem 0 0.2rem 0.35rem; padding: 0.35rem 0 0.35rem 0.7rem;
 }
 
+/* A file change is the part of a turn worth reading, so it gets colour the other calls do not. */
+.tool-call.tool-edit > summary .tool-name { color: var(--magenta); }
+.diff-added { color: var(--lime); }
+.diff-removed { color: var(--red); }
+.tool-call .body.diff { white-space: pre; overflow-x: auto; padding-right: 0.5rem; }
+.diff-line { white-space: pre; }
+
+/* What produced a line, kept quiet enough to skip and close enough to read. */
+.msg .who .msg-model {
+    color: var(--cyan); opacity: 0.75; font-size: 0.68rem;
+    text-transform: none; letter-spacing: 0;
+}
+.msg .who .msg-tokens { color: var(--text-2); font-size: 0.68rem; letter-spacing: 0; }
+
+/* Which pair of model fields the conversation is actually on. */
+.in-use {
+    font-size: 0.72rem; color: var(--text-1);
+    background: var(--cyan-soft); border-radius: var(--radius-sm);
+    padding: 0.3rem 0.5rem; margin-bottom: 0.6rem;
+}
+.in-use strong { color: var(--cyan); font-weight: 500; }
+.in-use-tag {
+    font-size: 0.6rem; color: var(--cyan); border: 1px solid var(--cyan-soft);
+    border-radius: 999px; padding: 0 0.35rem; margin-left: 0.35rem;
+}
+
 .chat-side {
     width: 300px; flex: 0 0 300px; border-left: 1px solid var(--border-soft);
     padding: 1rem; overflow-y: auto; background: #070b17;

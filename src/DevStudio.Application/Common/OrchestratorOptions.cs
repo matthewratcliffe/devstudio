@@ -151,7 +151,18 @@ public sealed class OrchestratorOptions
     public int SessionAutoArchiveHours { get; set; } = 24;
 
     /// <summary>
-    /// How often the auto-archive sweep runs. Sessions age in hours, so there is nothing to gain
+    /// How long a conversation may sit with nothing said in it before it is finished on its own, in
+    /// hours. A chat left open can be picked up again much later against a workspace that has moved
+    /// on underneath it, and one abandoned mid-thought reads as current work until somebody closes
+    /// it. Zero turns this off and leaves conversations open until they are ended by hand.
+    ///
+    /// Only idle conversations are touched: an agent still working is not idle however long its
+    /// turn has been running.
+    /// </summary>
+    public int SessionIdleFinishHours { get; set; } = 4;
+
+    /// <summary>
+    /// How often the housekeeping sweeps run. Sessions age in hours, so there is nothing to gain
     /// from looking more often than this.
     /// </summary>
     public int SessionArchiveTickMinutes { get; set; } = 15;

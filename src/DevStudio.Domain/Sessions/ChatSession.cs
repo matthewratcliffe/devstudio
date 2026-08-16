@@ -79,6 +79,44 @@ public sealed class ChatMessage
     /// CLI reporting a result, so it is wall-clock time including whatever the tool waited on.
     /// </summary>
     public int? DurationMs { get; set; }
+
+    /// <summary>
+    /// The model this line was produced on, and the thinking level it ran at. Recorded per message
+    /// rather than per session because a conversation can change model part way through, and an
+    /// answer is only worth comparing with another once you know what wrote each of them. Null on
+    /// anything the orchestrator wrote itself.
+    /// </summary>
+    public string? Model { get; set; }
+
+    public string? Effort { get; set; }
+
+    /// <summary>Set when this line reports a change to a file rather than any other tool call.</summary>
+    public string? FilePath { get; set; }
+
+    /// <summary>Lines the change added and removed, for the one-line summary above the diff.</summary>
+    public int? LinesAdded { get; set; }
+
+    public int? LinesRemoved { get; set; }
+
+    /// <summary>
+    /// The change itself in brief: the edited lines, +/- prefixed and capped, so a reader can see
+    /// what the agent did to a file without opening it or trusting the prose about it.
+    /// </summary>
+    public string? Diff { get; set; }
+
+    /// <summary>
+    /// Tokens spent producing this line, added to as the CLI reports each request it makes, so the
+    /// number moves while the answer is still being written. Cached reads are kept separate: they
+    /// dwarf everything else on a long conversation and would drown the part that varies.
+    /// </summary>
+    public int InputTokens { get; set; }
+
+    public int OutputTokens { get; set; }
+
+    public int CacheTokens { get; set; }
+
+    /// <summary>Everything the model was charged for on this line.</summary>
+    public int TotalTokens => InputTokens + OutputTokens + CacheTokens;
 }
 
 public enum SessionTrigger
@@ -156,6 +194,10 @@ public sealed class ChatSession : Entity
     /// it is on rather than making the reader work it out.
     /// </summary>
     public string? ModelInUse { get; set; }
+
+    /// <summary>The thinking level that went with <see cref="ModelInUse"/>.</summary>
+    public string? EffortInUse { get; set; }
+
     public SessionStatus Status { get; set; } = SessionStatus.Pending;
     public SessionTrigger Trigger { get; set; } = SessionTrigger.Manual;
 
@@ -187,8 +229,33 @@ public sealed class ChatSession : Entity
     /// </summary>
     public List<string> AllowedTools { get; set; } = [];
 
-    /// <summary>Turns completed, which is what the project's summarisation threshold counts.</summary>
+    /// <summary>
+    /// Messages exchanged, which is what the project's summarisation threshold and the model
+    /// handover both count. One message you send is a turn and one answer the agent writes is
+    /// another, so an ordinary exchange is two; tool calls and everything the orchestrator says for
+    /// itself are not messages and are not counted.
+    /// </summary>
     public int TurnCount { get; set; }
+
+    /// <summary>
+    /// The count when this session was last summarised. The count no longer moves one at a time —
+    /// an answer broken up by tool calls adds several — so being due is a distance from the last
+    /// one rather than an exact multiple, which could be stepped straight over.
+    /// </summary>
+    public int LastSummarisedTurn { get; set; }
+
+    /// <summary>
+    /// Tokens this conversation has spent across every turn, split the same way as a single line's.
+    /// Kept on the session rather than summed from the transcript so a compaction, which drops the
+    /// history, cannot make the conversation look cheaper than it was.
+    /// </summary>
+    public int InputTokens { get; set; }
+
+    public int OutputTokens { get; set; }
+
+    public int CacheTokens { get; set; }
+
+    public int TotalTokens => InputTokens + OutputTokens + CacheTokens;
 
     /// <summary>Latest rolling summary, carried into the conversation after a compaction.</summary>
     public string Summary { get; set; } = string.Empty;
@@ -244,6 +311,13 @@ public sealed class ChatSession : Entity
     public DateTimeOffset? ClosedAt { get; set; }
 
     public bool IsLive => Status is SessionStatus.Starting or SessionStatus.Running or SessionStatus.AwaitingInput;
+
+    /// <summary>
+    /// A CLI is running right now. Narrower than <see cref="IsLive"/>, which also covers a session
+    /// waiting on a person — that is the state an abandoned conversation sits in, so telling the
+    /// two apart is what lets one be swept up without disturbing the other.
+    /// </summary>
+    public bool IsWorking => Status is SessionStatus.Starting or SessionStatus.Running;
 
     /// <summary>Whether another turn can be sent: a closed session is read only for good.</summary>
     public bool AcceptsInput => !IsClosed;

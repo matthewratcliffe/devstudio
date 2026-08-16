@@ -361,7 +361,16 @@ public sealed class CodexCli : IProviderCli
                 }
                 else if (itemType is "file_change" or "patch_apply" && type == "item.completed")
                 {
-                    yield return new AgentEvent(AgentEventKind.Tool, GetString(item, "path")) { ToolName = "edit" };
+                    // codex reports the patch it applied when it has one, which is what the
+                    // transcript shows rather than the bare path.
+                    var patch = GetString(item, "unified_diff");
+                    var path = GetString(item, "path");
+
+                    yield return new AgentEvent(AgentEventKind.Tool, path)
+                    {
+                        ToolName = "edit",
+                        Edit = path.Length == 0 ? null : new FileEdit(path, UnifiedDiff: patch.Length == 0 ? null : patch),
+                    };
                 }
                 else if (itemType == "error")
                 {
@@ -408,6 +417,12 @@ public sealed class CodexCli : IProviderCli
                         break;
                     case "error":
                         yield return AgentEvent.Error(GetString(msg, "message"));
+                        break;
+                    case "token_count":
+                        // The last request's usage, not the running total: the orchestrator adds
+                        // these up itself, and totals would count every earlier request again.
+                        if (ReadUsage(msg) is { IsEmpty: false } spent)
+                            yield return new AgentEvent(AgentEventKind.Usage, string.Empty) { Usage = spent };
                         break;
                     case "task_complete":
                         yield return new AgentEvent(AgentEventKind.Result, GetString(msg, "last_agent_message"));
@@ -458,6 +473,32 @@ public sealed class CodexCli : IProviderCli
         /// <summary>Called when a message is finished; the next one starts from nothing.</summary>
         public void Reset() => _sent = string.Empty;
     }
+
+    /// <summary>
+    /// Tokens for the request that just finished. codex nests these under "info" in current builds
+    /// and reported them flat in older ones, and counts cached input inside the input total, which
+    /// is unpicked here so the two are not counted twice over.
+    /// </summary>
+    private static TokenUsage? ReadUsage(JsonElement msg)
+    {
+        var usage = msg;
+
+        if (msg.TryGetProperty("info", out var info) && info.ValueKind == JsonValueKind.Object)
+            usage = info;
+
+        if (usage.TryGetProperty("last_token_usage", out var last) && last.ValueKind == JsonValueKind.Object)
+            usage = last;
+        else if (usage.TryGetProperty("total_token_usage", out var total) && total.ValueKind == JsonValueKind.Object)
+            usage = total;
+
+        var cached = Number(usage, "cached_input_tokens");
+        var input = Number(usage, "input_tokens");
+
+        return new TokenUsage(Math.Max(0, input - cached), Number(usage, "output_tokens"), cached);
+    }
+
+    private static int Number(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) && value.TryGetInt32(out var number) ? number : 0;
 
     private static string GetString(JsonElement element, string property)
     {
