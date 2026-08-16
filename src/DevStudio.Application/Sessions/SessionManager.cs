@@ -204,6 +204,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             TokenMinimisation = agent.TokenMinimisation,
             ProjectId = agent.ProjectId,
             AccountId = agent.AccountId,
+            FallbackAccountId = agent.FallbackAccountId,
             RepositoryId = agent.RepositoryId,
             BaseBranch = agent.BaseBranch,
             UseWorktree = agent.UseWorktree,

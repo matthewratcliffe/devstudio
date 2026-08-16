@@ -52,13 +52,20 @@ public sealed class AccountService : IAccountService
                     : null,
             };
 
+            var projectFallback = agent.Provider switch
+            {
+                AiProvider.Claude => project.ClaudeFallbackAccountId,
+                AiProvider.Codex => project.CodexFallbackAccountId,
+                _ => null,
+            };
+
             if (chosen is not null && all.FirstOrDefault(a => a.Id == chosen) is { } projectAccount)
-                return await WithFallbackAsync(await MaterialiseAsync(projectAccount), all, agent, projectAccount, ct);
+                return await WithFallbackAsync(await MaterialiseAsync(projectAccount), all, agent, projectAccount, projectFallback, ct);
         }
 
         // 2. The agent's own pin, for work outside a project.
         if (agent.AccountId is not null && all.FirstOrDefault(a => a.Id == agent.AccountId) is { } agentAccount)
-            return await WithFallbackAsync(await MaterialiseAsync(agentAccount), all, agent, agentAccount, ct);
+            return await WithFallbackAsync(await MaterialiseAsync(agentAccount), all, agent, agentAccount, agent.FallbackAccountId, ct);
 
         // 3. The default account for this provider — for a custom CLI, one of its own accounts.
         bool Matches(ProviderAccount account) =>
@@ -68,7 +75,7 @@ public sealed class AccountService : IAccountService
         var fallback = all.FirstOrDefault(a => Matches(a) && a.IsDefault) ?? all.FirstOrDefault(Matches);
 
         return fallback is not null
-            ? await WithFallbackAsync(await MaterialiseAsync(fallback), all, agent, fallback, ct)
+            ? await WithFallbackAsync(await MaterialiseAsync(fallback), all, agent, fallback, agent.FallbackAccountId, ct)
             : new ResolvedAccount(null, "container default", _options.HomePath);
     }
 
@@ -77,15 +84,23 @@ public sealed class AccountService : IAccountService
         IReadOnlyList<ProviderAccount> all,
         Agent agent,
         ProviderAccount primaryAccount,
+        string? requestedFallbackId,
         CancellationToken ct)
     {
         // The default account is the primary; the next account for the same CLI is the backup.
         // Explicit project/agent pins still get the same safety net, but never fall back to the
         // account they already selected.
-        var backup = all.FirstOrDefault(account =>
+        bool Matches(ProviderAccount account) =>
             account.Id != primaryAccount.Id &&
             account.Provider == primaryAccount.Provider &&
-            (agent.Provider != AiProvider.Custom || account.CliProviderId == agent.CliProviderId));
+            (agent.Provider != AiProvider.Custom || account.CliProviderId == agent.CliProviderId);
+
+        var backup = !string.IsNullOrWhiteSpace(requestedFallbackId)
+            ? all.FirstOrDefault(account => account.Id == requestedFallbackId && Matches(account))
+            : null;
+
+        // Preserve the old automatic behavior when no explicit fallback was selected.
+        backup ??= all.FirstOrDefault(Matches);
 
         return backup is null
             ? primary

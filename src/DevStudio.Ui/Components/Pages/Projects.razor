@@ -168,6 +168,26 @@
                         }
                     </select>
                 </div>
+                <div class="field">
+                    <label>Claude fallback</label>
+                    <select @bind="_editing.ClaudeFallbackAccountId">
+                        <option value="">Automatic fallback</option>
+                        @foreach (var account in _accounts.Where(a => a.Provider == AiProvider.Claude && a.Id != _editing.ClaudeAccountId))
+                        {
+                            <option value="@account.Id">@account.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Codex fallback</label>
+                    <select @bind="_editing.CodexFallbackAccountId">
+                        <option value="">Automatic fallback</option>
+                        @foreach (var account in _accounts.Where(a => a.Provider == AiProvider.Codex && a.Id != _editing.CodexAccountId))
+                        {
+                            <option value="@account.Id">@account.Name</option>
+                        }
+                    </select>
+                </div>
             </div>
 
             @foreach (var cli in _cliProviders.Where(c => c.Enabled))
@@ -424,6 +444,8 @@
         SourceControl = project.SourceControl,
         ClaudeAccountId = project.ClaudeAccountId,
         CodexAccountId = project.CodexAccountId,
+        ClaudeFallbackAccountId = project.ClaudeFallbackAccountId,
+        CodexFallbackAccountId = project.CodexFallbackAccountId,
         CliAccountIds = new Dictionary<string, string>(project.CliAccountIds),
         SummariseAfterTurns = project.SummariseAfterTurns,
         CompactAfterSummary = project.CompactAfterSummary,

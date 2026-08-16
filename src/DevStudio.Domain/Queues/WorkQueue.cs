@@ -77,4 +77,9 @@ public sealed class WorkQueue : Entity
 
     /// <summary>Items still arrive while this is false; nothing is dispatched until it is true again.</summary>
     public bool Enabled { get; set; } = true;
+
+    /// <summary>When set, dispatch pauses until this time because the provider reported a usage limit.</summary>
+    public DateTimeOffset? SuspendedUntil { get; set; }
+
+    public string? SuspensionReason { get; set; }
 }

@@ -79,6 +79,9 @@ public sealed class Agent : Entity
     /// </summary>
     public string? AccountId { get; set; }
 
+    /// <summary>Optional account to use when the primary account is unavailable or out of capacity.</summary>
+    public string? FallbackAccountId { get; set; }
+
     /// <summary>Repository the agent works in. Null means the project or scratch workspace.</summary>
     public string? RepositoryId { get; set; }
 

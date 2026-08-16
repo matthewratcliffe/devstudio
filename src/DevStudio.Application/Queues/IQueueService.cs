@@ -113,6 +113,7 @@ public sealed record QueueOutcome
     public string? Output { get; init; }
     public string? SessionId { get; init; }
     public string? WorkflowRunId { get; init; }
+    public DateTimeOffset? SuspendUntil { get; init; }
 
     public static QueueOutcome Success(string? output, string? sessionId = null, string? runId = null) =>
         new() { Output = output, SessionId = sessionId, WorkflowRunId = runId };

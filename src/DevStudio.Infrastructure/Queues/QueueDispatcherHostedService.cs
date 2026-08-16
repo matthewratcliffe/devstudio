@@ -179,9 +179,15 @@ public sealed class QueueDispatcherHostedService : BackgroundService
             _logger.LogWarning(ex, "Could not close session {SessionId} after its queue item finished", session.Id);
         }
 
-        return session.Status is SessionStatus.Failed or SessionStatus.Cancelled
-            ? QueueOutcome.Failure(session.LastError ?? "The agent did not finish.", session.Id) with { Output = output }
-            : QueueOutcome.Success(output, session.Id);
+        if (session.Status is SessionStatus.Failed or SessionStatus.Cancelled)
+        {
+            var error = session.LastError ?? "The agent did not finish.";
+            return UsageLimitBackoff.TryGetUntil(error, DateTimeOffset.UtcNow, out var until)
+                ? QueueOutcome.Failure(error, session.Id) with { Output = output, SuspendUntil = until }
+                : QueueOutcome.Failure(error, session.Id) with { Output = output };
+        }
+
+        return QueueOutcome.Success(output, session.Id);
     }
 
     private async Task<QueueOutcome> RunWorkflowAsync(WorkQueue queue, QueueItem item)

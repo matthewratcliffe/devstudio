@@ -36,10 +36,29 @@ internal sealed class ProcessTerminalChannel : ITerminalChannel
 
         if (!_usePseudoTerminal)
         {
-            info.FileName = fileName;
+            var executable = OperatingSystem.IsWindows()
+                ? WindowsCommandLine.Resolve(fileName)
+                : fileName;
 
-            foreach (var argument in arguments)
-                info.ArgumentList.Add(argument);
+            if (OperatingSystem.IsWindows() && WindowsCommandLine.NeedsCommandInterpreter(executable))
+            {
+                // npm command entry points are .cmd files. CreateProcess cannot execute those
+                // scripts directly when shell execution is disabled, so route them through cmd.
+                info.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
+                info.ArgumentList.Add("/d");
+                info.ArgumentList.Add("/s");
+                info.ArgumentList.Add("/c");
+                info.ArgumentList.Add(string.Join(" ",
+                    new[] { $"\"{executable}\"" }
+                        .Concat(arguments.Select(WindowsCommandLine.Quote))));
+            }
+            else
+            {
+                info.FileName = executable;
+
+                foreach (var argument in arguments)
+                    info.ArgumentList.Add(argument);
+            }
         }
         else
         {

@@ -37,6 +37,8 @@ public sealed class Project : Entity
     /// </summary>
     public string? ClaudeAccountId { get; set; }
     public string? CodexAccountId { get; set; }
+    public string? ClaudeFallbackAccountId { get; set; }
+    public string? CodexFallbackAccountId { get; set; }
 
     /// <summary>Account per user-defined CLI, keyed by its provider id.</summary>
     public Dictionary<string, string> CliAccountIds { get; set; } = [];
