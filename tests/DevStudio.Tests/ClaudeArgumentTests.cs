@@ -72,6 +72,24 @@ public class ClaudeArgumentTests : IDisposable
     }
 
     [Fact]
+    public async Task The_system_prompt_travels_as_a_file_not_an_argument()
+    {
+        // A long system prompt as an inline argument value can blow past the ~32K character cap
+        // Windows puts on the whole command line, so CreateProcess fails with "the filename or
+        // extension is too long" before the CLI even starts. Writing it to disk sidesteps that.
+        var turn = Turn() with { SystemPrompt = "Follow the house style." };
+
+        var arguments = await ArgumentsFor(turn);
+
+        var index = arguments.IndexOf("--append-system-prompt-file");
+        Assert.True(index >= 0, "no --append-system-prompt-file was passed");
+        Assert.DoesNotContain("--append-system-prompt", arguments);
+
+        var path = arguments[index + 1];
+        Assert.Equal("Follow the house style.", await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
     public async Task Nothing_is_allow_listed_when_there_is_nothing_to_allow()
     {
         var arguments = await ArgumentsFor(Turn());
