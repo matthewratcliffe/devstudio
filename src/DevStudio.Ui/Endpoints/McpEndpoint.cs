@@ -5,6 +5,7 @@ using DevStudio.Application.Queues;
 using DevStudio.Application.Sessions;
 using DevStudio.Application.Workflows;
 using DevStudio.Domain.Agents;
+using DevStudio.Domain.Globals;
 using DevStudio.Domain.Images;
 using DevStudio.Domain.Projects;
 using DevStudio.Domain.Queues;
@@ -220,6 +221,11 @@ public static class McpEndpoint
         Tool("add_note", "Append a note to a session so humans and other agents can see it.", Props(
             ("sessionId", "string", "Session to annotate."),
             ("note", "string", "Text to append.")), "sessionId", "note"),
+        Tool("get_goal", "Read what this session is trying to achieve, shown in its sidebar.", Props(
+            ("sessionId", "string", "Session to read the goal from.")), "sessionId"),
+        Tool("set_goal", "Set or correct what this session is trying to achieve. Prefer this over guessing at it yourself once you know what the user actually wants.", Props(
+            ("sessionId", "string", "Session to set the goal on."),
+            ("goal", "string", "One or two sentences stating the goal.")), "sessionId", "goal"),
         Tool("list_projects", "List projects with their instructions and attached files.", new JsonObject()),
         Tool("list_workflows", "List runnable workflows and their declared inputs.", new JsonObject()),
         Tool("run_workflow", "Start a workflow run in the background.", Props(
@@ -367,6 +373,33 @@ public static class McpEndpoint
 
                 await store.UpsertAsync(session, ct);
                 return Text("Note added.");
+            }
+
+            case "get_goal":
+            {
+                if (!await GoalEnabledAsync(services, ct))
+                    return Text("Goal tracking is disabled for this instance.", isError: true);
+
+                var session = await sessions.GetAsync(Required(arguments, "sessionId"), ct);
+                return Text(string.IsNullOrWhiteSpace(session?.Goal) ? "(no goal set)" : session!.Goal);
+            }
+
+            case "set_goal":
+            {
+                if (!await GoalEnabledAsync(services, ct))
+                    return Text("Goal tracking is disabled for this instance.", isError: true);
+
+                var store = services.GetRequiredService<IEntityStore<ChatSession>>();
+                var sessionId = Required(arguments, "sessionId");
+                var session = await store.GetAsync(sessionId, ct);
+                if (session is null)
+                    return Text("No session with that id.", isError: true);
+
+                session.Goal = Required(arguments, "goal");
+                session.GoalAutoDerived = false;
+
+                await store.UpsertAsync(session, ct);
+                return Text("Goal set.");
             }
 
             case "list_projects":
@@ -520,6 +553,13 @@ public static class McpEndpoint
             ? $"There is no queue '{wanted}'. No queues are configured."
             : $"There is no queue '{wanted}'. The queues are: " +
               string.Join(", ", all.Select(q => $"{q.Name} (id {q.Id})")) + ".";
+    }
+
+    private static async Task<bool> GoalEnabledAsync(IServiceProvider services, CancellationToken ct)
+    {
+        var store = services.GetRequiredService<IEntityStore<GlobalSettings>>();
+        var settings = await store.GetAsync(GlobalSettings.WellKnownId, ct);
+        return settings?.EnableGoal ?? true;
     }
 
     private static string Required(JsonObject arguments, string key) =>

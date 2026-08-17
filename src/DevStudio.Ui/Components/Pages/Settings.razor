@@ -51,6 +51,34 @@
     }
 
     <div class="divider"></div>
+    <div class="section-tag">Web tools</div>
+    <div class="field-row">
+        <div>
+            <label for="enable-web-tools">Allow WebFetch and WebSearch</label>
+            <div class="hint">
+                Grants every agent standing permission to fetch URLs and search the web without being
+                asked. Nobody answers permission prompts in a headless session, so leaving this off
+                means those two tools never work at all.
+            </div>
+        </div>
+        <input id="enable-web-tools" type="checkbox" @bind="_settings.EnableWebTools" />
+    </div>
+
+    <div class="divider"></div>
+    <div class="section-tag">Goal tracking</div>
+    <div class="field-row">
+        <div>
+            <label for="enable-goal">Track a goal per session</label>
+            <div class="hint">
+                Shows the "Goal" field in the chat sidebar, lets agents read and set it over MCP, and
+                guesses one after a couple of turns if nobody has set it yet — a guess is always shown
+                for confirmation, never adopted automatically.
+            </div>
+        </div>
+        <input id="enable-goal" type="checkbox" @bind="_settings.EnableGoal" />
+    </div>
+
+    <div class="divider"></div>
     <div class="section-tag">Token minimisation defaults</div>
     <p class="small">
         These tactics are selected for new agents and quick chats. Existing agents keep their own

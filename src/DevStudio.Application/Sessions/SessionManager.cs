@@ -4,6 +4,7 @@ using DevStudio.Application.Abstractions;
 using DevStudio.Application.Agents;
 using DevStudio.Application.Common;
 using DevStudio.Domain.Agents;
+using DevStudio.Domain.Globals;
 using DevStudio.Domain.Projects;
 using DevStudio.Domain.Providers;
 using DevStudio.Domain.Sessions;
@@ -44,6 +45,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
     private readonly IWorkspaceService _workspaces;
     private readonly IAccountService _accounts;
     private readonly IEntityStore<Project> _projects;
+    private readonly IEntityStore<GlobalSettings> _globalSettings;
     private readonly OrchestratorOptions _options;
     private readonly ILogger<SessionManager> _logger;
     private readonly SemaphoreSlim _concurrency;
@@ -55,6 +57,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         IWorkspaceService workspaces,
         IAccountService accounts,
         IEntityStore<Project> projects,
+        IEntityStore<GlobalSettings> globalSettings,
         IOptions<OrchestratorOptions> options,
         ILogger<SessionManager> logger)
     {
@@ -64,6 +67,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         _workspaces = workspaces;
         _accounts = accounts;
         _projects = projects;
+        _globalSettings = globalSettings;
         _options = options.Value;
         _logger = logger;
         _concurrency = new SemaphoreSlim(Math.Max(1, _options.MaxConcurrentSessions));
@@ -772,7 +776,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                 HomeDirectory = account.HomePath,
                 FallbackHomeDirectory = account.Fallback?.HomePath,
                 McpServerNames = mcpServerNames,
-                AllowedTools = AllowedTools(session),
+                AllowedTools = await AllowedToolsAsync(session, turnCts.Token),
                 Environment = agent.Environment,
                 ExtraArguments = agent.ExtraArguments,
             };
@@ -938,7 +942,112 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         }
 
         await SummariseIfDueAsync(live);
+        await DeriveGoalIfDueAsync(live);
     }
+
+    /// <summary>Turns a session must reach before an unset goal is worth guessing at.</summary>
+    private const int GoalDerivationTurnThreshold = 2;
+
+    /// <summary>
+    /// Fills in <see cref="ChatSession.Goal"/> once there is enough conversation to guess at it. Runs
+    /// the same way as <see cref="SummariseIfDueAsync"/> — a plan-mode turn on the live agent, so the
+    /// guess is grounded in what was actually said rather than a canned heuristic. Never overwrites a
+    /// goal a person or the agent already chose; that is a stronger signal than a guess ever is.
+    /// </summary>
+    private async Task DeriveGoalIfDueAsync(LiveSession live)
+    {
+        var session = live.Session;
+
+        if (session.Status is SessionStatus.Cancelled or SessionStatus.Failed)
+            return;
+
+        if (!string.IsNullOrWhiteSpace(session.Goal) || !string.IsNullOrWhiteSpace(session.ProposedGoal))
+            return;
+
+        if (session.TurnCount < GoalDerivationTurnThreshold)
+            return;
+
+        // Already tried at this point in the conversation and got nothing usable — retried once
+        // there has been more to go on, not on every single turn from here on.
+        if (session.LastGoalAttemptTurn >= session.TurnCount)
+            return;
+
+        var settings = await _globalSettings.GetAsync(GlobalSettings.WellKnownId, CancellationToken.None);
+        if (!(settings?.EnableGoal ?? true))
+            return;
+
+        try
+        {
+            await _concurrency.WaitAsync(live.Cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(live.Cancellation.Token);
+            cts.CancelAfter(TimeSpan.FromMinutes(Math.Max(1, _options.TurnTimeoutMinutes)));
+
+            var account = await _accounts.ResolveAsync(live.Agent, session.ProjectId, cts.Token);
+            var goal = new System.Text.StringBuilder();
+
+            var cli = await _clis.ResolveAsync(live.Agent.Provider, live.Agent.CliProviderId, cts.Token);
+            var choice = ModelSchedule.For(live.Agent, session);
+
+            await foreach (var evt in cli.RunTurnAsync(new TurnRequest
+            {
+                Prompt = DefaultGoalPrompt,
+                WorkingDirectory = session.WorkingDirectory,
+                PermissionMode = PermissionMode.Plan,
+                Model = choice.Model,
+                Effort = choice.Effort,
+                ResumeSessionId = session.ProviderSessionId,
+                HomeDirectory = account.HomePath,
+                Environment = live.Agent.Environment,
+            }, cts.Token))
+            {
+                if (evt.Kind is AgentEventKind.Text or AgentEventKind.Result)
+                    goal.Append(evt.Text);
+                else if (evt is { Kind: AgentEventKind.Usage, Usage: { IsEmpty: false } used })
+                    Count(session, used);
+            }
+
+            session.LastGoalAttemptTurn = session.TurnCount;
+
+            var text = goal.ToString().Trim();
+            if (text.Length == 0)
+                return;
+
+            // Never adopted automatically — a guess only becomes the goal the session is actually
+            // held to once a person confirms or edits it from the sidebar.
+            session.ProposedGoal = text;
+            AppendMessage(session, MessageRole.System,
+                $"Guessed goal for this conversation: \"{text}\" — confirm or edit it in the sidebar before it's treated as the goal.");
+
+            await PersistAsync(session);
+        }
+        catch (OperationCanceledException)
+        {
+            // A guessed goal is a convenience; losing one must not disturb the session.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not derive a goal for session {SessionId}", session.Id);
+        }
+        finally
+        {
+            _concurrency.Release();
+        }
+    }
+
+    private const string DefaultGoalPrompt =
+        """
+        In one short sentence, state the goal of this conversation — what the user is actually trying
+        to achieve. Answer with the sentence alone, no preamble, no markdown. Do not edit anything —
+        this is a read-only question.
+        """;
 
     /// <summary>
     /// Rolls the conversation up when the project's turn threshold is reached. The summary is asked
@@ -1242,8 +1351,16 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
     /// second so a rule granted by hand wins nothing it did not already have, and duplicates are
     /// dropped because some CLIs treat a repeated rule as a parse error.
     /// </summary>
-    private IReadOnlyList<string> AllowedTools(ChatSession session) =>
-        [.. _options.DefaultAllowedTools.Concat(session.AllowedTools).Distinct()];
+    private async Task<IReadOnlyList<string>> AllowedToolsAsync(ChatSession session, CancellationToken ct)
+    {
+        var rules = _options.DefaultAllowedTools.Concat(session.AllowedTools);
+
+        var settings = await _globalSettings.GetAsync(GlobalSettings.WellKnownId, ct);
+        if (settings?.EnableWebTools ?? true)
+            rules = rules.Concat(["WebFetch", "WebSearch"]);
+
+        return [.. rules.Distinct()];
+    }
 
     private static string BuildTitle(string prompt)
     {

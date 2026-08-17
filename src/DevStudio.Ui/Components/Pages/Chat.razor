@@ -7,6 +7,7 @@
 @inject IEntityStore<GitRepository> RepositoryStore
 @inject IWorkspaceFileService WorkspaceFiles
 @inject IEntityStore<Agent> AgentStore
+@inject IEntityStore<GlobalSettings> GlobalSettingsStore
 @inject IEntityStore<CliProvider> CliProviderStore
 @inject IProviderCliRegistry Clis
 @inject IQuickChatService QuickChats
@@ -291,6 +292,38 @@ else
                 </div>
             }
 
+            @if (_goalEnabled)
+            {
+                <div class="divider"></div>
+                <div class="section-tag">Goal</div>
+
+                @if (!string.IsNullOrWhiteSpace(_session.ProposedGoal))
+                {
+                    <div class="card" style="border-color:var(--amber,#f6c85f);margin-bottom:0.6rem">
+                        <div class="small"><strong>Suggested goal</strong></div>
+                        <div class="mono-dim" style="margin:0.3rem 0">@_session.ProposedGoal</div>
+                        <div class="hint">
+                            Guessed from the conversation so far. It won't be treated as the goal until
+                            you confirm or edit it.
+                        </div>
+                        <div class="btn-row" style="margin-top:0.5rem">
+                            <button class="btn btn-sm btn-primary" @onclick="AcceptProposedGoalAsync">Use this</button>
+                            <button class="btn btn-sm" @onclick="EditProposedGoal">Edit</button>
+                            <button class="btn btn-sm" @onclick="DiscardProposedGoalAsync">Discard</button>
+                        </div>
+                    </div>
+                }
+
+                <textarea @bind="_goal" rows="3" placeholder="What are we trying to achieve in this chat?"></textarea>
+                <div class="btn-row" style="margin-top:0.5rem">
+                    <button class="btn btn-sm" @onclick="SaveGoalAsync">Save goal</button>
+                </div>
+                @if (_session.GoalAutoDerived && !string.IsNullOrWhiteSpace(_session.Goal))
+                {
+                    <div class="hint">Started as a guess you confirmed — edit it any time.</div>
+                }
+            }
+
             @if (_session.AcceptsInput)
             {
                 <div class="divider"></div>
@@ -468,6 +501,8 @@ else
     private string _draft = string.Empty;
     private bool _interrupt;
     private string _notes = string.Empty;
+    private string _goal = string.Empty;
+    private bool _goalEnabled = true;
     private string _gitStatus = string.Empty;
     private IReadOnlyList<McpServer> _mcpServers = [];
     private IReadOnlyList<WorkspaceFile> _files = [];
@@ -505,6 +540,8 @@ else
         _cliProviders = await CliProviderStore.GetAllAsync();
         _session = await Sessions.GetAsync(SessionId);
         _notes = _session?.Notes ?? string.Empty;
+        _goal = _session?.Goal ?? string.Empty;
+        _goalEnabled = (await GlobalSettingsStore.GetAsync(GlobalSettings.WellKnownId))?.EnableGoal ?? true;
 
         if (_session is not null)
         {
@@ -579,7 +616,38 @@ else
 
         var message = _draft.Trim();
         _draft = string.Empty;
+
+        if (_goalEnabled && TryParseGoalCommand(message, out var goal))
+        {
+            _goal = goal;
+            _session.Goal = goal;
+            _session.GoalAutoDerived = false;
+            _session.ProposedGoal = string.Empty;
+            await SessionStore.UpsertAsync(_session);
+            Layout.Notify(goal.Length == 0 ? "Goal cleared." : "Goal set.", "ok");
+            return;
+        }
+
         await SendMessageAsync(message);
+    }
+
+    /// <summary>
+    /// <c>/goal</c> sets the sidebar goal directly instead of being sent to the agent as a prompt —
+    /// the same override a person has from the sidebar textarea, reachable without leaving the
+    /// composer. <c>/goal</c> with nothing after it clears the goal.
+    /// </summary>
+    private static bool TryParseGoalCommand(string message, out string goal)
+    {
+        goal = string.Empty;
+
+        if (!message.StartsWith("/goal", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (message.Length > 5 && !char.IsWhiteSpace(message[5]))
+            return false;
+
+        goal = message.Length > 5 ? message[5..].Trim() : string.Empty;
+        return true;
     }
 
     /// <summary>
@@ -845,6 +913,50 @@ else
         _session.Notes = _notes;
         await SessionStore.UpsertAsync(_session);
         Layout.Notify("Notes saved.", "ok");
+    }
+
+    private async Task SaveGoalAsync()
+    {
+        if (_session is null)
+            return;
+
+        _session.Goal = _goal;
+        _session.GoalAutoDerived = false;
+        _session.ProposedGoal = string.Empty;
+        await SessionStore.UpsertAsync(_session);
+        Layout.Notify("Goal saved.", "ok");
+    }
+
+    private async Task AcceptProposedGoalAsync()
+    {
+        if (_session is null)
+            return;
+
+        _goal = _session.ProposedGoal;
+        _session.Goal = _session.ProposedGoal;
+        _session.GoalAutoDerived = true;
+        _session.ProposedGoal = string.Empty;
+        await SessionStore.UpsertAsync(_session);
+        Layout.Notify("Goal confirmed.", "ok");
+    }
+
+    private void EditProposedGoal()
+    {
+        if (_session is null)
+            return;
+
+        // Moves the guess into the editable box rather than the confirmed goal — it still has to be
+        // saved, same as anything else typed there.
+        _goal = _session.ProposedGoal;
+    }
+
+    private async Task DiscardProposedGoalAsync()
+    {
+        if (_session is null)
+            return;
+
+        _session.ProposedGoal = string.Empty;
+        await SessionStore.UpsertAsync(_session);
     }
 
     private async Task RefreshFilesAsync()

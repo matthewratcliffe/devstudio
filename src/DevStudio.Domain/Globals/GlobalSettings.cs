@@ -64,5 +64,19 @@ public sealed class GlobalSettings : Entity
     /// </summary>
     public TokenTactics DefaultTokenMinimisation { get; set; } = TokenTacticsDefaults.Recommended;
 
+    /// <summary>
+    /// Whether every agent may use <c>WebFetch</c> and <c>WebSearch</c> without being asked. Nobody
+    /// is watching a headless session to answer a permission prompt, so leaving this off means those
+    /// tools simply never work — the same problem <c>ExitPlanMode</c> had in plan mode.
+    /// </summary>
+    public bool EnableWebTools { get; set; } = true;
+
+    /// <summary>
+    /// Whether sessions track a goal at all — the sidebar field, the <c>set_goal</c>/<c>get_goal</c>
+    /// MCP tools, and automatic derivation after a couple of turns. Off means the goal machinery is
+    /// skipped entirely, for operators who find it noise rather than signal.
+    /// </summary>
+    public bool EnableGoal { get; set; } = true;
+
     public GlobalSettings() => Id = WellKnownId;
 }

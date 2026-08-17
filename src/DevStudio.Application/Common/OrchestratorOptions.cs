@@ -81,6 +81,10 @@ public sealed class OrchestratorOptions
     /// the local commands the container exists to provide: an agent that has to stop and ask before
     /// running <c>glab</c> gets no answer at all when nobody is watching, and reports the tool as
     /// broken. Anything approved from the UI is added to this per session.
+    ///
+    /// <c>WebFetch</c>/<c>WebSearch</c> are not listed here — they are the same kind of rule, but
+    /// gated behind <see cref="GlobalSettings.EnableWebTools"/> so an operator can turn real network
+    /// access for agents on or off, and <see cref="SessionManager"/> adds them when it is on.
     /// </summary>
     public List<string> DefaultAllowedTools { get; set; } =
     [

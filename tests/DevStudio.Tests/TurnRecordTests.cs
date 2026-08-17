@@ -3,6 +3,7 @@ using DevStudio.Application.Common;
 using DevStudio.Application.Sessions;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Common;
+using DevStudio.Domain.Globals;
 using DevStudio.Domain.Projects;
 using DevStudio.Domain.Providers;
 using DevStudio.Domain.Sessions;
@@ -29,6 +30,12 @@ public class TurnRecordTests : IDisposable
         var options = Options.Create(new OrchestratorOptions { DataPath = _root, HomePath = _root, MaxConcurrentSessions = 1 });
 
         _agents = Store<Agent>(options);
+
+        // Goal auto-derivation is a separate feature from what these tests assert on — an unrelated
+        // extra turn after the second message would throw off the exact message/token counts below.
+        var globalSettings = Store<GlobalSettings>(options);
+        globalSettings.UpsertAsync(new GlobalSettings { EnableGoal = false }).GetAwaiter().GetResult();
+
         _sessions = new SessionManager(
             Store<ChatSession>(options),
             _agents,
@@ -36,6 +43,7 @@ public class TurnRecordTests : IDisposable
             new StubWorkspace(_root),
             new StubAccounts(_root),
             Store<Project>(options),
+            globalSettings,
             options,
             NullLogger<SessionManager>.Instance);
     }

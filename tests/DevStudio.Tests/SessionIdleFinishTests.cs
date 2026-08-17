@@ -3,6 +3,7 @@ using DevStudio.Application.Common;
 using DevStudio.Application.Sessions;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Common;
+using DevStudio.Domain.Globals;
 using DevStudio.Domain.Providers;
 using DevStudio.Domain.Sessions;
 using DevStudio.Infrastructure.Persistence;
@@ -36,6 +37,7 @@ public class SessionIdleFinishTests : IDisposable
             new StubWorkspace(_root),
             new StubAccounts(_root),
             new JsonEntityStore<Domain.Projects.Project>(options, NullLogger<JsonEntityStore<Domain.Projects.Project>>.Instance),
+            new JsonEntityStore<GlobalSettings>(options, NullLogger<JsonEntityStore<GlobalSettings>>.Instance),
             options,
             NullLogger<SessionManager>.Instance);
     }

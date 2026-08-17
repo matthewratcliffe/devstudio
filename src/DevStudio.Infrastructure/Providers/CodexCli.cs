@@ -85,6 +85,7 @@ public sealed class CodexCli : IProviderCli
                         arguments,
                         request.WorkingDirectory,
                         BuildEnvironment(request),
+                        StandardInput: BuildPrompt(request),
                         TimeoutSeconds: 0),
                     async (line, isError, _) =>
                     {
@@ -218,14 +219,19 @@ public sealed class CodexCli : IProviderCli
         if (!string.IsNullOrWhiteSpace(request.ExtraArguments))
             arguments.AddRange(ClaudeCli.SplitArguments(request.ExtraArguments!));
 
-        // Codex takes the prompt as the trailing positional argument.
-        var prompt = string.IsNullOrWhiteSpace(request.SystemPrompt)
-            ? request.Prompt
-            : $"{request.SystemPrompt}\n\n---\n\n{request.Prompt}";
-        arguments.Add(prompt);
+        // The prompt travels on stdin rather than as a positional argument: on Windows the whole
+        // command line is capped at ~32K characters, and a long conversation or a large paste
+        // blows past that, so CreateProcess fails with "the filename or extension is too long".
+        // `-` tells codex to read the prompt from stdin instead.
+        arguments.Add("-");
 
         return arguments;
     }
+
+    private static string BuildPrompt(TurnRequest request) =>
+        string.IsNullOrWhiteSpace(request.SystemPrompt)
+            ? request.Prompt
+            : $"{request.SystemPrompt}\n\n---\n\n{request.Prompt}";
 
     /// <summary>
     /// Hands codex the MCP servers this session is meant to have. Codex reads servers from its own

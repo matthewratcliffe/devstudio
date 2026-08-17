@@ -124,6 +124,7 @@ public sealed class ClaudeCli : IProviderCli
                         arguments,
                         request.WorkingDirectory,
                         BuildEnvironment(request),
+                        StandardInput: request.Prompt,
                         TimeoutSeconds: 0),
                     async (line, isError, _) =>
                     {
@@ -194,9 +195,12 @@ public sealed class ClaudeCli : IProviderCli
 
     private List<string> BuildArguments(TurnRequest request)
     {
+        // The prompt travels on stdin rather than as an argument value: on Windows the whole
+        // command line is capped at ~32K characters, and a long conversation or a large paste
+        // blows past that, so CreateProcess fails with "the filename or extension is too long".
         var arguments = new List<string>
         {
-            "-p", request.Prompt,
+            "-p",
             "--output-format", "stream-json",
             "--verbose",
             // Without this the CLI only reports a block of prose once it is finished, so a long
@@ -258,14 +262,19 @@ public sealed class ClaudeCli : IProviderCli
 
         // Without this the CLI asks permission for every MCP tool and, with no one to answer,
         // the call simply fails — which reads to the model as "that server isn't available".
-        // Rules the operator approved in the UI ride along on the same flag.
-        if (request.McpServerNames.Count > 0 || request.AllowedTools.Count > 0)
+        // Rules the operator approved in the UI ride along on the same flag. In plan mode,
+        // ExitPlanMode needs the same treatment: nobody is watching to approve it, so without an
+        // explicit allow rule the model can plan but never leave plan mode.
+        var isPlanMode = request.PermissionMode == PermissionMode.Plan;
+        if (request.McpServerNames.Count > 0 || request.AllowedTools.Count > 0 || isPlanMode)
         {
             arguments.Add("--allowedTools");
             foreach (var server in request.McpServerNames)
                 arguments.Add($"mcp__{server}");
             foreach (var rule in request.AllowedTools)
                 arguments.Add(rule);
+            if (isPlanMode && !request.AllowedTools.Contains("ExitPlanMode"))
+                arguments.Add("ExitPlanMode");
         }
 
         if (!string.IsNullOrWhiteSpace(request.ExtraArguments))

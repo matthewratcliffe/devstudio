@@ -3,6 +3,7 @@ using DevStudio.Application.Common;
 using DevStudio.Application.Sessions;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Common;
+using DevStudio.Domain.Globals;
 using DevStudio.Domain.Projects;
 using DevStudio.Domain.Providers;
 using DevStudio.Domain.Sessions;
@@ -39,6 +40,7 @@ public class ProjectProviderPinTests : IDisposable
             _workspace = new StubWorkspace(_root),
             new StubAccounts(_root),
             _projects,
+            Store<GlobalSettings>(options),
             options,
             NullLogger<SessionManager>.Instance);
     }
