@@ -98,6 +98,17 @@
         <input id="use-llm-prompting-tips" type="checkbox" @bind="_settings.UseLlmForPromptingTips" />
     </div>
 
+    <div class="field-row">
+        <div>
+            <label for="enable-guided-quick-chat">Guided Prompting in Quick Chat</label>
+            <div class="hint">
+                Locally asks for missing goal, context, constraints, or output details before sending
+                the request to the CLI. No LLM is used for the guidance.
+            </div>
+        </div>
+        <input id="enable-guided-quick-chat" type="checkbox" @bind="_settings.EnableGuidedQuickChat" />
+    </div>
+
     <div class="divider"></div>
     <div class="section-tag">Token minimisation defaults</div>
     <p class="small">

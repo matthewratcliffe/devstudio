@@ -22,6 +22,22 @@
                     servers are on the right, and stay changeable once the chat is going.
                 </div>
 
+                @if (_guidance is not null)
+                {
+                    <div class="section-tag">Local prompt guidance</div>
+                    <div class="card" style="margin-bottom:1rem">
+                        <div class="small">I’ll ask only for details that are missing, then send one focused prompt to the CLI. No model is used here.</div>
+                        @foreach (var exchange in _guidanceTranscript)
+                        {
+                            <div style="margin-top:.8rem"><strong>@exchange.Role</strong><div>@exchange.Text</div></div>
+                        }
+                        @if (_guidance.NextQuestion is { } question)
+                        {
+                            <div style="margin-top:.8rem"><strong>Guidance</strong><div>@question</div></div>
+                        }
+                    </div>
+                }
+
                 @if (_recent.Count > 0)
                 {
                     <div class="section-tag">Recent chats</div>
@@ -54,7 +70,7 @@
                               placeholder="Ask anything. Enter to send, Shift+Enter for a new line."></textarea>
                     <div style="display:flex;flex-direction:column;gap:0.4rem">
                         <button class="btn btn-primary" disabled="@(_starting || string.IsNullOrWhiteSpace(_prompt))"
-                                @onclick="StartAsync">
+                                @onclick="HandleSendAsync">
                             @(_starting ? "Starting…" : "Send")
                         </button>
                     </div>
@@ -62,6 +78,10 @@
                 <div class="mono-dim" style="margin-top:0.4rem">
                     @SelectedName · @ModeSummary · scratch workspace
                 </div>
+                @if (_guidance is not null)
+                {
+                    <button class="btn btn-link" style="padding:.5rem 0" @onclick="SkipGuidanceAsync">Skip guidance</button>
+                }
             </div>
         </div>
     </div>
@@ -132,6 +152,9 @@
     private string _selected = string.Empty;
     private string _prompt = string.Empty;
     private bool _starting;
+    private bool _guidedQuickChat;
+    private PromptGuidance? _guidance;
+    private readonly List<(string Role, string Text)> _guidanceTranscript = [];
     private ElementReference _draftElement;
     private IReadOnlyList<McpServer> _mcpServers = [];
     private readonly HashSet<string> _selectedMcp = [];
@@ -165,8 +188,9 @@
         _clis = await Clis.GetAllAsync();
         _cliProviders = await CliProviderStore.GetAllAsync();
         _mcpServers = (await McpStore.GetAllAsync()).Where(s => s.Enabled).ToList();
-        _tokenMinimisation = (await SettingsStore.GetAsync(GlobalSettings.WellKnownId))?.DefaultTokenMinimisation
-                             ?? _tokenMinimisation;
+        var globalSettings = await SettingsStore.GetAsync(GlobalSettings.WellKnownId);
+        _tokenMinimisation = globalSettings?.DefaultTokenMinimisation ?? _tokenMinimisation;
+        _guidedQuickChat = globalSettings?.EnableGuidedQuickChat == true;
         _selected = _clis.Count > 0 ? Key(_clis[0]) : string.Empty;
         LoadModelChoices();
 
@@ -228,13 +252,59 @@
         if (string.IsNullOrWhiteSpace(_prompt) || string.IsNullOrWhiteSpace(_selected))
             return;
 
+        if (_guidedQuickChat && _guidance is null)
+        {
+            _guidance = new PromptGuidance(_prompt);
+            _guidanceTranscript.Add(("You", _prompt.Trim()));
+            _prompt = string.Empty;
+            if (_guidance.NextQuestion is null)
+                await StartGuidedAsync();
+            return;
+        }
+
+        await StartDirectAsync(_prompt);
+    }
+
+    private async Task ContinueGuidanceAsync()
+    {
+        if (_guidance is null || string.IsNullOrWhiteSpace(_prompt))
+            return;
+
+        _guidance.AddAnswer(_prompt);
+        _guidanceTranscript.Add(("You", _prompt.Trim()));
+        _prompt = string.Empty;
+
+        if (_guidance.NextQuestion is null)
+            await StartGuidedAsync();
+    }
+
+    private async Task StartGuidedAsync() => await StartDirectAsync(_guidance!.BuildPrompt());
+
+    private Task HandleSendAsync() => _guidance is null ? StartAsync() : ContinueGuidanceAsync();
+
+    private async Task SkipGuidanceAsync()
+    {
+        if (_guidance is null)
+            return;
+
+        var prompt = _guidance.OriginalPrompt;
+        _guidance = null;
+        _guidanceTranscript.Clear();
+        await StartDirectAsync(prompt);
+    }
+
+    private async Task StartDirectAsync(string prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt) || string.IsNullOrWhiteSpace(_selected))
+            return;
+
         _starting = true;
         try
         {
             var (provider, cliProviderId) = Resolve();
 
             var session = await QuickChats.StartAsync(
-                provider, cliProviderId, _prompt, _selectedMcp.ToList(), _permissionMode, _model,
+                provider, cliProviderId, prompt, _selectedMcp.ToList(), _permissionMode, _model,
                 _tokenMinimisation);
 
             Nav.NavigateTo($"/chat/{session.Id}");
@@ -256,7 +326,10 @@
             return;
 
         if (!args.ShiftKey || args.CtrlKey || args.MetaKey)
-            await StartAsync();
+            if (_guidance is not null)
+                await ContinueGuidanceAsync();
+            else
+                await StartAsync();
     }
 
     private void ToggleMcp(string id, ChangeEventArgs args)
