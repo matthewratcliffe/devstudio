@@ -125,6 +125,7 @@
                         <option value="">Each agent decides</option>
                         <option value="@AiProvider.Claude">Claude Code</option>
                         <option value="@AiProvider.Codex">OpenAI Codex</option>
+                        <option value="@AiProvider.Opencoder">OpenCoder</option>
                         @foreach (var cli in _cliProviders.Where(c => c.Enabled))
                         {
                             <option value="custom:@cli.Id">@cli.Name</option>

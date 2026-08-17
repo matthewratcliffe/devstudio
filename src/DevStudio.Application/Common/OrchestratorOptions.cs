@@ -49,6 +49,7 @@ public sealed class OrchestratorOptions
 
     public string ClaudeExecutable { get; set; } = "claude";
     public string CodexExecutable { get; set; } = "codex";
+    public string OpencoderExecutable { get; set; } = "opencoder";
     public string GitExecutable { get; set; } = "git";
     public string GitHubCliExecutable { get; set; } = "gh";
     public string GitLabCliExecutable { get; set; } = "glab";
@@ -110,11 +111,15 @@ public sealed class OrchestratorOptions
 
     public List<string> CodexModels { get; set; } = ["gpt-5-codex", "gpt-5", "o3", "o4-mini"];
 
+    public List<string> OpencoderModels { get; set; } = [];
+
     /// <summary>Effort levels the claude CLI accepts for --effort.</summary>
     public List<string> ClaudeEfforts { get; set; } = ["low", "medium", "high", "xhigh", "max"];
 
     /// <summary>Reasoning levels passed to codex as model_reasoning_effort.</summary>
     public List<string> CodexEfforts { get; set; } = ["minimal", "low", "medium", "high"];
+
+    public List<string> OpencoderEfforts { get; set; } = [];
 
     /// <summary>Hard cap on agent turns running at once.</summary>
     public int MaxConcurrentSessions { get; set; } = 6;

@@ -1,13 +1,13 @@
 # devStudio
 
-> A self-hosted console that runs coding CLIs — Claude Code, OpenAI Codex, and any other CLI already installed and signed in — as configurable agents. Concurrent sessions, a git worktree each, schedules and workflows. There is no API integration: every agent runs the real CLI as a child process, so the only credential involved is the login completed in the web UI.
+> A self-hosted console that runs coding CLIs — Claude Code, OpenAI Codex, OpenCoder, and any other CLI already installed — as configurable agents. Concurrent sessions, a git worktree each, schedules, workflows and queues. Every agent runs the real CLI as a child process.
 
 devStudio is free and open source under the MIT licence, published by Matt Ratcliffe. It runs either as a container
 (`ghcr.io/matthewratcliffe/devstudio`) or as an installed desktop app on Windows, macOS and Linux.
 State is JSON on a volume — there is no database, and no account to create.
 
 The design constraint that explains most of the rest: nothing is reimplemented. When an agent works,
-it is `claude` or `codex` on a PATH, reading the same files it would read if the command had been
+it is `claude`, `codex` or `opencoder` on a PATH, reading the same files it would read if the command had been
 typed by hand. The orchestrator arranges the work and keeps the transcript; the CLI does the thinking.
 
 ## What it does
@@ -23,7 +23,7 @@ typed by hand. The orchestrator arranges the work and keeps the transcript; the 
 
 ## Providers
 
-- [Claude Code and OpenAI Codex](https://matthewratcliffe.github.io/devstudio/#providers): built in, streamed token by token with tool calls and durations in the transcript.
+- [Claude Code, OpenAI Codex and OpenCoder](https://matthewratcliffe.github.io/devstudio/#providers): built-in CLI providers with configurable models and executable settings.
 - [Any installed CLI](https://matthewratcliffe.github.io/devstudio/#providers): described on a form — executable, argument template, output format — and it becomes an agent provider with no code change.
 - [ACP agents](https://matthewratcliffe.github.io/devstudio/#providers): Agent Client Protocol over stdio, where permission answers come from the session's permission mode.
 - [OpenAI-compatible endpoints](https://matthewratcliffe.github.io/devstudio/#providers): llama.cpp and similar. A bare model has no tools, so devStudio runs the loop itself.
@@ -31,7 +31,7 @@ typed by hand. The orchestrator arranges the work and keeps the transcript; the 
 ## Running it
 
 - [Container install](https://matthewratcliffe.github.io/devstudio/#install): one image, two volumes — one for state, one for the CLI logins. Published for amd64 and arm64.
-- [Desktop app](https://matthewratcliffe.github.io/devstudio/#desktop): Windows, macOS (Apple silicon and Intel) and Linux. No container and no bind mounts; it uses the `~/.claude` and `~/.codex` logins already on the machine and updates itself in the background.
+- [Desktop app](https://matthewratcliffe.github.io/devstudio/#desktop): Windows, macOS (Apple silicon and Intel) and Linux. No container and no bind mounts; it uses the locally installed CLI tools and updates itself in the background.
 - [Latest release and all downloads](https://github.com/matthewratcliffe/devstudio/releases/latest)
 - [Container image on GHCR](https://github.com/matthewratcliffe/devstudio/pkgs/container/devstudio)
 
