@@ -101,7 +101,7 @@ public sealed class ClaudeCli : IProviderCli
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var channel = Channel.CreateUnbounded<AgentEvent>();
-        var arguments = BuildArguments(request);
+        var arguments = BuildArguments(request, WriteSystemPromptFile(request));
 
         // The CLI says only that a server failed, never why. Each failure starts a diagnosis that
         // connects from here and reports what the server actually said.
@@ -193,7 +193,24 @@ public sealed class ClaudeCli : IProviderCli
         await pump;
     }
 
-    private List<string> BuildArguments(TurnRequest request)
+    /// <summary>
+    /// Writes the system prompt to a file next to the turn's <c>.mcp.json</c> rather than handing
+    /// it to the CLI inline: on Windows the whole command line is capped at ~32K characters, and a
+    /// long system prompt (a large CLAUDE.md, a big set of house rules) blows past that on its own,
+    /// so CreateProcess fails with "the filename or extension is too long" before the CLI even
+    /// starts. The CLI reads the same content from disk via <c>--append-system-prompt-file</c>.
+    /// </summary>
+    private static string? WriteSystemPromptFile(TurnRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.SystemPrompt))
+            return null;
+
+        var path = Path.Combine(request.WorkingDirectory, ".claude-system-prompt.txt");
+        File.WriteAllText(path, request.SystemPrompt);
+        return path;
+    }
+
+    private List<string> BuildArguments(TurnRequest request, string? systemPromptFile)
     {
         // The prompt travels on stdin rather than as an argument value: on Windows the whole
         // command line is capped at ~32K characters, and a long conversation or a large paste
@@ -221,10 +238,10 @@ public sealed class ClaudeCli : IProviderCli
             arguments.Add(request.Effort!);
         }
 
-        if (!string.IsNullOrWhiteSpace(request.SystemPrompt))
+        if (!string.IsNullOrWhiteSpace(systemPromptFile))
         {
-            arguments.Add("--append-system-prompt");
-            arguments.Add(request.SystemPrompt!);
+            arguments.Add("--append-system-prompt-file");
+            arguments.Add(systemPromptFile!);
         }
 
         if (!string.IsNullOrWhiteSpace(request.ResumeSessionId))
