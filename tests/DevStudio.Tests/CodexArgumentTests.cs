@@ -40,6 +40,26 @@ public class CodexArgumentTests
         return [.. runner.LastRequest!.Arguments];
     }
 
+    private static async Task<string?> StandardInputFor(TurnRequest request, bool containerIsTheSandbox = true)
+    {
+        var runner = new RecordingRunner();
+        var cli = new CodexCli(
+            runner,
+            Options.Create(new OrchestratorOptions
+            {
+                HomePath = "/home/test",
+                CodexExecutable = "codex",
+                ContainerIsTheSandbox = containerIsTheSandbox,
+            }),
+            NullLogger<CodexCli>.Instance);
+
+        await foreach (var _ in cli.RunTurnAsync(request, CancellationToken.None))
+        {
+        }
+
+        return runner.LastRequest!.StandardInput;
+    }
+
     private static TurnRequest Turn(string? resumeId = null, PermissionMode mode = PermissionMode.AcceptEdits) => new()
     {
         Prompt = "hello",
@@ -88,11 +108,19 @@ public class CodexArgumentTests
     }
 
     [Fact]
-    public async Task The_prompt_stays_the_last_argument_when_resuming()
+    public async Task The_prompt_is_read_from_stdin_with_a_dash_as_the_last_argument_when_resuming()
     {
         var arguments = await ArgumentsFor(Turn(resumeId: "abc"));
 
-        Assert.Equal("hello", arguments[^1]);
+        Assert.Equal("-", arguments[^1]);
+    }
+
+    [Fact]
+    public async Task The_prompt_travels_on_stdin_rather_than_the_command_line()
+    {
+        var stdin = await StandardInputFor(Turn(resumeId: "abc"));
+
+        Assert.Equal("hello", stdin);
     }
 
     [Fact]
