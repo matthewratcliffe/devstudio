@@ -23,7 +23,15 @@
 }
 else
 {
-    <div class="chat-layout">
+    <div class="chat-layout @(IsSubagent ? "subagent-readonly" : "")">
+        @if (IsSubagent)
+        {
+            <div class="subagent-toolbar">
+                <span class="pill pill-amber"><span class="dot"></span>Read-only subagent</span>
+                <button class="btn btn-sm" @onclick="BackToMainAgent">← Back to main agent</button>
+            </div>
+        }
+        <fieldset disabled="@IsSubagent" style="display:contents">
         <div class="chat-main">
             <div class="chat-scroll" @ref="_scrollElement">
             <div class="chat-thread">
@@ -134,6 +142,20 @@ else
 
             <div class="composer">
                 <div class="composer-inner">
+                @if (!IsSubagent && _childSessions.Count > 0)
+                {
+                    <div class="subagent-links">
+                        <span class="section-tag">Underlying subagents</span>
+                        @foreach (var child in _childSessions)
+                        {
+                            <a class="subagent-link" href="@($"/chat/{child.Id}")">
+                                <span class="dot @(child.IsWorking ? "dot-live" : "")"></span>
+                                <span>Chat with the sub agent</span>
+                                <span class="mono-dim">@child.Title · @child.Status</span>
+                            </a>
+                        }
+                    </div>
+                }
                 @if (!_session.AcceptsInput)
                 {
                     <div class="closed-note">
@@ -172,6 +194,43 @@ else
                             {
                                 <button class="suggestion" @onclick="() => SendMessageAsync(suggestion)">@suggestion</button>
                             }
+                        </div>
+                    }
+                    @if (SlashCommandCompletions is { Count: > 0 } commandCompletions)
+                    {
+                        <div class="slash-command-menu" role="listbox" aria-label="Slash commands">
+                            @foreach (var command in commandCompletions)
+                            {
+                                <button class="slash-command" role="option" @onclick="() => CompleteSlashCommand(command)">
+                                    <code>@command.Name</code><span>@command.Description</span>
+                                    <small class="slash-command-usage">Usage: <code>@command.Usage</code></small>
+                                </button>
+                            }
+                            <span class="slash-command-help">Tab complete · click a command to select</span>
+                        </div>
+                    }
+                    @if (CommandHint is { } commandHint)
+                    {
+                        <div class="command-hint">
+                            <div class="command-hint-copy">
+                                <span class="command-hint-label">Did you know?</span>
+                                <span>Your current problem may benefit from <code>@commandHint.Command</code> to @commandHint.Purpose.</span>
+                                <a href="@commandHint.DocumentationUrl" target="_blank" rel="noopener noreferrer">Learn more</a>
+                            </div>
+                            <button class="btn btn-sm" @onclick="() => UseCommandHint(commandHint)">Use @commandHint.Command</button>
+                        </div>
+                    }
+
+                    @if (PromptingTipsEnabled && PromptingTips.For(_draft) is { Count: > 0 } tips)
+                    {
+                        <div class="command-hint prompting-tips">
+                            <div class="command-hint-copy">
+                                <span class="command-hint-label">Prompting tips</span>
+                                @foreach (var tip in tips)
+                                {
+                                    <span>@tip</span>
+                                }
+                            </div>
                         </div>
                     }
 
@@ -488,6 +547,7 @@ else
                 <button class="btn btn-sm btn-danger" @onclick="ArchiveAsync">Archive</button>
             </div>
         </aside>
+        </fieldset>
     </div>
 }
 
@@ -503,6 +563,7 @@ else
     private string _notes = string.Empty;
     private string _goal = string.Empty;
     private bool _goalEnabled = true;
+    private bool _promptingTipsEnabled = true;
     private string _gitStatus = string.Empty;
     private IReadOnlyList<McpServer> _mcpServers = [];
     private IReadOnlyList<WorkspaceFile> _files = [];
@@ -519,6 +580,9 @@ else
     private bool _forceScroll;
     private readonly RenderCoalescer _render = new();
     private bool _disposed;
+    private IReadOnlyList<ChatSession> _childSessions = [];
+
+    private bool IsSubagent => _session?.ParentSessionId is { Length: > 0 };
 
     protected override async Task OnInitializedAsync()
     {
@@ -539,15 +603,18 @@ else
         _clis = await Clis.GetAllAsync();
         _cliProviders = await CliProviderStore.GetAllAsync();
         _session = await Sessions.GetAsync(SessionId);
+        await RefreshChildSessionsAsync();
         _notes = _session?.Notes ?? string.Empty;
         _goal = _session?.Goal ?? string.Empty;
-        _goalEnabled = (await GlobalSettingsStore.GetAsync(GlobalSettings.WellKnownId))?.EnableGoal ?? true;
+        var globalSettings = await GlobalSettingsStore.GetAsync(GlobalSettings.WellKnownId);
+        _goalEnabled = globalSettings?.EnableGoal ?? true;
 
         if (_session is not null)
         {
             // The agent decides what this panel may offer: only a quick chat can change CLI, and the
             // model fields fall back to whatever the agent itself chose.
             _agent = await AgentStore.GetAsync(_session.AgentId);
+            _promptingTipsEnabled = _agent?.PromptingTips ?? globalSettings?.EnablePromptingTips ?? true;
             _selectedCli = KeyOf(_session);
             _model = new SessionModelSettings(
                 _session.Model,
@@ -564,6 +631,22 @@ else
 
         if (_session is not null)
             Layout.SetHeader(_session.Title, $"{_session.AgentName} · {_session.Provider}", flush: true);
+    }
+
+    private async Task RefreshChildSessionsAsync()
+    {
+        _childSessions = _session is null
+            ? []
+            : (await Sessions.GetAllAsync()).Where(s => s.ParentSessionId == _session.Id && s.IsLive)
+                .OrderByDescending(s => s.IsWorking)
+                .ThenByDescending(s => s.UpdatedAt)
+                .ToList();
+    }
+
+    private void BackToMainAgent()
+    {
+        if (_session?.ParentSessionId is { Length: > 0 } parentId)
+            Nav.NavigateTo($"/chat/{parentId}");
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -657,6 +740,26 @@ else
     private IReadOnlyList<string> Suggestions =>
         _session is null ? [] : ReplySuggestions.For(_session, ForgeOf(_session));
 
+    private bool PromptingTipsEnabled => _promptingTipsEnabled && !_session!.IsClosed;
+
+    private CommandHint? CommandHint =>
+        _session is null ? null : CommandHints.For(_session);
+
+    private IReadOnlyList<CliSlashCommand> SlashCommandCompletions =>
+        _session is null ? [] : CliSlashCommands.For(_session.Provider, _draft);
+
+    private async Task CompleteSlashCommand(CliSlashCommand command)
+    {
+        _draft = command.Name + " ";
+        await Js.InvokeVoidAsync("aiShop.focus", _draftElement);
+    }
+
+    private async Task UseCommandHint(CommandHint hint)
+    {
+        _draft = hint.Command;
+        await Js.InvokeVoidAsync("aiShop.focus", _draftElement);
+    }
+
     /// <summary>Which forge the session's repository belongs to, so the wording matches it.</summary>
     private SourceControlProvider? ForgeOf(ChatSession session) =>
         session.RepositoryId is { Length: > 0 } id
@@ -688,6 +791,12 @@ else
     /// </summary>
     private async Task OnKeyDown(KeyboardEventArgs args)
     {
+        if (args.Key is "Tab" && SlashCommandCompletions.FirstOrDefault() is { } first)
+        {
+            await CompleteSlashCommand(first);
+            return;
+        }
+
         if (args.Key != "Enter")
             return;
 
@@ -840,6 +949,8 @@ else
         {
             _session = await QuickChats.SwitchProviderAsync(_session.Id, provider, cliProviderId);
             _agent = await AgentStore.GetAsync(_session.AgentId);
+            var globalSettings = await GlobalSettingsStore.GetAsync(GlobalSettings.WellKnownId);
+            _promptingTipsEnabled = _agent?.PromptingTips ?? globalSettings?.EnablePromptingTips ?? true;
             _selectedCli = KeyOf(_session);
 
             // Another CLI offers other models, and a name from the one being left would be passed
@@ -1007,8 +1118,18 @@ else
 
     private void OnSessionUpdated(ChatSession session)
     {
-        if (session.Id != SessionId)
+        if (session.Id != SessionId && session.ParentSessionId != SessionId)
             return;
+
+        if (session.Id != SessionId)
+        {
+            _ = InvokeAsync(async () =>
+            {
+                await RefreshChildSessionsAsync();
+                StateHasChanged();
+            });
+            return;
+        }
 
         var wasLive = _session?.IsLive ?? false;
         _session = session;

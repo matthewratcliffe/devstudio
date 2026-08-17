@@ -70,6 +70,15 @@ public sealed class Agent : Entity
     /// </summary>
     public TokenTactics TokenMinimisation { get; set; } = TokenTactics.None;
 
+    /// <summary>
+    /// Whether this agent's chats show prompting tips. Null follows the global setting; an agent
+    /// can explicitly enable or disable the tips without changing the application default.
+    /// </summary>
+    public bool? PromptingTips { get; set; }
+
+    /// <summary>Null follows the global setting; true asks the model to add a tip to its answer.</summary>
+    public bool? UseLlmForPromptingTips { get; set; }
+
     /// <summary>Project the agent belongs to. Its instructions and files travel with every session.</summary>
     public string? ProjectId { get; set; }
 

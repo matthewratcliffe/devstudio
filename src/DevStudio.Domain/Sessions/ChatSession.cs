@@ -161,6 +161,9 @@ public sealed class ChatSession : Entity
     public string Title { get; set; } = "Untitled session";
     public string AgentId { get; set; } = string.Empty;
     public string AgentName { get; set; } = string.Empty;
+
+    /// <summary>Parent conversation when this session is an underlying subagent.</summary>
+    public string? ParentSessionId { get; set; }
     public AiProvider Provider { get; set; }
 
     /// <summary>Set for a user-defined CLI, with its name kept for display.</summary>
@@ -195,6 +198,9 @@ public sealed class ChatSession : Entity
     /// so switching one on or off mid-conversation applies from the next message.
     /// </summary>
     public TokenTactics? TokenMinimisation { get; set; }
+
+    /// <summary>Whether this session asks the model to append prompting tips to its answers.</summary>
+    public bool UseLlmForPromptingTips { get; set; }
 
     /// <summary>
     /// The agent asked to move to the cheaper model itself, by writing the change-model marker in an

@@ -52,9 +52,15 @@ public sealed class CloudflareImageGenerator : IImageGenerator
         var body = new JsonObject
         {
             ["prompt"] = request.Prompt,
-            ["width"] = request.Width,
-            ["height"] = request.Height,
         };
+
+        // flux-1-schnell's input schema has no width/height (or guidance) — only the SDXL model
+        // accepts a target size. Sending them to flux is what Cloudflare rejects the request for.
+        if (!model.Contains("flux", StringComparison.OrdinalIgnoreCase))
+        {
+            body["width"] = request.Width;
+            body["height"] = request.Height;
+        }
 
         if (request.Seed is { } seed)
             body["seed"] = seed;

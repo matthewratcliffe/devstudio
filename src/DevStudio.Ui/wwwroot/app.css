@@ -455,6 +455,13 @@ select.select-sm { width: auto; font-size: 0.72rem; padding: 0.3em 1.6em 0.3em 0
 .msg .body code { color: var(--cyan); }
 
 .composer { border-top: 1px solid var(--border-soft); padding: 0.8rem 1.4rem 1.1rem; background: #05070fcc; }
+.subagent-toolbar { grid-column: 1 / -1; display:flex; align-items:center; gap:0.7rem; padding:0.7rem 1.4rem; border-bottom:1px solid var(--border-soft); background:#11101a; }
+.subagent-links { display:flex; flex-direction:column; gap:0.35rem; margin-bottom:0.7rem; }
+.subagent-link { display:flex; align-items:center; gap:0.45rem; width:fit-content; padding:0.35rem 0.55rem; border:1px solid var(--border-soft); border-radius:0.35rem; color:var(--text); text-decoration:none; }
+.subagent-link:hover { border-color:var(--cyan); background:var(--panel); }
+.dot-live { background:var(--lime); box-shadow:0 0 0.45rem var(--lime); }
+.pill-amber { color:var(--amber); border-color:color-mix(in srgb, var(--amber) 45%, transparent); }
+.subagent-readonly fieldset { min-width:0; }
 .composer textarea { min-height: 62px; }
 .composer .composer-inner { width: 100%; max-width: var(--chat-max); margin: 0 auto; }
 .composer .suggestions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem; }
@@ -465,6 +472,46 @@ select.select-sm { width: auto; font-size: 0.72rem; padding: 0.3em 1.6em 0.3em 0
     transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .suggestion:hover { color: var(--text-1); border-color: var(--cyan); background: var(--surface-2); }
+
+.command-hint {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.8rem;
+    margin-bottom: 0.6rem; padding: 0.55rem 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--amber) 55%, var(--border));
+    border-left: 3px solid var(--amber); border-radius: var(--radius-sm);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--amber) 10%, transparent), transparent);
+    color: var(--text-2); font-size: 0.78rem;
+}
+.command-hint-copy { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem 0.5rem; min-width: 0; }
+.command-hint-label { color: var(--amber); font-weight: 700; white-space: nowrap; }
+.command-hint code { color: var(--cyan); }
+.command-hint a { color: var(--text-2); white-space: nowrap; }
+.command-hint a:hover { color: var(--cyan); }
+@media (max-width: 700px) {
+    .command-hint { align-items: flex-start; flex-direction: column; }
+}
+
+.slash-command-menu {
+    display: flex; flex-direction: column; gap: 0.15rem;
+    margin-bottom: 0.6rem; padding: 0.35rem;
+    border: 1px solid var(--cyan); border-radius: var(--radius-sm);
+    background: var(--surface-1); box-shadow: 0 8px 24px #0008;
+}
+.slash-command {
+    display: flex; align-items: baseline; gap: 0.7rem; width: 100%;
+    border: 0; border-radius: var(--radius-sm); padding: 0.4rem 0.55rem;
+    background: transparent; color: var(--text-2); font: inherit; font-size: 0.78rem;
+    text-align: left; cursor: pointer;
+}
+.slash-command:hover, .slash-command:focus-visible { background: var(--surface-2); color: var(--text-1); outline: none; }
+.slash-command code { min-width: 8rem; color: var(--cyan); }
+.slash-command-usage { margin-left: auto; color: var(--text-3); white-space: nowrap; }
+.slash-command-usage code { min-width: 0; color: var(--text-2); }
+.slash-command-help { padding: 0.25rem 0.55rem 0.1rem; color: var(--text-3); font-size: 0.68rem; }
+
+@media (max-width: 700px) {
+    .slash-command { align-items: flex-start; flex-wrap: wrap; gap: 0.2rem 0.7rem; }
+    .slash-command-usage { margin-left: 8rem; }
+}
 
 .composer-row { display: flex; gap: 0.6rem; align-items: flex-end; }
 .composer .composer-row textarea { flex: 1; }
