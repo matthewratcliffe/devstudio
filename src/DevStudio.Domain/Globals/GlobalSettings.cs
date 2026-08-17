@@ -32,6 +32,23 @@ public sealed class GlobalSettings : Entity
     /// </summary>
     public List<StoredFile> Files { get; set; } = [];
 
+    /// <summary>Registered repository the reference files are synced from. Null means the feature is off.</summary>
+    public string? FilesRepositoryId { get; set; }
+
+    /// <summary>Folder inside the repository holding the files. Empty means its root.</summary>
+    public string FilesFolder { get; set; } = string.Empty;
+
+    /// <summary>Fetch and fast-forward the checkout before reading it, so a sync is never stale.</summary>
+    public bool FilesPullBeforeSync { get; set; } = true;
+
+    public DateTimeOffset? FilesLastSyncedAt { get; set; }
+
+    /// <summary>Why the last files sync failed, or null when it did not.</summary>
+    public string? FilesLastError { get; set; }
+
+    /// <summary>What the last files sync did, line by line.</summary>
+    public List<string> FilesLastLog { get; set; } = [];
+
     /// <summary>Whether agent and browser workspace paths must stay inside their workspace.</summary>
     public bool ValidateWorkspacePaths { get; set; } = true;
 

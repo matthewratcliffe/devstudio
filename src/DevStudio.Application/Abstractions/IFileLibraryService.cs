@@ -29,6 +29,7 @@ public interface IFileLibraryService
         string fileName,
         Stream content,
         string contentType,
+        string? teamSourcePath = null,
         CancellationToken ct = default);
 
     Task<bool> DeleteAsync(FileScope scope, string fileId, CancellationToken ct = default);

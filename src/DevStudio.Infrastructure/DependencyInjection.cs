@@ -1,5 +1,6 @@
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
+using DevStudio.Application.Globals;
 using DevStudio.Application.Sessions;
 using DevStudio.Application.Teams;
 using DevStudio.Domain.Agents;
@@ -11,6 +12,7 @@ using DevStudio.Domain.Sessions;
 using DevStudio.Domain.Skills;
 using DevStudio.Domain.Workflows;
 using DevStudio.Infrastructure.Git;
+using DevStudio.Infrastructure.Globals;
 using DevStudio.Infrastructure.Updates;
 using DevStudio.Infrastructure.Images;
 using DevStudio.Infrastructure.Mcp;
@@ -125,6 +127,11 @@ public static class DependencyInjection
         // Shared definitions read out of a git repository, and the catch-up import on start.
         services.AddSingleton<ITeamSettingsService, TeamSettingsService>();
         services.AddHostedService<TeamSyncHostedService>();
+
+        // Standards reference files read out of their own git repository: pulled on an interval and
+        // best-effort before every new session, so they never go stale without anybody noticing.
+        services.AddSingleton<IStandardsFilesSyncService, StandardsFilesSyncService>();
+        services.AddHostedService<StandardsFilesSyncHostedService>();
 
         services.AddSingleton<SchedulerHostedService>();
         services.AddHostedService(sp => sp.GetRequiredService<SchedulerHostedService>());

@@ -53,6 +53,7 @@ public class McpWorkspaceCredentialTests : IDisposable
             tokens,
             Store<Project>(),
             Store<GlobalSettings>(),
+            new StubStandardsFilesSyncService(),
             _options,
             NullLogger<WorkspaceService>.Instance);
     }

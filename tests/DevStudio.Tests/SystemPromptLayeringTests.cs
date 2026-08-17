@@ -37,6 +37,7 @@ public class SystemPromptLayeringTests : IDisposable
             new StubTokens(),
             _projects,
             _globals,
+            new StubStandardsFilesSyncService(),
             options,
             NullLogger<WorkspaceService>.Instance);
     }

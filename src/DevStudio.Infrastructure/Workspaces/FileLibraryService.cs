@@ -42,6 +42,7 @@ public sealed class FileLibraryService : IFileLibraryService
         string fileName,
         Stream content,
         string contentType,
+        string? teamSourcePath = null,
         CancellationToken ct = default)
     {
         var safeName = Path.GetFileName(fileName);
@@ -77,6 +78,7 @@ public sealed class FileLibraryService : IFileLibraryService
                 ContentType = contentType,
                 SizeBytes = info.Length,
                 IsText = TextExtensions.Contains(Path.GetExtension(safeName).ToLowerInvariant()),
+                TeamSourcePath = teamSourcePath,
             };
 
             // Re-uploading the same name replaces the entry rather than duplicating it.

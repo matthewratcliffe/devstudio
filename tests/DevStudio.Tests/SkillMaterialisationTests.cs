@@ -50,6 +50,7 @@ public class SkillMaterialisationTests : IDisposable
             new StubTokens(),
             Store<Project>(options),
             Store<GlobalSettings>(options),
+            new StubStandardsFilesSyncService(),
             options,
             NullLogger<WorkspaceService>.Instance);
     }

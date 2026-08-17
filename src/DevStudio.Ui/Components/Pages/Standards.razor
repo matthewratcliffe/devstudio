@@ -1,7 +1,9 @@
 @page "/standards"
 @inject IEntityStore<GlobalSettings> SettingsStore
 @inject IEntityStore<Project> ProjectStore
+@inject IEntityStore<GitRepository> RepositoryStore
 @inject IFileLibraryService Files
+@inject IStandardsFilesSyncService StandardsSync
 
 <PageTitle>Standards · devStudio</PageTitle>
 
@@ -52,6 +54,73 @@
             document, a setup guide, a schema.
         </p>
 
+        <div class="divider"></div>
+        <div class="section-tag">Source from a repository</div>
+
+        @if (_repositories.Count == 0)
+        {
+            <p class="mono-dim">
+                No repositories yet. Clone or attach one on the
+                <a href="/repositories">Repositories</a> page first.
+            </p>
+        }
+        else
+        {
+            <div class="form-grid">
+                <div class="field">
+                    <label>Repository</label>
+                    <select value="@(_settings.FilesRepositoryId ?? string.Empty)"
+                            @onchange="e => _settings.FilesRepositoryId = Blank(e.Value?.ToString())">
+                        <option value="">None — uploaded files only</option>
+                        @foreach (var repository in _repositories)
+                        {
+                            <option value="@repository.Id">@repository.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Folder in the repository</label>
+                    <input type="text" @bind="_settings.FilesFolder" placeholder="standards" />
+                    <span class="hint">Blank for the repository root. Every file directly in the folder is imported.</span>
+                </div>
+            </div>
+
+            <label class="check">
+                <input type="checkbox" @bind="_settings.FilesPullBeforeSync" />
+                <span>Pull before reading, so a sync is never stale</span>
+            </label>
+
+            <div class="mono-dim" style="margin-top:0.4rem">
+                Also pulled automatically every 15 minutes and before every new session starts — a
+                failed pull never blocks a conversation, it just keeps the last checkout.
+            </div>
+
+            <div class="btn-row" style="margin-top:0.8rem">
+                <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="SaveAsync">Save</button>
+                <button class="btn btn-sm" disabled="@(_busy || _settings.FilesRepositoryId is null)" @onclick="SyncAsync">
+                    @(_syncing ? "Syncing…" : "Sync now")
+                </button>
+            </div>
+
+            <div class="mono-dim" style="margin-top:0.6rem">
+                @if (_settings.FilesLastSyncedAt is { } synced)
+                {
+                    <text>Last synced <LocalTime Value="@synced" Format="daytime" />.</text>
+                }
+                else
+                {
+                    <text>Never synced.</text>
+                }
+            </div>
+
+            @if (_settings.FilesLastError is { Length: > 0 } error)
+            {
+                <div class="toast err" style="margin-top:0.7rem">@error</div>
+            }
+        }
+
+        <div class="divider"></div>
+
         <InputFile OnChange="UploadAsync" multiple class="btn btn-sm" />
 
         @if (_uploading)
@@ -70,6 +139,10 @@
                     <tr>
                         <td>
                             @file.FileName
+                            @if (file.TeamSourcePath is { Length: > 0 })
+                            {
+                                <span class="pill" title="Synced from the repository — the next sync writes it back over">repo</span>
+                            }
                             @if (file.IsText)
                             {
                                 <button class="btn btn-sm btn-ghost" @onclick="() => PreviewAsync(file)">peek</button>
@@ -108,9 +181,14 @@
 
     private GlobalSettings _settings = new();
     private List<Project> _optedOut = [];
+    private IReadOnlyList<GitRepository> _repositories = [];
     private string? _preview;
     private string _previewName = string.Empty;
     private bool _uploading;
+    private bool _saving;
+    private bool _syncing;
+
+    private bool _busy => _saving || _syncing;
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 
@@ -123,6 +201,7 @@
     private async Task ReloadAsync()
     {
         _settings = await SettingsStore.GetAsync(GlobalSettings.WellKnownId) ?? new GlobalSettings();
+        _repositories = await RepositoryStore.GetAllAsync();
 
         var projects = await ProjectStore.GetAllAsync();
         _optedOut = projects.Where(p => !p.Archived && !p.InheritGlobalInstructions).ToList();
@@ -130,9 +209,37 @@
 
     private async Task SaveAsync()
     {
-        await SettingsStore.UpsertAsync(_settings);
-        Layout.Notify("Standards saved.", "ok");
+        _saving = true;
+        try
+        {
+            await SettingsStore.UpsertAsync(_settings);
+            Layout.Notify("Standards saved.", "ok");
+        }
+        finally
+        {
+            _saving = false;
+        }
     }
+
+    private async Task SyncAsync()
+    {
+        // Saved first, or a sync would read the repository the page is no longer showing.
+        await SettingsStore.UpsertAsync(_settings);
+
+        _syncing = true;
+        try
+        {
+            var result = await StandardsSync.SyncAsync();
+            await ReloadAsync();
+            Layout.Notify(result.Message, result.Succeeded ? "ok" : "err");
+        }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+
+    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     private async Task UploadAsync(InputFileChangeEventArgs args)
     {
