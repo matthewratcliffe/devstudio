@@ -197,3 +197,21 @@ window.addEventListener('keydown', async function (e) {
         location.reload();
     }
 });
+
+// All application modals use the shared .modal-backdrop shape. Route Escape through the modal's
+// own Cancel/Close button so Blazor runs the same cleanup path as an explicit click.
+window.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+
+    const modal = Array.from(document.querySelectorAll('.modal-backdrop .modal'))
+        .find(element => element.getClientRects().length > 0);
+    if (!modal) return;
+
+    const action = Array.from(modal.querySelectorAll('button'))
+        .find(button => /^(cancel|close|close preview)$/i.test(button.textContent.trim()));
+    if (!action || action.disabled) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    action.click();
+});

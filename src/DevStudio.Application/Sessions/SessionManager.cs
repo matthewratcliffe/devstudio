@@ -100,10 +100,13 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             Title = string.IsNullOrWhiteSpace(request.Title) ? BuildTitle(prompt) : request.Title!,
             AgentId = agent.Id,
             AgentName = agent.Name,
+            ParentSessionId = request.ParentSessionId,
             Provider = agent.Provider,
             CliProviderId = agent.CliProviderId,
             PermissionMode = request.PermissionMode ?? agent.PermissionMode,
             TokenMinimisation = request.TokenMinimisation,
+            UseLlmForPromptingTips = agent.UseLlmForPromptingTips ??
+                                     (await _globalSettings.GetAsync(GlobalSettings.WellKnownId, ct))?.UseLlmForPromptingTips == true,
             Trigger = request.Trigger,
             ProjectId = request.ProjectId ?? agent.ProjectId,
             McpServerIds = [.. request.McpServerIds],
@@ -207,6 +210,8 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             DefaultPrompt = agent.DefaultPrompt,
             PermissionMode = agent.PermissionMode,
             TokenMinimisation = agent.TokenMinimisation,
+            PromptingTips = agent.PromptingTips,
+            UseLlmForPromptingTips = agent.UseLlmForPromptingTips,
             ProjectId = agent.ProjectId,
             AccountId = agent.AccountId,
             FallbackAccountId = agent.FallbackAccountId,
@@ -760,6 +765,9 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                 agent, session.ProjectId, session.Id, TokenMinimisation.For(agent, session),
                 HandoverTarget(agent, session, choice), turnCts.Token);
 
+            if (session.UseLlmForPromptingTips)
+                systemPrompt = $"{systemPrompt}\n\n{LlmPromptingTipInstruction}";
+
             // Re-resolved each turn so moving a project onto another account takes effect straight away.
             var account = await _accounts.ResolveAsync(agent, session.ProjectId, turnCts.Token);
             session.AccountId = account.AccountId;
@@ -944,6 +952,13 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         await SummariseIfDueAsync(live);
         await DeriveGoalIfDueAsync(live);
     }
+
+    private const string LlmPromptingTipInstruction = """
+        After answering a user's request, add a brief section headed "Prompting tip" with one
+        practical suggestion for making their next prompt clearer, more focused, or less costly.
+        Keep it to one sentence, and omit it when the message is only a trivial acknowledgement.
+        Do not let this tip prevent you from completing the requested work.
+        """;
 
     /// <summary>Turns a session must reach before an unset goal is worth guessing at.</summary>
     private const int GoalDerivationTurnThreshold = 2;

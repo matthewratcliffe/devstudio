@@ -330,6 +330,26 @@
                                      ValueChanged="v => _editing.TokenMinimisation = v ?? TokenTactics.None" />
 
             <div class="divider"></div>
+            <div class="field">
+                <label>Prompting tips</label>
+                <select value="@PromptingTipsValue" @onchange="SetPromptingTips">
+                    <option value="inherit">Follow application setting</option>
+                    <option value="on">Show tips for this agent</option>
+                    <option value="off">Hide tips for this agent</option>
+                </select>
+                <span class="hint">Tips teach clearer, more focused and lower-cost prompting in the chat composer.</span>
+            </div>
+            <div class="field">
+                <label>LLM prompting tips</label>
+                <select value="@UseLlmPromptingTipsValue" @onchange="SetUseLlmPromptingTips">
+                    <option value="inherit">Follow application setting</option>
+                    <option value="on">Use LLM for this agent</option>
+                    <option value="off">Use local tips only</option>
+                </select>
+                <span class="hint">The LLM option adds a tailored tip to answers and uses extra tokens.</span>
+            </div>
+
+            <div class="divider"></div>
 
             <div class="grid grid-2">
                 <div>
@@ -386,6 +406,20 @@
     private IReadOnlyList<CliProvider> _cliProviders = [];
     private TokenTactics _defaultTokenMinimisation = new GlobalSettings().DefaultTokenMinimisation;
 
+    private string PromptingTipsValue => _editing?.PromptingTips switch
+    {
+        true => "on",
+        false => "off",
+        _ => "inherit",
+    };
+
+    private string UseLlmPromptingTipsValue => _editing?.UseLlmForPromptingTips switch
+    {
+        true => "on",
+        false => "off",
+        _ => "inherit",
+    };
+
     private Agent? _editing;
     private bool _isNew;
     private bool _customModel;
@@ -415,6 +449,22 @@
     }
 
     private Agent NewAgent() => new() { TokenMinimisation = _defaultTokenMinimisation };
+
+    private void SetPromptingTips(ChangeEventArgs args) =>
+        _editing!.PromptingTips = args.Value?.ToString() switch
+        {
+            "on" => true,
+            "off" => false,
+            _ => null,
+        };
+
+    private void SetUseLlmPromptingTips(ChangeEventArgs args) =>
+        _editing!.UseLlmForPromptingTips = args.Value?.ToString() switch
+        {
+            "on" => true,
+            "off" => false,
+            _ => null,
+        };
 
     /// <summary>Model choices for the agent's provider, from configuration or the CLI definition.</summary>
     private IReadOnlyList<string> ModelsFor(Agent agent) => agent.Provider switch
@@ -637,6 +687,8 @@
         DefaultPrompt = agent.DefaultPrompt,
         PermissionMode = agent.PermissionMode,
         TokenMinimisation = agent.TokenMinimisation,
+        PromptingTips = agent.PromptingTips,
+        UseLlmForPromptingTips = agent.UseLlmForPromptingTips,
         ProjectId = agent.ProjectId,
         AccountId = agent.AccountId,
         FallbackAccountId = agent.FallbackAccountId,

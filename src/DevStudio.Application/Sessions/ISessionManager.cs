@@ -43,6 +43,9 @@ public sealed record StartSessionRequest
 
     /// <summary>Run in this directory instead of provisioning a fresh workspace.</summary>
     public string? WorkingDirectoryOverride { get; init; }
+
+    /// <summary>Set when this conversation is an underlying subagent of another session.</summary>
+    public string? ParentSessionId { get; init; }
 }
 
 /// <summary>

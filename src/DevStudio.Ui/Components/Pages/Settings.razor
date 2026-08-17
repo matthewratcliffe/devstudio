@@ -79,6 +79,26 @@
     </div>
 
     <div class="divider"></div>
+    <div class="section-tag">Prompting tips</div>
+    <div class="field-row">
+        <div>
+            <label for="enable-prompting-tips">Show prompting tips in chat</label>
+            <div class="hint">
+                Gives practical suggestions for clearer prompts and lower-cost requests. Tips are
+                generated locally and do not use model tokens. Individual agents can override this.
+            </div>
+        </div>
+        <input id="enable-prompting-tips" type="checkbox" @bind="_settings.EnablePromptingTips" />
+    </div>
+    <div class="field-row">
+        <div>
+            <label for="use-llm-prompting-tips">Use LLM for prompting tips</label>
+            <div class="hint">Asks the model to add a tailored tip to its answer. Warning: this uses extra tokens.</div>
+        </div>
+        <input id="use-llm-prompting-tips" type="checkbox" @bind="_settings.UseLlmForPromptingTips" />
+    </div>
+
+    <div class="divider"></div>
     <div class="section-tag">Token minimisation defaults</div>
     <p class="small">
         These tactics are selected for new agents and quick chats. Existing agents keep their own

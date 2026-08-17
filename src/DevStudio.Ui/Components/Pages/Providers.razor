@@ -156,7 +156,7 @@
 
         <div class="field">
             <label>API token</label>
-            <input type="password" @bind="_imageSettings.Pollinations.ApiToken" placeholder="anonymous" />
+            <input type="password" @bind="_imageSettings.Pollinations.ApiToken" @bind:event="oninput" placeholder="anonymous" />
             <span class="hint">
                 Free from <code>auth.pollinations.ai</code>. Without one you get a watermark and one
                 image every @_imageSettings.Pollinations.MinSecondsBetweenRequests seconds. Use a
@@ -185,13 +185,13 @@
 
         <div class="field">
             <label>Account id</label>
-            <input type="text" @bind="_imageSettings.Cloudflare.AccountId" />
+            <input type="text" @bind="_imageSettings.Cloudflare.AccountId" @bind:event="oninput" />
             <span class="hint">On the Workers &amp; Pages overview in the Cloudflare dashboard.</span>
         </div>
 
         <div class="field">
             <label>API token</label>
-            <input type="password" @bind="_imageSettings.Cloudflare.ApiToken" />
+            <input type="password" @bind="_imageSettings.Cloudflare.ApiToken" @bind:event="oninput" />
             <span class="hint">
                 Needs the Workers AI permission. 10,000 neurons a day are free — about 500 images at
                 1024×1024 on FLUX.1 Schnell — resetting at 00:00 UTC.
@@ -213,7 +213,7 @@
 
         <div class="field">
             <label>AI Studio key</label>
-            <input type="password" @bind="_imageSettings.Gemini.ApiKey" />
+            <input type="password" @bind="_imageSettings.Gemini.ApiKey" @bind:event="oninput" />
             <span class="hint">
                 The only backend here that can edit an existing image. Free-tier limits vary by key
                 and region; the pro image model needs billing enabled.
