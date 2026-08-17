@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Agents;
 using DevStudio.Application.Common;
+using DevStudio.Application.Globals;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Globals;
 using DevStudio.Domain.Mcp;
@@ -30,6 +31,7 @@ public sealed class WorkspaceService : IWorkspaceService
     private readonly IMcpTokenService _mcpTokens;
     private readonly IEntityStore<Project> _projects;
     private readonly IEntityStore<GlobalSettings> _globals;
+    private readonly IStandardsFilesSyncService _standardsFiles;
     private readonly OrchestratorOptions _options;
     private readonly ILogger<WorkspaceService> _logger;
 
@@ -41,6 +43,7 @@ public sealed class WorkspaceService : IWorkspaceService
         IMcpTokenService mcpTokens,
         IEntityStore<Project> projects,
         IEntityStore<GlobalSettings> globals,
+        IStandardsFilesSyncService standardsFiles,
         IOptions<OrchestratorOptions> options,
         ILogger<WorkspaceService> logger)
     {
@@ -51,6 +54,7 @@ public sealed class WorkspaceService : IWorkspaceService
         _mcpTokens = mcpTokens;
         _projects = projects;
         _globals = globals;
+        _standardsFiles = standardsFiles;
         _options = options.Value;
         _logger = logger;
     }
@@ -103,6 +107,8 @@ public sealed class WorkspaceService : IWorkspaceService
             Directory.CreateDirectory(path);
             workspace = new SessionWorkspace(path, null, null, null);
         }
+
+        await TrySyncStandardsFilesAsync(ct);
 
         await MaterialiseSkillsAsync(agent, workspace.Path, ct);
         await MaterialiseMcpAsync(agent, workspace.Path, extraServerIds, ct);
@@ -325,6 +331,28 @@ public sealed class WorkspaceService : IWorkspaceService
         {
             // Cosmetic. A session that cannot write the exclude file still runs fine.
             _logger.LogWarning(ex, "Could not update the git exclude list for {Path}", workspacePath);
+        }
+    }
+
+    /// <summary>
+    /// Best-effort pull of the standards files repository before a new session materialises them.
+    /// A network blip or a stale checkout must not stop a conversation from starting — the sync
+    /// already reports its own failure onto <see cref="GlobalSettings"/> and never throws, but this
+    /// is wrapped anyway so a defect there cannot become one here.
+    /// </summary>
+    private async Task TrySyncStandardsFilesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var settings = await _globals.GetAsync(GlobalSettings.WellKnownId, ct);
+            if (string.IsNullOrWhiteSpace(settings?.FilesRepositoryId))
+                return;
+
+            await _standardsFiles.SyncAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Standards files sync failed before session start");
         }
     }
 

@@ -17,4 +17,11 @@ public sealed class StoredFile
 
     /// <summary>Set for text files so the UI can preview them without touching disk.</summary>
     public bool IsText { get; set; }
+
+    /// <summary>
+    /// Relative path inside the source repository this file was synced from, if any. Null for a file
+    /// uploaded by hand — that is what keeps a sync from touching it and a repo file's own re-sync
+    /// from becoming a duplicate.
+    /// </summary>
+    public string? TeamSourcePath { get; set; }
 }
