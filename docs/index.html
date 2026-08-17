@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>devStudio — run your coding CLIs as a fleet</title>
-<meta name="description" content="A self-hosted console that runs Claude Code, Codex and any other coding CLI as agents: concurrent sessions, per-session git worktrees, schedules and workflows. Run it as a container or install it on Windows, macOS and Linux. No API keys — it drives the CLIs you are already signed in to.">
+<meta name="description" content="A self-hosted console that runs Claude Code, OpenAI Codex, OpenCoder and any other coding CLI as agents: concurrent sessions, per-session git worktrees, schedules, workflows and queues. Run it as a container or install it on Windows, macOS and Linux.">
 <meta name="theme-color" content="#05070f">
 <link rel="icon" href="favicon.png">
 <link rel="stylesheet" href="styles.css">
@@ -12,7 +12,7 @@
 <link rel="sitemap" type="application/xml" href="sitemap.xml">
 
 <meta property="og:title" content="devStudio — run your coding CLIs as a fleet">
-<meta property="og:description" content="A self-hosted console for Claude Code, Codex and any CLI you already pay for. Concurrent sessions, a git worktree each, schedules and workflows. Container or desktop app.">
+<meta property="og:description" content="A self-hosted console for Claude Code, OpenAI Codex, OpenCoder and any CLI you already use. Concurrent sessions, git worktrees, schedules, workflows and queues. Container or desktop app.">
 <meta property="og:type" content="website">
 </head>
 <body>
@@ -39,7 +39,7 @@
                 <span class="rule">One container. Every session in its own checkout.</span>
             </h1>
             <p class="lede">
-                devStudio drives <strong>Claude Code</strong>, <strong>Codex</strong> and whatever else you
+                devStudio drives <strong>Claude Code</strong>, <strong>Codex</strong>, <strong>OpenCoder</strong> and whatever else you
                 already have installed — as agents you configure once and then leave to work. Several at a
                 time, each in its own git worktree, on a schedule if you want one.
             </p>
@@ -86,7 +86,7 @@
                 three in the morning because a cron expression said so.
             </p>
             <p>
-                Nothing is reimplemented. When an agent works, it is <code>claude</code> or <code>codex</code>
+                Nothing is reimplemented. When an agent works, it is <code>claude</code>, <code>codex</code> or <code>opencoder</code>
                 on a PATH, signed in as you, reading the same files it would read if you had typed the command
                 yourself. That is the whole design: the orchestrator arranges the work and keeps the
                 transcript — the CLI does the thinking.
@@ -132,6 +132,10 @@
             <div class="item">
                 <h3>Schedules</h3>
                 <p>Cron expressions or plain timers, pointed at an agent or a workflow. Unattended runs need no one at the keyboard.</p>
+            </div>
+            <div class="item">
+                <h3>Queues</h3>
+                <p>Give a backlog to an agent and let it drain work with controlled concurrency, retries and usage-limit backoff.</p>
             </div>
             <div class="item">
                 <h3>Standards</h3>
@@ -206,6 +210,10 @@
             <div class="provider">
                 <div class="who">OpenAI Codex</div>
                 <div class="what">Same treatment, including resuming a conversation across turns and reporting what each command did.</div>
+            </div>
+            <div class="provider">
+                <div class="who">OpenCoder</div>
+                <div class="what">The OpenCoder npm CLI is available as a first-class provider, with configurable executable and model settings alongside the other built-in agents.</div>
             </div>
             <div class="provider">
                 <div class="who">Any installed CLI</div>

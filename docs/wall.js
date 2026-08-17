@@ -41,7 +41,7 @@
         },
         {
             agent: 'migrator',
-            provider: 'claude',
+            provider: 'opencoder',
             state: 'running',
             script: [
                 { tool: 'Bash', arg: 'git worktree list', took: '22ms' },

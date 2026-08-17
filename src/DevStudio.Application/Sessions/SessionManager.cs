@@ -1282,6 +1282,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
     {
         AiProvider.Claude => _options.ClaudeModels,
         AiProvider.Codex => _options.CodexModels,
+        AiProvider.Opencoder => _options.OpencoderModels,
         // A user-defined CLI keeps its models on its own definition, which this does not read. Its
         // agents can still hand over, through a handover configured on the agent.
         _ => [],
