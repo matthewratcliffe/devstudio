@@ -484,6 +484,12 @@ public sealed class WorkspaceService : IWorkspaceService
                 foreach (var file in settings.Files)
                     builder.AppendLine($"- {file.FileName}");
                 builder.AppendLine();
+                builder.AppendLine(
+                    "These cover multiple languages and stacks. Before applying one, check that it " +
+                    "actually matches the language/framework of the code you're touching (the file name " +
+                    "and its folder prefix usually say which) — don't apply a C++ file's rules to C# code, " +
+                    "or vice versa. Skip files for languages that aren't in play.");
+                builder.AppendLine();
             }
         }
 

@@ -138,14 +138,16 @@ public sealed class StandardsFilesSyncService : IStandardsFilesSyncService
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var imported = 0;
 
-        foreach (var file in Directory.EnumerateFiles(folder)
+        foreach (var file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+                     .Where(f => !IsUnderGitFolder(folder, f))
                      .OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
         {
-            var relative = Path.GetFileName(file);
+            var relative = Path.GetRelativePath(folder, file).Replace(Path.DirectorySeparatorChar, '/');
+            var flattenedName = relative.Replace("/", "__");
             var contentType = ContentTypeOf(relative);
 
             await using (var stream = File.OpenRead(file))
-                await _files.SaveAsync(FileScope.Global, relative, stream, contentType, relative, ct);
+                await _files.SaveAsync(FileScope.Global, flattenedName, stream, contentType, relative, ct);
 
             seen.Add(relative);
             imported++;
@@ -167,6 +169,13 @@ public sealed class StandardsFilesSyncService : IStandardsFilesSyncService
         }
 
         return (imported, removed);
+    }
+
+    private static bool IsUnderGitFolder(string root, string file)
+    {
+        var relative = Path.GetRelativePath(root, file);
+        return relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Any(segment => segment.Equals(".git", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string ContentTypeOf(string fileName) =>
