@@ -316,6 +316,31 @@ public sealed class ChatSession : Entity
     /// <summary>Free-form operator notes, also readable and writable by agents over MCP.</summary>
     public string Notes { get; set; } = string.Empty;
 
+    /// <summary>
+    /// What this conversation is trying to achieve, in a sentence or two. Settable by the operator
+    /// from the sidebar, by the agent over MCP, or derived automatically once there is enough
+    /// conversation to summarise. Empty means no goal has been set yet.
+    /// </summary>
+    public string Goal { get; set; } = string.Empty;
+
+    /// <summary>True when <see cref="Goal"/> was written by accepting an auto-derived suggestion
+    /// rather than a person or the agent choosing its own words — shown in the UI so an operator
+    /// knows it started as a guess.</summary>
+    public bool GoalAutoDerived { get; set; }
+
+    /// <summary>
+    /// A guessed goal awaiting confirmation. Auto-derivation never writes <see cref="Goal"/>
+    /// directly — a guess only starts being "the" goal, and gets acted on as one, once a person
+    /// accepts or edits it from the sidebar. Cleared once accepted or dismissed.
+    /// </summary>
+    public string ProposedGoal { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The turn count at which auto-derivation last ran (successfully or not), so a session that
+    /// never produces a usable goal is not retried every single turn.
+    /// </summary>
+    public int LastGoalAttemptTurn { get; set; }
+
     /// <summary>Soft delete, so a session can be recovered from the archive.</summary>
     public bool IsArchived { get; set; }
 

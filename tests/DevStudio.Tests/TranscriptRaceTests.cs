@@ -3,6 +3,7 @@ using DevStudio.Application.Common;
 using DevStudio.Application.Sessions;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Common;
+using DevStudio.Domain.Globals;
 using DevStudio.Domain.Projects;
 using DevStudio.Domain.Providers;
 using DevStudio.Domain.Sessions;
@@ -35,6 +36,7 @@ public class TranscriptRaceTests : IDisposable
             new StubWorkspace(_root),
             new StubAccounts(_root),
             Store<Project>(options),
+            Store<GlobalSettings>(options),
             options,
             NullLogger<SessionManager>.Instance);
     }
