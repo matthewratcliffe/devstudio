@@ -11,7 +11,7 @@ public interface INotificationService
     /// <summary>Newest first.</summary>
     Task<IReadOnlyList<Notification>> GetAllAsync(CancellationToken ct = default);
 
-    Task<Notification> CreateAsync(string title, string body, string kind, string createdBy, CancellationToken ct = default);
+    Task<Notification> CreateAsync(string title, string body, string kind, string createdBy, string? sessionId = null, CancellationToken ct = default);
 
     /// <summary>Removes one notification for everyone.</summary>
     Task<bool> DismissAsync(string id, CancellationToken ct = default);

@@ -380,7 +380,7 @@ public sealed class CliCommandService : ICliCommandService
                 if (title.Length == 0)
                     throw new InvalidOperationException("Usage: notifications create <title>");
 
-                var notification = await _notifications.CreateAsync(title, string.Empty, "info", invokedBy, ct);
+                var notification = await _notifications.CreateAsync(title, string.Empty, "info", invokedBy, ct: ct);
                 return TerminalResult.Of($"Raised notification {notification.Id}.");
             }
 

@@ -20,7 +20,7 @@ public sealed class NotificationService : INotificationService
         return all.OrderByDescending(n => n.CreatedAt).ToList();
     }
 
-    public async Task<Notification> CreateAsync(string title, string body, string kind, string createdBy, CancellationToken ct = default)
+    public async Task<Notification> CreateAsync(string title, string body, string kind, string createdBy, string? sessionId = null, CancellationToken ct = default)
     {
         var notification = new Notification
         {
@@ -28,6 +28,7 @@ public sealed class NotificationService : INotificationService
             Body = body.Trim(),
             Kind = string.IsNullOrWhiteSpace(kind) ? "info" : kind.Trim(),
             CreatedBy = createdBy,
+            SessionId = string.IsNullOrWhiteSpace(sessionId) ? null : sessionId,
         };
 
         await _store.UpsertAsync(notification, ct);

@@ -17,4 +17,7 @@ public sealed class Notification : Entity
 
     /// <summary>Who raised it: "mcp", "agent:&lt;name&gt;", or a signed-in username.</summary>
     public string CreatedBy { get; set; } = "manual";
+
+    /// <summary>Set when the notification is about a specific session, so a viewer can jump to it.</summary>
+    public string? SessionId { get; set; }
 }
