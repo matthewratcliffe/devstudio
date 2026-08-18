@@ -52,7 +52,7 @@ RUN apt-get update \
     && curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_$(dpkg --print-architecture).deb" -o /tmp/glab.deb \
     && apt-get install -y --no-install-recommends /tmp/glab.deb \
     && rm -f /tmp/glab.deb \
-    && npm install -g @anthropic-ai/claude-code @openai/codex opencode \
+    && npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai \
     && npm cache clean --force \
     && apt-get purge -y gnupg \
     && apt-get autoremove -y \

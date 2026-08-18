@@ -138,6 +138,9 @@ public class SessionAutoArchiveTests : IDisposable
         public async Task<ChatSession?> GetAsync(string sessionId, CancellationToken ct = default) =>
             await _store.GetAsync(sessionId, ct);
 
+        public Task NotifyUpdatedAsync(ChatSession session, CancellationToken ct = default) =>
+            _store.UpsertAsync(session, ct);
+
         public Task<ChatSession> StartAsync(StartSessionRequest request, CancellationToken ct = default) =>
             throw new NotSupportedException();
 

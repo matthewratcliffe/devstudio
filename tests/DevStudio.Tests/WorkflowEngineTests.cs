@@ -214,6 +214,9 @@ public class WorkflowEngineTests
         public Task<ChatSession?> GetAsync(string sessionId, CancellationToken ct = default) =>
             Task.FromResult<ChatSession?>(null);
 
+        public Task NotifyUpdatedAsync(ChatSession session, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
         public Task<IReadOnlyList<ChatSession>> GetAllAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<ChatSession>>([]);
 
