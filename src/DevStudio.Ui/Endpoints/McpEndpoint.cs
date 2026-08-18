@@ -266,7 +266,8 @@ public static class McpEndpoint
         Tool("create_notification", "Raise a notification shown to everyone using the app right now, in real time. Use it for things a human should see: a workflow finished, something needs attention, a run failed.", Props(
             ("title", "string", "One line, shown bold in the list and the sidebar."),
             ("body", "string", "Optional detail shown under the title."),
-            ("kind", "string", "Optional: info, ok, warn or err. Defaults to info.")), "title"),
+            ("kind", "string", "Optional: info, ok, warn or err. Defaults to info."),
+            ("sessionId", "string", "Optional. Your own session id, so the notification links to this conversation.")), "title"),
     ];
 
     private static async Task<JsonObject> CallToolAsync(
@@ -620,6 +621,7 @@ public static class McpEndpoint
                     arguments["body"]?.GetValue<string>() ?? string.Empty,
                     arguments["kind"]?.GetValue<string>() ?? "info",
                     agentName is null ? "mcp" : $"agent:{agentName}",
+                    arguments["sessionId"]?.GetValue<string>(),
                     ct);
 
                 return Text($"Notification {notification.Id} raised.");

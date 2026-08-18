@@ -42,6 +42,10 @@ else
                 </dl>
 
                 <div class="btn-row">
+                    @if (notification.SessionId is { Length: > 0 })
+                    {
+                        <a class="btn btn-sm btn-primary" href="/chat/@notification.SessionId">Go to conversation</a>
+                    }
                     <button class="btn btn-sm btn-danger" @onclick="() => DismissAsync(notification)">Dismiss</button>
                 </div>
             </div>
