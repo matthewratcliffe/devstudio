@@ -3,7 +3,7 @@
 [![CI](https://github.com/matthewratcliffe/devstudio/actions/workflows/ci.yml/badge.svg)](https://github.com/matthewratcliffe/devstudio/actions/workflows/ci.yml)
 [![ghcr.io](https://img.shields.io/badge/ghcr.io-devstudio-blue?logo=docker&logoColor=white)](https://github.com/matthewratcliffe/devstudio/pkgs/container/devstudio)
 
-A self-hosted console for running **Claude Code**, **OpenAI Codex**, and **OpenCoder** agents side by side. Create
+A self-hosted console for running **Claude Code**, **OpenAI Codex**, and **OpenCode** agents side by side. Create
 agents, chat with them concurrently, chain them into scheduled workflows, give them repos and
 worktrees to work in, and let them talk back to the orchestrator over MCP.
 
@@ -14,7 +14,7 @@ only credential involved is the login you complete in the web UI.
 
 | Area | What you get |
 | --- | --- |
-| **Agents** | Any number, each bound to `claude`, `codex`, `opencoder` or a CLI you define yourself, with its own system prompt, model, permission mode, skills and MCP servers. |
+| **Agents** | Any number, each bound to `claude`, `codex`, `opencode` or a CLI you define yourself, with its own system prompt, model, permission mode, skills and MCP servers. |
 | **Bring your own CLI** | Describe any installed, already-signed-in CLI on the **CLI providers** page — executable, argument template, output format, sign-in command — and it becomes an agent provider. No code change, no API key. |
 | **Concurrent chats** | Sessions run in parallel up to a configurable cap. Each session queues its own turns, so you can keep typing while an agent is working. |
 | **Team settings** | One git repository holding the team's agents, workflows, skills, schedules and standards. Point every install at it and they all get the same definitions, reviewed and versioned like code instead of retyped on each machine. Anything you make in the UI stays local and is never touched by a sync ([how](#team-settings)). |
@@ -617,7 +617,7 @@ Agents can still produce SVG and mermaid diagrams directly as text, and those pr
 Model, thinking level and base branch are all dropdowns rather than free text:
 
 - **Model** is offered per provider from `Orchestrator__ClaudeModels` / `CodexModels` /
-  `OpencoderModels`, or the model
+  `OpencodeModels`, or the model
   list on a custom CLI definition. Names move faster than this app, so the list is configuration and
   there is always a *Something else…* option that reveals a text box.
 - **Thinking level** maps to what each CLI actually accepts — `--effort` for Claude

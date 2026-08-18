@@ -264,6 +264,16 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 }
 .section-tag::before { content: '//'; color: var(--magenta); }
 
+summary.section-tag {
+    cursor: pointer; user-select: none; list-style: none; width: 100%;
+}
+summary.section-tag::-webkit-details-marker { display: none; }
+summary.section-tag::after {
+    content: '▸'; margin-left: 0.3em; color: var(--text-2);
+    display: inline-block; transition: transform 0.15s ease;
+}
+details[open] > summary.section-tag::after { transform: rotate(90deg); }
+
 /* -- Buttons -------------------------------------------------------------- */
 
 .btn {

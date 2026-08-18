@@ -66,7 +66,7 @@ public static class DependencyInjection
         // Provider CLIs. Adding another AI CLI means adding an IProviderCli here.
         services.AddSingleton<IProviderCli, ClaudeCli>();
         services.AddSingleton<IProviderCli, CodexCli>();
-        services.AddSingleton<IProviderCli, OpencoderCli>();
+        services.AddSingleton<IProviderCli, OpencodeCli>();
         services.AddSingleton<IProviderCliRegistry, ProviderCliRegistry>();
 
         // User-defined providers that are not plain commands: an ACP agent driven over its stdio,

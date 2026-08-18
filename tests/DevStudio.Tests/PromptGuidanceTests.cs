@@ -28,6 +28,17 @@ public sealed class PromptGuidanceTests
     }
 
     [Fact]
+    public void Vague_prompt_advances_past_the_goal_question_once_answered()
+    {
+        var guidance = new PromptGuidance("Help");
+        Assert.Contains("accomplish", guidance.NextQuestion);
+
+        guidance.AddAnswer("Write a short reply summarising the deploy status.");
+
+        Assert.DoesNotContain("accomplish", guidance.NextQuestion);
+    }
+
+    [Fact]
     public void Detailed_prompt_is_ready_without_a_local_model_call()
     {
         var guidance = new PromptGuidance(

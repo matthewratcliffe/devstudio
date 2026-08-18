@@ -20,14 +20,14 @@ public sealed class PromptGuidance
         {
             var text = string.Join("\n", new[] { OriginalPrompt }.Concat(_answers));
 
-            if (IsVagueGoal(OriginalPrompt))
-                return "What should the assistant accomplish? Include the specific outcome you want.";
+            if (_answers.Count == 0 && IsVagueGoal(OriginalPrompt))
+                return "What should the assistant accomplish? Include the specific outcome you want—e.g. \"write a reply\", \"fix a bug\", \"summarize a file\".";
 
             if (!HasContext(text))
-                return "What context matters here—who or what is this for, and which files, system, or situation should it consider?";
+                return "What's the context—which files, project, or system does this touch, and who or what is it for?";
 
             if (!HasConstraintsOrOutput(text))
-                return "Are there constraints or success criteria, and what should the final answer look like?";
+                return "What should the final result look like (e.g. a file edit, a written reply, a summary), and are there any constraints to follow?";
 
             return null;
         }

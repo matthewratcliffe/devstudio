@@ -227,6 +227,18 @@ public static class McpEndpoint
         Tool("set_goal", "Set or correct what this session is trying to achieve. Prefer this over guessing at it yourself once you know what the user actually wants.", Props(
             ("sessionId", "string", "Session to set the goal on."),
             ("goal", "string", "One or two sentences stating the goal.")), "sessionId", "goal"),
+        Tool("add_link", "Add a link to this session's sidebar, e.g. label \"Open PR\" pointing at the pull request you just opened. There is no limit on how many you add.", Props(
+            ("sessionId", "string", "Your own session id, given in your instructions."),
+            ("label", "string", "Short label shown for the link, e.g. \"Open PR\"."),
+            ("url", "string", "The URL it points to.")), "sessionId", "label", "url"),
+        Tool("list_links", "List the links currently on this session's sidebar.", Props(
+            ("sessionId", "string", "Session to read links from.")), "sessionId"),
+        Tool("remove_link", "Remove a link previously added with add_link.", Props(
+            ("sessionId", "string", "Session to remove the link from."),
+            ("linkId", "string", "Id of the link, from add_link or list_links.")), "sessionId", "linkId"),
+        Tool("set_title", "Rename this session's title, shown in the sidebar and session list. Use it once a better name for the chat becomes clear from the conversation — you do not need to get it right on the first turn.", Props(
+            ("sessionId", "string", "Your own session id, given in your instructions."),
+            ("title", "string", "The new title, a few words.")), "sessionId", "title"),
         Tool("list_projects", "List projects with their instructions and attached files.", new JsonObject()),
         Tool("list_workflows", "List runnable workflows and their declared inputs.", new JsonObject()),
         Tool("run_workflow", "Start a workflow run in the background.", Props(
@@ -405,6 +417,63 @@ public static class McpEndpoint
 
                 await store.UpsertAsync(session, ct);
                 return Text("Goal set.");
+            }
+
+            case "add_link":
+            {
+                var store = services.GetRequiredService<IEntityStore<ChatSession>>();
+                var sessionId = Required(arguments, "sessionId");
+                var session = await store.GetAsync(sessionId, ct);
+                if (session is null)
+                    return Text("No session with that id.", isError: true);
+
+                var link = new SessionLink { Label = Required(arguments, "label"), Url = Required(arguments, "url") };
+                session.Links.Add(link);
+
+                await store.UpsertAsync(session, ct);
+                return Text($"Added (id {link.Id}).");
+            }
+
+            case "list_links":
+            {
+                var session = await sessions.GetAsync(Required(arguments, "sessionId"), ct);
+                if (session is null)
+                    return Text("No session with that id.", isError: true);
+
+                return Text(session.Links.Count == 0
+                    ? "(no links)"
+                    : string.Join("\n", session.Links.Select(l => $"{l.Id}  {l.Label}  {l.Url}")));
+            }
+
+            case "remove_link":
+            {
+                var store = services.GetRequiredService<IEntityStore<ChatSession>>();
+                var sessionId = Required(arguments, "sessionId");
+                var session = await store.GetAsync(sessionId, ct);
+                if (session is null)
+                    return Text("No session with that id.", isError: true);
+
+                var linkId = Required(arguments, "linkId");
+                var removed = session.Links.RemoveAll(l => l.Id == linkId) > 0;
+                if (!removed)
+                    return Text("No link with that id.", isError: true);
+
+                await store.UpsertAsync(session, ct);
+                return Text("Removed.");
+            }
+
+            case "set_title":
+            {
+                var store = services.GetRequiredService<IEntityStore<ChatSession>>();
+                var sessionId = Required(arguments, "sessionId");
+                var session = await store.GetAsync(sessionId, ct);
+                if (session is null)
+                    return Text("No session with that id.", isError: true);
+
+                session.Title = Required(arguments, "title");
+
+                await store.UpsertAsync(session, ct);
+                return Text("Title set.");
             }
 
             case "list_projects":

@@ -9,8 +9,8 @@
 
 <div class="tabs">
     <button class="tab @(_filter == "live" ? "active" : "")" @onclick='() => SetFilter("live")'>Live</button>
-    <button class="tab @(_filter == "all" ? "active" : "")" @onclick='() => SetFilter("all")'>All</button>
     <button class="tab @(_filter == "failed" ? "active" : "")" @onclick='() => SetFilter("failed")'>Failed</button>
+    <button class="tab @(_filter == "all" ? "active" : "")" @onclick='() => SetFilter("all")'>All</button>
     <button class="tab @(_filter == "archived" ? "active" : "")" @onclick='() => SetFilter("archived")'>Archive</button>
     <div style="flex:1"></div>
     @if (_selected.Count > 0)
@@ -108,7 +108,7 @@ else
     private List<ChatSession> _visible = [];
     private readonly HashSet<string> _selected = [];
     private readonly RenderCoalescer _render = new();
-    private string _filter = "all";
+    private string _filter = "live";
 
     /// <summary>
     /// Bumped after each bulk status change so the picker is rebuilt on its placeholder. Setting the
