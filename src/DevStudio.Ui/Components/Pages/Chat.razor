@@ -335,22 +335,6 @@ else
                 <dt>Directory</dt><dd>@_session.WorkingDirectory</dd>
                 <dt>Started</dt><dd>@if (_session.StartedAt is { } __t1) { <LocalTime Value="@__t1" Format="daytime" /> } else { <text>—</text> }</dd>
             </dl>
-            </details>
-
-            @if (_session.Links.Count > 0)
-            {
-                <div class="divider"></div>
-                <details class="side-accordion">
-                <summary class="section-tag">Links</summary>
-                <div class="btn-row" style="flex-wrap:wrap">
-                    @foreach (var link in _session.Links)
-                    {
-                        <a class="btn btn-sm" href="@link.Url" target="_blank" rel="noopener">@link.Label</a>
-                        <button class="btn btn-sm btn-ghost" title="Remove" @onclick="() => RemoveLinkAsync(link.Id)">✕</button>
-                    }
-                </div>
-                </details>
-            }
 
             @if (_session.LastError is { Length: > 0 })
             {
@@ -366,6 +350,22 @@ else
                     Marks it finished and read only — the transcript and its files stay. A
                     conversation with nothing said in it for @IdleHours hours is finished on its own.
                 </div>
+            }
+            </details>
+
+            @if (_session.Links.Count > 0)
+            {
+                <div class="divider"></div>
+                <details class="side-accordion">
+                <summary class="section-tag">Links</summary>
+                <div class="btn-row" style="flex-wrap:wrap">
+                    @foreach (var link in _session.Links)
+                    {
+                        <a class="btn btn-sm" href="@link.Url" target="_blank" rel="noopener">@link.Label</a>
+                        <button class="btn btn-sm btn-ghost" title="Remove" @onclick="() => RemoveLinkAsync(link.Id)">✕</button>
+                    }
+                </div>
+                </details>
             }
 
             @if (_goalEnabled)
@@ -1175,8 +1175,15 @@ else
         }
 
         var wasLive = _session?.IsLive ?? false;
+        var titleChanged = _session?.Title != session.Title;
         _session = session;
         _shouldScroll = true;
+
+        // The header is a separate persistent bar, not bound to _session — it only redraws when
+        // told to, so a title changed elsewhere (e.g. the agent renaming itself over MCP) needs
+        // this nudge or the top of the screen would keep showing the old one until next navigation.
+        if (titleChanged)
+            Layout.SetHeader(session.Title, $"{session.AgentName} · {session.Provider}", flush: true);
 
         // A turn that has just finished is usually the one that wrote the files.
         if (wasLive && !session.IsLive)

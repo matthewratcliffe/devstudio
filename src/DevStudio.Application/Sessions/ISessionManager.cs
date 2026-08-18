@@ -115,6 +115,13 @@ public interface ISessionManager
     /// <summary>Loads a session from memory when live, otherwise from the store.</summary>
     Task<ChatSession?> GetAsync(string sessionId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Persists a session already mutated elsewhere (e.g. a metadata edit over MCP) and raises
+    /// <see cref="SessionUpdated"/>, so a chat page open on it picks the change up immediately
+    /// instead of waiting for its next poll.
+    /// </summary>
+    Task NotifyUpdatedAsync(ChatSession session, CancellationToken ct = default);
+
     Task<IReadOnlyList<ChatSession>> GetAllAsync(CancellationToken ct = default);
 
     Task<bool> DeleteAsync(string sessionId, CancellationToken ct = default);

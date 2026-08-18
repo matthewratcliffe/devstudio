@@ -55,6 +55,7 @@
                     <div class="btn-row">
                         <button class="btn btn-sm btn-primary" @onclick="() => RunNowAsync(schedule)">Run now</button>
                         <button class="btn btn-sm" @onclick="() => Edit(schedule)">Edit</button>
+                        <a class="btn btn-sm" href="@HistoryUrl(schedule)">History</a>
                         <button class="btn btn-sm btn-ghost" @onclick="() => ToggleAsync(schedule)">
                             @(schedule.Enabled ? "Pause" : "Resume")
                         </button>
@@ -335,6 +336,9 @@
 
         _editing!.Inputs = inputs;
     }
+
+    private static string HistoryUrl(Schedule schedule) =>
+        $"/sessions?ScheduleId={Uri.EscapeDataString(schedule.Id)}&Name={Uri.EscapeDataString(schedule.Name)}";
 
     private string TargetName(Schedule schedule) => schedule.Target == ScheduleTarget.Agent
         ? _agents.FirstOrDefault(a => a.Id == schedule.TargetId)?.Name ?? "(missing agent)"
