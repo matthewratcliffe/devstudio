@@ -5,7 +5,7 @@ public enum AiProvider
 {
     Claude = 0,
     Codex = 1,
-    Opencoder = 3,
+    Opencode = 3,
 
     /// <summary>
     /// A user-defined CLI. The agent, session or account also carries the id of the

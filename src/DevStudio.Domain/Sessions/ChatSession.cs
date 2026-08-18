@@ -155,6 +155,18 @@ public sealed class ToolApproval
     public DateTimeOffset RequestedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+/// <summary>
+/// A link an agent hung on the session sidebar — e.g. "Open PR" pointing at the pull request it
+/// just opened. Purely informational: the app never dereferences it.
+/// </summary>
+public sealed class SessionLink
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n");
+    public string Label { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 /// <summary>A single conversation with one CLI process. Many run concurrently.</summary>
 public sealed class ChatSession : Entity
 {
@@ -321,6 +333,12 @@ public sealed class ChatSession : Entity
 
     /// <summary>Free-form operator notes, also readable and writable by agents over MCP.</summary>
     public string Notes { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Links the agent has hung on the sidebar over MCP — e.g. "Open PR" once it has opened one.
+    /// The agent decides what goes here and how many; nothing here is capped.
+    /// </summary>
+    public List<SessionLink> Links { get; set; } = [];
 
     /// <summary>
     /// What this conversation is trying to achieve, in a sentence or two. Settable by the operator

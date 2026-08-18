@@ -264,6 +264,16 @@ a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visib
 }
 .section-tag::before { content: '//'; color: var(--magenta); }
 
+summary.section-tag {
+    cursor: pointer; user-select: none; list-style: none; width: 100%;
+}
+summary.section-tag::-webkit-details-marker { display: none; }
+summary.section-tag::after {
+    content: '▸'; margin-left: 0.3em; color: var(--text-2);
+    display: inline-block; transition: transform 0.15s ease;
+}
+details[open] > summary.section-tag::after { transform: rotate(90deg); }
+
 /* -- Buttons -------------------------------------------------------------- */
 
 .btn {
@@ -621,6 +631,9 @@ select.select-sm { width: auto; font-size: 0.72rem; padding: 0.3em 1.6em 0.3em 0
 }
 .terminal-input { display: flex; gap: 0.5rem; padding: 0.6rem; border-top: 1px solid var(--border); background: var(--bg-1); }
 .terminal-input .prompt { color: var(--cyan); align-self: center; }
+.terminal-input input { flex: 1; background: transparent; border: none; color: var(--text-0); font-family: var(--font-mono); font-size: 0.82rem; }
+.terminal-input input:focus { outline: none; }
+.terminal-body .term-err { color: var(--red); }
 
 /* -- Misc ----------------------------------------------------------------- */
 

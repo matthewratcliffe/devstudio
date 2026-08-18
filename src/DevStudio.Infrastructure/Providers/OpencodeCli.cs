@@ -8,25 +8,27 @@ using Microsoft.Extensions.Options;
 namespace DevStudio.Infrastructure.Providers;
 
 /// <summary>
-/// Drives the OpenCoder npm CLI in prompt mode. OpenCoder is primarily an interactive TUI; the
-/// prompt flag is the automation entry point and leaves the model/tool configuration in the
-/// user's OpenCoder config file.
+/// Drives the opencode CLI through <c>opencode run</c>, its non-interactive entry point. opencode
+/// is primarily an interactive TUI; <c>run</c> takes the prompt as a positional argument and
+/// leaves the rest of the model/tool configuration in the user's opencode config file. Unlike
+/// Claude Code or Codex, opencode holds no separate per-account login of its own to check or
+/// manage here — whatever credentials its own config already has are what a turn runs with.
 /// </summary>
-public sealed class OpencoderCli : IProviderCli
+public sealed class OpencodeCli : IProviderCli
 {
     private readonly IProcessRunner _runner;
     private readonly OrchestratorOptions _options;
-    private readonly ILogger<OpencoderCli> _logger;
+    private readonly ILogger<OpencodeCli> _logger;
 
-    public OpencoderCli(IProcessRunner runner, IOptions<OrchestratorOptions> options, ILogger<OpencoderCli> logger)
+    public OpencodeCli(IProcessRunner runner, IOptions<OrchestratorOptions> options, ILogger<OpencodeCli> logger)
     {
         _runner = runner;
         _options = options.Value;
         _logger = logger;
     }
 
-    public AiProvider Provider => AiProvider.Opencoder;
-    public string DisplayName => "OpenCoder";
+    public AiProvider Provider => AiProvider.Opencode;
+    public string DisplayName => "OpenCode";
     public IReadOnlyList<LoginMethod> SupportedLoginMethods => [];
 
     public async IAsyncEnumerable<AgentEvent> RunTurnAsync(
@@ -40,7 +42,7 @@ public sealed class OpencoderCli : IProviderCli
             {
                 var exitCode = await _runner.StreamAsync(
                     new ProcessRequest(
-                        _options.OpencoderExecutable,
+                        _options.OpencodeExecutable,
                         BuildArguments(request),
                         request.WorkingDirectory,
                         BuildEnvironment(request),
@@ -53,14 +55,14 @@ public sealed class OpencoderCli : IProviderCli
                     ct);
 
                 if (exitCode != 0)
-                    await channel.Writer.WriteAsync(AgentEvent.Error($"opencoder exited with code {exitCode}."), CancellationToken.None);
+                    await channel.Writer.WriteAsync(AgentEvent.Error($"opencode exited with code {exitCode}."), CancellationToken.None);
             }
             catch (OperationCanceledException)
             {
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "opencoder turn failed");
+                _logger.LogError(ex, "opencode turn failed");
                 await channel.Writer.WriteAsync(AgentEvent.Error(ex.Message), CancellationToken.None);
             }
             finally
@@ -81,11 +83,17 @@ public sealed class OpencoderCli : IProviderCli
             ? request.Prompt
             : $"{request.SystemPrompt}\n\n---\n\n{request.Prompt}";
 
-        var arguments = new List<string> { "--prompt", prompt, "--cwd", request.WorkingDirectory };
+        // The working directory travels as the process's cwd (set on the ProcessRequest below), not
+        // as a flag: opencode has none, it just resolves the project from where it was launched.
+        var arguments = new List<string> { "run" };
         if (!string.IsNullOrWhiteSpace(request.Model))
             arguments.AddRange(["--model", request.Model]);
         if (!string.IsNullOrWhiteSpace(request.ExtraArguments))
             arguments.AddRange(ClaudeCli.SplitArguments(request.ExtraArguments));
+
+        // The prompt is the last positional argument, so any extra arguments above it are still
+        // read as flags rather than being swallowed as further positionals.
+        arguments.Add(prompt);
         return arguments;
     }
 
@@ -104,24 +112,27 @@ public sealed class OpencoderCli : IProviderCli
     public async Task<ProviderAuthStatus> GetAuthStatusAsync(string? homePath = null, CancellationToken ct = default)
     {
         var result = await _runner.RunAsync(new ProcessRequest(
-            _options.OpencoderExecutable, ["--version"], TimeoutSeconds: 30,
+            _options.OpencodeExecutable, ["--version"], TimeoutSeconds: 30,
             Environment: new Dictionary<string, string>
             {
                 ["HOME"] = homePath ?? _options.HomePath,
                 ["NO_COLOR"] = "1",
             }), ct);
 
+        // opencode has no separate login state for this app to report: it is either installed and
+        // ready to run, or it is not. There is no logged-out state to distinguish here.
         return new ProviderAuthStatus(
             Provider,
             result.ExitCode == -1 ? ProviderAuthState.Unknown : ProviderAuthState.LoggedIn,
             null,
-            result.ExitCode == -1 ? $"'{_options.OpencoderExecutable}' is not installed." : FirstLine(result.StandardOutput),
+            result.ExitCode == -1 ? $"'{_options.OpencodeExecutable}' is not installed." : FirstLine(result.StandardOutput),
             DateTimeOffset.UtcNow);
     }
 
+    // No login/logout to drive: opencode needs no local auth flow through this app.
     public (string FileName, IReadOnlyList<string> Arguments) BuildLoginCommand(LoginMethod method = LoginMethod.Browser) => (string.Empty, []);
     public (string FileName, IReadOnlyList<string> Arguments) BuildLogoutCommand() => (string.Empty, []);
 
     private static string FirstLine(string text) =>
-        text.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "Installed; authentication is configured by OpenCoder.";
+        text.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "Installed; opencode needs no separate login.";
 }

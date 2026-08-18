@@ -29,9 +29,21 @@ else
                 </select>
             </div>
         </div>
-        <div class="field">
-            <label>Description</label>
-            <input type="text" @bind="_workflow.Description" />
+        <div class="form-grid">
+            <div class="field">
+                <label>Description</label>
+                <input type="text" @bind="_workflow.Description" />
+            </div>
+            <div class="field">
+                <label>Category</label>
+                <input type="text" @bind="_workflow.Category" placeholder="Groups this workflow in pick lists" list="workflow-categories" />
+                <datalist id="workflow-categories">
+                    @foreach (var category in _allCategories)
+                    {
+                        <option value="@category" />
+                    }
+                </datalist>
+            </div>
         </div>
         <div class="check">
             <input type="checkbox" id="wf-enabled" @bind="_workflow.Enabled" />
@@ -97,9 +109,14 @@ else
                     <label>Agent</label>
                     <select @bind="step.AgentId">
                         <option value="">Pick an agent</option>
-                        @foreach (var agent in _agents)
+                        @foreach (var group in _agents.GroupedByCategory())
                         {
-                            <option value="@agent.Id">@agent.Name — @agent.Provider</option>
+                            <optgroup label="@group.Key">
+                                @foreach (var agent in group)
+                                {
+                                    <option value="@agent.Id">@agent.Name — @agent.Provider</option>
+                                }
+                            </optgroup>
                         }
                     </select>
                 </div>
@@ -150,12 +167,20 @@ else
     private Workflow? _workflow;
     private IReadOnlyList<Agent> _agents = [];
     private IReadOnlyList<Project> _projects = [];
+    private IReadOnlyList<string> _allCategories = [];
 
     protected override async Task OnInitializedAsync()
     {
         _workflow = await WorkflowStore.GetAsync(WorkflowId);
         _agents = await AgentStore.GetAllAsync();
         _projects = await ProjectStore.GetAllAsync();
+
+        _allCategories = (await WorkflowStore.GetAllAsync())
+            .Select(w => w.Category)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct()
+            .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     protected override void OnAfterRender(bool firstRender)

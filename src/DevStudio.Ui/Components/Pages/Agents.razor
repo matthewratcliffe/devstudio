@@ -90,7 +90,7 @@
                     <select @bind="_editing.Provider">
                         <option value="@AiProvider.Claude">Claude Code (claude)</option>
                         <option value="@AiProvider.Codex">OpenAI Codex (codex)</option>
-                        <option value="@AiProvider.Opencoder">OpenCoder (opencoder)</option>
+                        <option value="@AiProvider.Opencode">OpenCode (opencode)</option>
                         @if (_cliProviders.Count > 0)
                         {
                             <option value="@AiProvider.Custom">Custom CLI…</option>
@@ -99,9 +99,21 @@
                 </div>
             </div>
 
-            <div class="field">
-                <label>Description</label>
-                <input type="text" @bind="_editing.Description" placeholder="What this agent is for" />
+            <div class="form-grid">
+                <div class="field">
+                    <label>Description</label>
+                    <input type="text" @bind="_editing.Description" placeholder="What this agent is for" />
+                </div>
+                <div class="field">
+                    <label>Category</label>
+                    <input type="text" @bind="_editing.Category" placeholder="Groups this agent in pick lists" list="agent-categories" />
+                    <datalist id="agent-categories">
+                        @foreach (var category in _agents.Select(a => a.Category).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().OrderBy(c => c, StringComparer.OrdinalIgnoreCase))
+                        {
+                            <option value="@category" />
+                        }
+                    </datalist>
+                </div>
             </div>
 
             <div class="field">
@@ -472,7 +484,7 @@
     {
         AiProvider.Claude => Options.Value.ClaudeModels,
         AiProvider.Codex => Options.Value.CodexModels,
-        AiProvider.Opencoder => Options.Value.OpencoderModels,
+        AiProvider.Opencode => Options.Value.OpencodeModels,
         _ => _cliProviders.FirstOrDefault(c => c.Id == agent.CliProviderId)?.Models ?? [],
     };
 
@@ -480,7 +492,7 @@
     {
         AiProvider.Claude => Options.Value.ClaudeEfforts,
         AiProvider.Codex => Options.Value.CodexEfforts,
-        AiProvider.Opencoder => Options.Value.OpencoderEfforts,
+        AiProvider.Opencode => Options.Value.OpencodeEfforts,
         _ => _cliProviders.FirstOrDefault(c => c.Id == agent.CliProviderId)?.Efforts ?? [],
     };
 
@@ -663,7 +675,7 @@
     private string ProviderLabel(Agent agent) => agent.Provider switch
     {
         AiProvider.Custom => _cliProviders.FirstOrDefault(c => c.Id == agent.CliProviderId)?.Name ?? "custom CLI",
-        AiProvider.Opencoder => "OpenCoder",
+        AiProvider.Opencode => "OpenCode",
         _ => agent.Provider.ToString(),
     };
 
@@ -671,7 +683,7 @@
     {
         AiProvider.Claude => "pill-cyan",
         AiProvider.Codex => "pill-magenta",
-        AiProvider.Opencoder => "pill-green",
+        AiProvider.Opencode => "pill-green",
         _ => "pill-lime",
     };
 

@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject ISessionManager Sessions
 @inject IQueueService Queues
+@inject INotificationService Notifications
 @inject NavigationManager Nav
 
 @* Prerendering paints the real page before the circuit that carries every click exists, so for a
@@ -18,7 +19,7 @@
 }
 
 <div class="shell">
-    <NavMenu Open="_navOpen" LiveCount="_liveCount" QueuedCount="_queuedCount" OnNavigate="CloseNav" />
+    <NavMenu Open="_navOpen" LiveCount="_liveCount" QueuedCount="_queuedCount" NotificationCount="_notificationCount" OnNavigate="CloseNav" />
 
     <div class="main">
         <header class="topbar">
@@ -67,6 +68,7 @@
     private bool _navOpen;
     private int _liveCount;
     private int _queuedCount;
+    private int _notificationCount;
 
     /// <summary>Set by pages so the top bar reads like a breadcrumb.</summary>
     public string Title { get; private set; } = "Orchestrator";
@@ -79,10 +81,15 @@
     {
         Sessions.SessionUpdated += OnSessionUpdated;
         Queues.ItemChanged += OnQueueItemChanged;
+        Notifications.Changed += OnNotificationsChanged;
         _liveCount = Sessions.Live.Count(s => s.IsLive);
     }
 
-    protected override async Task OnInitializedAsync() => await RefreshQueuedCountAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshQueuedCountAsync();
+        await RefreshNotificationCountAsync();
+    }
 
     public void SetHeader(string title, string? subtitle = null, bool flush = false)
     {
@@ -127,6 +134,23 @@
 
     private void OnQueueItemChanged(QueueItem item) => _ = RefreshQueuedCountAsync();
 
+    /// <summary>
+    /// Every open circuit subscribes to the same singleton service, so a notification raised from one
+    /// tab — or from an MCP call — updates every other viewer's badge without polling.
+    /// </summary>
+    private async Task RefreshNotificationCountAsync()
+    {
+        var active = (await Notifications.GetAllAsync()).Count;
+
+        if (active == _notificationCount)
+            return;
+
+        _notificationCount = active;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OnNotificationsChanged() => _ = RefreshNotificationCountAsync();
+
     private void OnSessionUpdated(ChatSession session)
     {
         var live = Sessions.Live.Count(s => s.IsLive);
@@ -141,5 +165,6 @@
     {
         Sessions.SessionUpdated -= OnSessionUpdated;
         Queues.ItemChanged -= OnQueueItemChanged;
+        Notifications.Changed -= OnNotificationsChanged;
     }
 }

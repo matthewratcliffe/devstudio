@@ -1036,10 +1036,10 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                 return;
 
             // Never adopted automatically — a guess only becomes the goal the session is actually
-            // held to once a person confirms or edits it from the sidebar.
+            // held to once a person confirms or edits it from the sidebar. Shown only in the sidebar's
+            // Goal card (Chat.razor) — not also appended to the transcript, to avoid showing the same
+            // guess twice.
             session.ProposedGoal = text;
-            AppendMessage(session, MessageRole.System,
-                $"Guessed goal for this conversation: \"{text}\" — confirm or edit it in the sidebar before it's treated as the goal.");
 
             await PersistAsync(session);
         }
@@ -1282,7 +1282,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
     {
         AiProvider.Claude => _options.ClaudeModels,
         AiProvider.Codex => _options.CodexModels,
-        AiProvider.Opencoder => _options.OpencoderModels,
+        AiProvider.Opencode => _options.OpencodeModels,
         // A user-defined CLI keeps its models on its own definition, which this does not read. Its
         // agents can still hand over, through a handover configured on the agent.
         _ => [],

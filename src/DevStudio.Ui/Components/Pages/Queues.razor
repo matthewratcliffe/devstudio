@@ -116,16 +116,26 @@
                         <option value="">Nothing yet — items wait</option>
                         @if (_editing.Target == QueueTarget.Agent)
                         {
-                            @foreach (var agent in _agents)
+                            @foreach (var group in _agents.GroupedByCategory())
                             {
-                                <option value="@agent.Id">@agent.Name — @agent.Provider</option>
+                                <optgroup label="@group.Key">
+                                    @foreach (var agent in group)
+                                    {
+                                        <option value="@agent.Id">@agent.Name — @agent.Provider</option>
+                                    }
+                                </optgroup>
                             }
                         }
                         else
                         {
-                            @foreach (var workflow in _workflows)
+                            @foreach (var group in _workflows.GroupedByCategory())
                             {
-                                <option value="@workflow.Id">@workflow.Name</option>
+                                <optgroup label="@group.Key">
+                                    @foreach (var workflow in group)
+                                    {
+                                        <option value="@workflow.Id">@workflow.Name</option>
+                                    }
+                                </optgroup>
                             }
                         }
                     </select>

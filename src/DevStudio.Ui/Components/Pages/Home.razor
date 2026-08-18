@@ -28,44 +28,6 @@
     </div>
 </div>
 
-<div class="card" style="margin-bottom:1.4rem">
-    <div class="section-tag">Launch</div>
-    <div class="form-grid">
-        <div class="field">
-            <label for="agent">Agent</label>
-            <select id="agent" @bind="_launchAgentId">
-                @foreach (var agent in _agents.Where(a => a.Enabled))
-                {
-                    <option value="@agent.Id">@agent.Name — @agent.Provider</option>
-                }
-            </select>
-        </div>
-        <div class="field">
-            <label for="project">Project</label>
-            <select id="project" @bind="_launchProjectId">
-                <option value="">No project</option>
-                @foreach (var project in _projects.Where(p => !p.Archived))
-                {
-                    <option value="@project.Id">@project.Name</option>
-                }
-            </select>
-        </div>
-    </div>
-    <div class="field">
-        <label for="prompt">Prompt</label>
-        <textarea id="prompt" @bind="_launchPrompt" @bind:event="oninput"
-                  placeholder="What should the agent do? Ctrl+Enter to launch."
-                  @onkeydown="OnPromptKeyDown"></textarea>
-    </div>
-    <div class="btn-row">
-        <button class="btn btn-primary" disabled="@(_launching || string.IsNullOrWhiteSpace(_launchPrompt) || _launchAgentId is null)"
-                @onclick="LaunchAsync">
-            @(_launching ? "Starting…" : "Launch session")
-        </button>
-        <span class="mono-dim">Runs concurrently with everything else.</span>
-    </div>
-</div>
-
 <div class="section-tag">Running now</div>
 @if (_live.Count == 0)
 {
@@ -198,11 +160,6 @@ else
     private List<ChatSession> _live = [];
     private List<ChatSession> _recent = [];
 
-    private string? _launchAgentId;
-    private string _launchProjectId = string.Empty;
-    private string _launchPrompt = string.Empty;
-    private bool _launching;
-
     protected override async Task OnInitializedAsync()
     {
         Sessions.SessionUpdated += OnSessionUpdated;
@@ -221,7 +178,6 @@ else
         _projects = await ProjectStore.GetAllAsync();
         _schedules = await ScheduleStore.GetAllAsync();
         _runs = await Workflows.GetRunsAsync();
-        _launchAgentId ??= _agents.FirstOrDefault(a => a.Enabled)?.Id;
 
         var all = await Sessions.GetAllAsync();
         _live = all.Where(s => s.IsLive).ToList();
@@ -229,40 +185,6 @@ else
     }
 
     private void Open(string url) => Nav.NavigateTo(url);
-
-    private async Task LaunchAsync()
-    {
-        if (_launchAgentId is null || string.IsNullOrWhiteSpace(_launchPrompt))
-            return;
-
-        _launching = true;
-        try
-        {
-            var session = await Sessions.StartAsync(new StartSessionRequest
-            {
-                AgentId = _launchAgentId,
-                Prompt = _launchPrompt.Trim(),
-                ProjectId = string.IsNullOrWhiteSpace(_launchProjectId) ? null : _launchProjectId,
-            });
-
-            _launchPrompt = string.Empty;
-            Nav.NavigateTo($"/chat/{session.Id}");
-        }
-        catch (Exception ex)
-        {
-            Layout.Notify(ex.Message, "err");
-        }
-        finally
-        {
-            _launching = false;
-        }
-    }
-
-    private async Task OnPromptKeyDown(KeyboardEventArgs args)
-    {
-        if (args.Key == "Enter" && (args.CtrlKey || args.MetaKey))
-            await LaunchAsync();
-    }
 
     // Every streamed chunk raises this, and each pass reads the whole session store, so the
     // reloads are collapsed into one per interval rather than one per chunk.

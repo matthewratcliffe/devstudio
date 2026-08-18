@@ -46,13 +46,6 @@
                             </div>
                         }
                     }
-                    @if (_guidance.NextQuestion is { } question)
-                    {
-                        <div class="msg msg-guidance">
-                            <div class="who"><span>Guidance</span></div>
-                            <div class="body">@question</div>
-                        </div>
-                    }
                 }
 
                 @if (_recent.Count > 0)
@@ -287,7 +280,9 @@
             _guidance = new PromptGuidance(_prompt);
             _guidanceTranscript.Add(("You", _prompt.Trim()));
             _prompt = string.Empty;
-            if (_guidance.NextQuestion is null)
+            if (_guidance.NextQuestion is { } firstQuestion)
+                _guidanceTranscript.Add(("Guidance", firstQuestion));
+            else
                 await StartGuidedAsync();
             return;
         }
@@ -304,7 +299,9 @@
         _guidanceTranscript.Add(("You", _prompt.Trim()));
         _prompt = string.Empty;
 
-        if (_guidance.NextQuestion is null)
+        if (_guidance.NextQuestion is { } nextQuestion)
+            _guidanceTranscript.Add(("Guidance", nextQuestion));
+        else
             await StartGuidedAsync();
     }
 

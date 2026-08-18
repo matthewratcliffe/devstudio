@@ -85,9 +85,14 @@ else
                     <div class="field">
                         <label>Agent</label>
                         <select @bind="_agentId">
-                            @foreach (var agent in _agents.Where(a => a.Enabled))
+                            @foreach (var group in _agents.Where(a => a.Enabled).GroupedByCategory())
                             {
-                                <option value="@agent.Id">@agent.Name — @agent.Provider</option>
+                                <optgroup label="@group.Key">
+                                    @foreach (var agent in group)
+                                    {
+                                        <option value="@agent.Id">@agent.Name — @agent.Provider</option>
+                                    }
+                                </optgroup>
                             }
                         </select>
                     </div>
@@ -106,9 +111,14 @@ else
                     <div class="field">
                         <label>Workflow</label>
                         <select @bind="_workflowId">
-                            @foreach (var workflow in _workflows.Where(w => w.Enabled))
+                            @foreach (var group in _workflows.Where(w => w.Enabled).GroupedByCategory())
                             {
-                                <option value="@workflow.Id">@workflow.Name</option>
+                                <optgroup label="@group.Key">
+                                    @foreach (var workflow in group)
+                                    {
+                                        <option value="@workflow.Id">@workflow.Name</option>
+                                    }
+                                </optgroup>
                             }
                         </select>
                     </div>

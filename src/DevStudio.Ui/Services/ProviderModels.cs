@@ -19,7 +19,7 @@ public static class ProviderModels
     {
         AiProvider.Claude => options.ClaudeModels,
         AiProvider.Codex => options.CodexModels,
-        AiProvider.Opencoder => options.OpencoderModels,
+        AiProvider.Opencode => options.OpencodeModels,
         _ => custom.FirstOrDefault(c => c.Id == cliProviderId)?.Models ?? [],
     };
 
@@ -31,7 +31,7 @@ public static class ProviderModels
     {
         AiProvider.Claude => options.ClaudeEfforts,
         AiProvider.Codex => options.CodexEfforts,
-        AiProvider.Opencoder => options.OpencoderEfforts,
+        AiProvider.Opencode => options.OpencodeEfforts,
         _ => custom.FirstOrDefault(c => c.Id == cliProviderId)?.Efforts ?? [],
     };
 }

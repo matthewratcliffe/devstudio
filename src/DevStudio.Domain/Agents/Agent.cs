@@ -21,6 +21,10 @@ public sealed class Agent : Entity
 {
     public string Name { get; set; } = "New agent";
     public string Description { get; set; } = string.Empty;
+
+    /// <summary>Groups this agent in pick lists. Empty falls into an "Uncategorized" bucket.</summary>
+    public string Category { get; set; } = string.Empty;
+
     public AiProvider Provider { get; set; } = AiProvider.Claude;
 
     /// <summary>Which user-defined CLI to drive when <see cref="Provider"/> is Custom.</summary>

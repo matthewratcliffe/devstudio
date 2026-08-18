@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using DevStudio.Application.Abstractions;
+using DevStudio.Application.Notifications;
 using DevStudio.Application.Queues;
 using DevStudio.Application.Sessions;
 using DevStudio.Application.Workflows;
@@ -226,6 +227,18 @@ public static class McpEndpoint
         Tool("set_goal", "Set or correct what this session is trying to achieve. Prefer this over guessing at it yourself once you know what the user actually wants.", Props(
             ("sessionId", "string", "Session to set the goal on."),
             ("goal", "string", "One or two sentences stating the goal.")), "sessionId", "goal"),
+        Tool("add_link", "Add a link to this session's sidebar, e.g. label \"Open PR\" pointing at the pull request you just opened. There is no limit on how many you add.", Props(
+            ("sessionId", "string", "Your own session id, given in your instructions."),
+            ("label", "string", "Short label shown for the link, e.g. \"Open PR\"."),
+            ("url", "string", "The URL it points to.")), "sessionId", "label", "url"),
+        Tool("list_links", "List the links currently on this session's sidebar.", Props(
+            ("sessionId", "string", "Session to read links from.")), "sessionId"),
+        Tool("remove_link", "Remove a link previously added with add_link.", Props(
+            ("sessionId", "string", "Session to remove the link from."),
+            ("linkId", "string", "Id of the link, from add_link or list_links.")), "sessionId", "linkId"),
+        Tool("set_title", "Rename this session's title, shown in the sidebar and session list. Use it once a better name for the chat becomes clear from the conversation — you do not need to get it right on the first turn.", Props(
+            ("sessionId", "string", "Your own session id, given in your instructions."),
+            ("title", "string", "The new title, a few words.")), "sessionId", "title"),
         Tool("list_projects", "List projects with their instructions and attached files.", new JsonObject()),
         Tool("list_workflows", "List runnable workflows and their declared inputs.", new JsonObject()),
         Tool("run_workflow", "Start a workflow run in the background.", Props(
@@ -250,6 +263,10 @@ public static class McpEndpoint
             ("seed", "number", "Optional. The same seed and prompt reproduce the same image."),
             ("backend", "string", "Optional service: Pollinations, Cloudflare or Gemini. Defaults to the configured one."),
             ("sessionId", "string", "Optional. Your own session id, so the image is filed against this session.")), "prompt"),
+        Tool("create_notification", "Raise a notification shown to everyone using the app right now, in real time. Use it for things a human should see: a workflow finished, something needs attention, a run failed.", Props(
+            ("title", "string", "One line, shown bold in the list and the sidebar."),
+            ("body", "string", "Optional detail shown under the title."),
+            ("kind", "string", "Optional: info, ok, warn or err. Defaults to info.")), "title"),
     ];
 
     private static async Task<JsonObject> CallToolAsync(
@@ -402,6 +419,63 @@ public static class McpEndpoint
                 return Text("Goal set.");
             }
 
+            case "add_link":
+            {
+                var store = services.GetRequiredService<IEntityStore<ChatSession>>();
+                var sessionId = Required(arguments, "sessionId");
+                var session = await store.GetAsync(sessionId, ct);
+                if (session is null)
+                    return Text("No session with that id.", isError: true);
+
+                var link = new SessionLink { Label = Required(arguments, "label"), Url = Required(arguments, "url") };
+                session.Links.Add(link);
+
+                await store.UpsertAsync(session, ct);
+                return Text($"Added (id {link.Id}).");
+            }
+
+            case "list_links":
+            {
+                var session = await sessions.GetAsync(Required(arguments, "sessionId"), ct);
+                if (session is null)
+                    return Text("No session with that id.", isError: true);
+
+                return Text(session.Links.Count == 0
+                    ? "(no links)"
+                    : string.Join("\n", session.Links.Select(l => $"{l.Id}  {l.Label}  {l.Url}")));
+            }
+
+            case "remove_link":
+            {
+                var store = services.GetRequiredService<IEntityStore<ChatSession>>();
+                var sessionId = Required(arguments, "sessionId");
+                var session = await store.GetAsync(sessionId, ct);
+                if (session is null)
+                    return Text("No session with that id.", isError: true);
+
+                var linkId = Required(arguments, "linkId");
+                var removed = session.Links.RemoveAll(l => l.Id == linkId) > 0;
+                if (!removed)
+                    return Text("No link with that id.", isError: true);
+
+                await store.UpsertAsync(session, ct);
+                return Text("Removed.");
+            }
+
+            case "set_title":
+            {
+                var store = services.GetRequiredService<IEntityStore<ChatSession>>();
+                var sessionId = Required(arguments, "sessionId");
+                var session = await store.GetAsync(sessionId, ct);
+                if (session is null)
+                    return Text("No session with that id.", isError: true);
+
+                session.Title = Required(arguments, "title");
+
+                await store.UpsertAsync(session, ct);
+                return Text("Title set.");
+            }
+
             case "list_projects":
             {
                 var projects = await services.GetRequiredService<IEntityStore<Project>>().GetAllAsync(ct);
@@ -534,6 +608,21 @@ public static class McpEndpoint
                     $"Generated a {image.Width}×{image.Height} image with {image.Backend} ({image.Model}). " +
                     $"Include this line in your reply exactly as written so the user can see it:\n\n" +
                     $"![{image.Prompt}]({images.UrlFor(image)})");
+            }
+
+            case "create_notification":
+            {
+                var notifications = services.GetRequiredService<INotificationService>();
+                var agentName = parameters?["_meta"]?["agentName"]?.GetValue<string>();
+
+                var notification = await notifications.CreateAsync(
+                    Required(arguments, "title"),
+                    arguments["body"]?.GetValue<string>() ?? string.Empty,
+                    arguments["kind"]?.GetValue<string>() ?? "info",
+                    agentName is null ? "mcp" : $"agent:{agentName}",
+                    ct);
+
+                return Text($"Notification {notification.Id} raised.");
             }
 
             default:

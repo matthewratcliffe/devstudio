@@ -276,7 +276,8 @@ else
         </div>
 
         <aside class="chat-side">
-            <div class="section-tag">Session</div>
+            <details class="side-accordion" open>
+            <summary class="section-tag">Session</summary>
             <dl class="kv">
                 <dt>Agent</dt><dd>@_session.AgentName</dd>
                 <dt>Provider</dt>
@@ -334,6 +335,22 @@ else
                 <dt>Directory</dt><dd>@_session.WorkingDirectory</dd>
                 <dt>Started</dt><dd>@if (_session.StartedAt is { } __t1) { <LocalTime Value="@__t1" Format="daytime" /> } else { <text>—</text> }</dd>
             </dl>
+            </details>
+
+            @if (_session.Links.Count > 0)
+            {
+                <div class="divider"></div>
+                <details class="side-accordion">
+                <summary class="section-tag">Links</summary>
+                <div class="btn-row" style="flex-wrap:wrap">
+                    @foreach (var link in _session.Links)
+                    {
+                        <a class="btn btn-sm" href="@link.Url" target="_blank" rel="noopener">@link.Label</a>
+                        <button class="btn btn-sm btn-ghost" title="Remove" @onclick="() => RemoveLinkAsync(link.Id)">✕</button>
+                    }
+                </div>
+                </details>
+            }
 
             @if (_session.LastError is { Length: > 0 })
             {
@@ -354,19 +371,17 @@ else
             @if (_goalEnabled)
             {
                 <div class="divider"></div>
-                <div class="section-tag">Goal</div>
+                <details class="side-accordion">
+                <summary class="section-tag">Goal</summary>
 
                 @if (!string.IsNullOrWhiteSpace(_session.ProposedGoal))
                 {
                     <div class="card" style="border-color:var(--amber,#f6c85f);margin-bottom:0.6rem">
-                        <div class="small"><strong>Suggested goal</strong></div>
-                        <div class="mono-dim" style="margin:0.3rem 0">@_session.ProposedGoal</div>
-                        <div class="hint">
-                            Guessed from the conversation so far. It won't be treated as the goal until
-                            you confirm or edit it.
+                        <div class="small">
+                            Guessed goal for this conversation: @_session.ProposedGoal
+                            <a href="javascript:void(0)" @onclick="AcceptProposedGoalAsync">Accept this goal</a>
                         </div>
                         <div class="btn-row" style="margin-top:0.5rem">
-                            <button class="btn btn-sm btn-primary" @onclick="AcceptProposedGoalAsync">Use this</button>
                             <button class="btn btn-sm" @onclick="EditProposedGoal">Edit</button>
                             <button class="btn btn-sm" @onclick="DiscardProposedGoalAsync">Discard</button>
                         </div>
@@ -381,12 +396,14 @@ else
                 {
                     <div class="hint">Started as a guess you confirmed — edit it any time.</div>
                 }
+                </details>
             }
 
             @if (_session.AcceptsInput)
             {
                 <div class="divider"></div>
-                <div class="section-tag">Model</div>
+                <details class="side-accordion">
+                <summary class="section-tag">Model</summary>
                 <ModelPicker Value="_model" ValueChanged="SetModelAsync" Models="_models" Efforts="_efforts"
                              DefaultLabel="Agent default" InUse="@ModelNow" OpeningInUse="@HandoverPending" />
                 <div class="mono-dim">
@@ -407,30 +424,36 @@ else
                         </text>
                     }
                 </div>
+                </details>
             }
 
             <div class="divider"></div>
-            <div class="section-tag">Token minimisation</div>
+            <details class="side-accordion">
+            <summary class="section-tag">Token minimisation</summary>
             <TokenMinimisationPicker Value="_session.TokenMinimisation"
                                      Inherited="@(_agent?.TokenMinimisation ?? TokenTactics.None)"
                                      Disabled="@(!_session.AcceptsInput)"
                                      ValueChanged="SetTokenMinimisationAsync" />
             <div class="mono-dim">Applies from your next message.</div>
+            </details>
 
             @if (!string.IsNullOrWhiteSpace(_session.Summary))
             {
                 <div class="divider"></div>
-                <div class="section-tag">Rolling summary</div>
+                <details class="side-accordion">
+                <summary class="section-tag">Rolling summary</summary>
                 <div class="mono-dim" style="margin-bottom:0.4rem">
                     @_session.SummaryCount summarisation(s) · last @if (_session.LastSummarisedAt is { } __t2) { <LocalTime Value="@__t2" Format="daytime" /> } else { <text>—</text> }
                 </div>
                 <div class="small" style="white-space:pre-wrap">@_session.Summary</div>
+                </details>
             }
 
             @if (_session.Guidance.Count > 0)
             {
                 <div class="divider"></div>
-                <div class="section-tag">Guidance</div>
+                <details class="side-accordion">
+                <summary class="section-tag">Guidance</summary>
                 <ul class="list-reset small">
                     @foreach (var guidance in _session.Guidance.OrderByDescending(g => g.CreatedAt))
                     {
@@ -443,10 +466,12 @@ else
                         </li>
                     }
                 </ul>
+                </details>
             }
 
             <div class="divider"></div>
-            <div class="section-tag">Files produced</div>
+            <details class="side-accordion">
+            <summary class="section-tag">Files produced</summary>
             <div class="btn-row" style="margin-bottom:0.6rem">
                 <button class="btn btn-sm" @onclick="RefreshFilesAsync">Refresh</button>
                 @if (_files.Count > 0)
@@ -485,11 +510,13 @@ else
                     </button>
                 }
             }
+            </details>
 
             @if (_mcpServers.Count > 0)
             {
                 <div class="divider"></div>
-                <div class="section-tag">MCP servers</div>
+                <details class="side-accordion">
+                <summary class="section-tag">MCP servers</summary>
                 @foreach (var server in _mcpServers)
                 {
                     <label class="check">
@@ -507,12 +534,14 @@ else
                         to Accept edits to actually use these tools.
                     </div>
                 }
+                </details>
             }
 
             @if (_session.AllowedTools.Count > 0)
             {
                 <div class="divider"></div>
-                <div class="section-tag">Allowed this session</div>
+                <details class="side-accordion">
+                <summary class="section-tag">Allowed this session</summary>
                 @foreach (var rule in _session.AllowedTools)
                 {
                     <div class="mono-dim" style="display:flex;gap:0.4rem;align-items:center">
@@ -521,24 +550,29 @@ else
                                 @onclick="() => RevokeAsync(rule)">×</button>
                     </div>
                 }
+                </details>
             }
 
             <div class="divider"></div>
 
-            <div class="section-tag">Notes</div>
+            <details class="side-accordion">
+            <summary class="section-tag">Notes</summary>
             <textarea @bind="_notes" rows="6" placeholder="Notes for you and for agents reading over MCP."></textarea>
             <div class="btn-row" style="margin-top:0.5rem">
                 <button class="btn btn-sm" @onclick="SaveNotesAsync">Save notes</button>
             </div>
+            </details>
 
             @if (_session.RepositoryId is not null)
             {
                 <div class="divider"></div>
-                <div class="section-tag">Worktree</div>
+                <details class="side-accordion">
+                <summary class="section-tag">Worktree</summary>
                 <div class="btn-row" style="margin-bottom:0.6rem">
                     <button class="btn btn-sm" @onclick="RefreshGitAsync">git status</button>
                 </div>
                 <pre class="mono-dim" style="white-space:pre-wrap;font-size:0.72rem">@_gitStatus</pre>
+                </details>
             }
 
             <div class="divider"></div>
@@ -1024,6 +1058,15 @@ else
         _session.Notes = _notes;
         await SessionStore.UpsertAsync(_session);
         Layout.Notify("Notes saved.", "ok");
+    }
+
+    private async Task RemoveLinkAsync(string linkId)
+    {
+        if (_session is null)
+            return;
+
+        _session.Links.RemoveAll(l => l.Id == linkId);
+        await SessionStore.UpsertAsync(_session);
     }
 
     private async Task SaveGoalAsync()
