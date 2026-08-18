@@ -562,6 +562,9 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
     public async Task<ChatSession?> GetAsync(string sessionId, CancellationToken ct = default) =>
         _live.TryGetValue(sessionId, out var live) ? live.Session : await _sessions.GetAsync(sessionId, ct);
 
+    public async Task NotifyUpdatedAsync(ChatSession session, CancellationToken ct = default) =>
+        await PersistAsync(session);
+
     public async Task<IReadOnlyList<ChatSession>> GetAllAsync(CancellationToken ct = default)
     {
         var stored = await _sessions.GetAllAsync(ct);

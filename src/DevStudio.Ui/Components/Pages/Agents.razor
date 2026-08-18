@@ -59,6 +59,7 @@
             <div class="btn-row">
                 <button class="btn btn-sm btn-primary" @onclick="() => StartChat(agent)">Chat</button>
                 <button class="btn btn-sm" @onclick="() => Edit(agent)">Edit</button>
+                <a class="btn btn-sm" href="@HistoryUrl(agent)">History</a>
                 <button class="btn btn-sm btn-ghost" @onclick="() => DuplicateAsync(agent)">Duplicate</button>
                 <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(agent)">Delete</button>
             </div>
@@ -582,6 +583,9 @@
         _customModel = false;
         _editing!.Model = Blank(value);
     }
+
+    private static string HistoryUrl(Agent agent) =>
+        $"/sessions?AgentId={Uri.EscapeDataString(agent.Id)}&Name={Uri.EscapeDataString(agent.Name)}";
 
     private void Edit(Agent agent)
     {

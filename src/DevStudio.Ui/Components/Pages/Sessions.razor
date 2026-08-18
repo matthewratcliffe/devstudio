@@ -7,6 +7,15 @@
 
 <PageTitle>Sessions · devStudio</PageTitle>
 
+@if (AgentId is { Length: > 0 } || ScheduleId is { Length: > 0 })
+{
+    <div class="card" style="margin-bottom:1rem;display:flex;align-items:center;gap:0.6rem">
+        <span class="mono-dim">History for @(Name ?? "this " + (AgentId is { Length: > 0 } ? "agent" : "schedule"))</span>
+        <div style="flex:1"></div>
+        <a class="btn btn-sm btn-ghost" href="/sessions">Clear filter</a>
+    </div>
+}
+
 <div class="tabs">
     <button class="tab @(_filter == "live" ? "active" : "")" @onclick='() => SetFilter("live")'>Live</button>
     <button class="tab @(_filter == "failed" ? "active" : "")" @onclick='() => SetFilter("failed")'>Failed</button>
@@ -103,6 +112,10 @@ else
 @code {
     [CascadingParameter] private MainLayout Layout { get; set; } = default!;
 
+    [SupplyParameterFromQuery] private string? AgentId { get; set; }
+    [SupplyParameterFromQuery] private string? ScheduleId { get; set; }
+    [SupplyParameterFromQuery] private string? Name { get; set; }
+
     private IReadOnlyList<ChatSession> _all = [];
     private IReadOnlyList<Project> _projects = [];
     private List<ChatSession> _visible = [];
@@ -136,6 +149,11 @@ else
     {
         SessionManager.SessionUpdated += OnSessionUpdated;
         _projects = await ProjectStore.GetAllAsync();
+
+        // Arriving via a History link is about the full record, not just what's running now.
+        if (AgentId is { Length: > 0 } || ScheduleId is { Length: > 0 })
+            _filter = "all";
+
         await ReloadAsync();
     }
 
@@ -164,12 +182,18 @@ else
 
     private void ApplyFilter()
     {
+        var scoped = _all.AsEnumerable();
+        if (AgentId is { Length: > 0 })
+            scoped = scoped.Where(s => s.AgentId == AgentId);
+        if (ScheduleId is { Length: > 0 })
+            scoped = scoped.Where(s => s.ScheduleId == ScheduleId);
+
         _visible = _filter switch
         {
-            "live" => _all.Where(s => s.IsLive && !s.IsArchived).ToList(),
-            "failed" => _all.Where(s => s.Status == SessionStatus.Failed && !s.IsArchived).ToList(),
-            "archived" => _all.Where(s => s.IsArchived).ToList(),
-            _ => _all.Where(s => !s.IsArchived).ToList(),
+            "live" => scoped.Where(s => s.IsLive && !s.IsArchived).ToList(),
+            "failed" => scoped.Where(s => s.Status == SessionStatus.Failed && !s.IsArchived).ToList(),
+            "archived" => scoped.Where(s => s.IsArchived).ToList(),
+            _ => scoped.Where(s => !s.IsArchived).ToList(),
         };
     }
 

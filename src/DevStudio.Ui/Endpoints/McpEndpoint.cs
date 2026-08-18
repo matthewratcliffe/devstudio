@@ -388,7 +388,7 @@ public static class McpEndpoint
                     ? $"[{stamp}] {Required(arguments, "note")}"
                     : $"{session.Notes}\n[{stamp}] {Required(arguments, "note")}";
 
-                await store.UpsertAsync(session, ct);
+                await sessions.NotifyUpdatedAsync(session, ct);
                 return Text("Note added.");
             }
 
@@ -415,7 +415,7 @@ public static class McpEndpoint
                 session.Goal = Required(arguments, "goal");
                 session.GoalAutoDerived = false;
 
-                await store.UpsertAsync(session, ct);
+                await sessions.NotifyUpdatedAsync(session, ct);
                 return Text("Goal set.");
             }
 
@@ -430,7 +430,7 @@ public static class McpEndpoint
                 var link = new SessionLink { Label = Required(arguments, "label"), Url = Required(arguments, "url") };
                 session.Links.Add(link);
 
-                await store.UpsertAsync(session, ct);
+                await sessions.NotifyUpdatedAsync(session, ct);
                 return Text($"Added (id {link.Id}).");
             }
 
@@ -458,7 +458,7 @@ public static class McpEndpoint
                 if (!removed)
                     return Text("No link with that id.", isError: true);
 
-                await store.UpsertAsync(session, ct);
+                await sessions.NotifyUpdatedAsync(session, ct);
                 return Text("Removed.");
             }
 
@@ -472,7 +472,7 @@ public static class McpEndpoint
 
                 session.Title = Required(arguments, "title");
 
-                await store.UpsertAsync(session, ct);
+                await sessions.NotifyUpdatedAsync(session, ct);
                 return Text("Title set.");
             }
 
