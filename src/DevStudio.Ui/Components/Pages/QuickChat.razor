@@ -24,18 +24,35 @@
 
                 @if (_guidance is not null)
                 {
-                    <div class="section-tag">Local prompt guidance</div>
-                    <div class="card" style="margin-bottom:1rem">
-                        <div class="small">I’ll ask only for details that are missing, then send one focused prompt to the CLI. No model is used here.</div>
-                        @foreach (var exchange in _guidanceTranscript)
-                        {
-                            <div style="margin-top:.8rem"><strong>@exchange.Role</strong><div>@exchange.Text</div></div>
-                        }
-                        @if (_guidance.NextQuestion is { } question)
-                        {
-                            <div style="margin-top:.8rem"><strong>Guidance</strong><div>@question</div></div>
-                        }
+                    <div class="msg msg-guidance">
+                        <div class="who"><span>Guidance</span></div>
+                        <div class="guidance-state">local prompt guidance · no model is used here</div>
+                        <div class="body">I'll ask only for details that are missing, then send one focused prompt to the CLI.</div>
                     </div>
+                    @foreach (var exchange in _guidanceTranscript)
+                    {
+                        @if (exchange.Role == "You")
+                        {
+                            <div class="msg msg-user">
+                                <div class="who"><span>You</span></div>
+                                <div class="body">@exchange.Text</div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="msg msg-guidance">
+                                <div class="who"><span>Guidance</span></div>
+                                <div class="body">@exchange.Text</div>
+                            </div>
+                        }
+                    }
+                    @if (_guidance.NextQuestion is { } question)
+                    {
+                        <div class="msg msg-guidance">
+                            <div class="who"><span>Guidance</span></div>
+                            <div class="body">@question</div>
+                        </div>
+                    }
                 }
 
                 @if (_recent.Count > 0)
@@ -65,6 +82,19 @@
 
         <div class="composer">
             <div class="composer-inner">
+                @if (_guidance is null && SlashCommandCompletions is { Count: > 0 } commandCompletions)
+                {
+                    <div class="slash-command-menu" role="listbox" aria-label="Slash commands">
+                        @foreach (var command in commandCompletions)
+                        {
+                            <button class="slash-command" role="option" @onclick="() => CompleteSlashCommand(command)">
+                                <code>@command.Name</code><span>@command.Description</span>
+                                <small class="slash-command-usage">Usage: <code>@command.Usage</code></small>
+                            </button>
+                        }
+                        <span class="slash-command-help">Tab complete · click a command to select</span>
+                    </div>
+                }
                 <div class="composer-row">
                     <textarea @bind="_prompt" @bind:event="oninput" @onkeydown="OnKeyDown" @ref="_draftElement"
                               placeholder="Ask anything. Enter to send, Shift+Enter for a new line."></textarea>
@@ -322,6 +352,12 @@
     /// </summary>
     private async Task OnKeyDown(KeyboardEventArgs args)
     {
+        if (args.Key is "Tab" && _guidance is null && SlashCommandCompletions.FirstOrDefault() is { } first)
+        {
+            CompleteSlashCommand(first);
+            return;
+        }
+
         if (args.Key != "Enter")
             return;
 
@@ -341,4 +377,14 @@
     }
 
     private void Open(ChatSession session) => Nav.NavigateTo($"/chat/{session.Id}");
+
+    /// <summary>
+    /// Works before a session exists — it only needs the CLI the user has picked, not a live
+    /// conversation — so this composer offers the same completions Chat.razor does once a session
+    /// has started.
+    /// </summary>
+    private IReadOnlyList<CliSlashCommand> SlashCommandCompletions =>
+        string.IsNullOrWhiteSpace(_selected) ? [] : CliSlashCommands.For(Resolve().Provider, _prompt);
+
+    private void CompleteSlashCommand(CliSlashCommand command) => _prompt = command.Name + " ";
 }

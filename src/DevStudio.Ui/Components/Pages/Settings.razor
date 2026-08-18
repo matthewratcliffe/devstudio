@@ -4,124 +4,161 @@
 
 <PageTitle>Settings · devStudio</PageTitle>
 
-<div class="card" style="margin-bottom:1.2rem">
-    <div class="section-tag">Workspace security</div>
-    <p class="small">
-        These controls apply to agent file tools, ACP file callbacks and workspace downloads. The
-        secure defaults keep every path inside its assigned workspace and reject symlinks.
-    </p>
+<div class="settings-bar">
+    <div class="section-tag" style="margin:0">Application settings</div>
+    <div class="spacer"></div>
+    <span class="save-hint">Workspace controls apply immediately · token defaults apply to new agents and quick chats</span>
+    <button class="btn btn-primary" @onclick="SaveAsync">Save settings</button>
 </div>
 
-<div class="card">
-    <div class="field-row">
-        <div>
-            <label for="validate-paths">Validate workspace paths</label>
-            <div class="hint">
-                Refuse paths outside the session workspace after normalisation. Disabling this lets
-                agents and browser downloads address any path they can reach.
+<div class="settings-grid">
+
+    <div class="card">
+        <div class="setting-group">
+            <div class="setting-group-head">
+                <span class="ico">🔒</span>
+                <div>
+                    <h3 style="margin:0">Workspace security</h3>
+                </div>
+            </div>
+            <p class="small setting-group-desc">
+                Applies to agent file tools, ACP file callbacks and workspace downloads. Secure defaults
+                keep every path inside its assigned workspace and reject symlinks.
+            </p>
+
+            <div class="setting-row">
+                <input id="validate-paths" class="switch" type="checkbox" @bind="_settings.ValidateWorkspacePaths" />
+                <div class="setting-copy">
+                    <label for="validate-paths">Validate workspace paths</label>
+                    <div class="hint">
+                        Refuse paths outside the session workspace after normalisation. Disabling this lets
+                        agents and browser downloads address any path they can reach.
+                    </div>
+                </div>
+            </div>
+
+            <div class="setting-row">
+                <input id="follow-symlinks" class="switch" type="checkbox" @bind="_settings.FollowWorkspaceSymlinks" />
+                <div class="setting-copy">
+                    <label for="follow-symlinks">Follow workspace symlinks</label>
+                    <div class="hint">
+                        Allow existing symlinks while resolving workspace paths. With validation enabled,
+                        their final target must still remain inside the workspace.
+                    </div>
+                </div>
+            </div>
+
+            @if (!_settings.ValidateWorkspacePaths)
+            {
+                <div class="setting-callout warn">
+                    <strong>Warning:</strong>&nbsp;path validation is disabled. Agents can read and write
+                    outside their workspaces.
+                </div>
+            }
+            else if (_settings.FollowWorkspaceSymlinks)
+            {
+                <div class="setting-callout info">
+                    Symlinks are enabled. Links to locations outside a workspace are still rejected while
+                    path validation remains on.
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="setting-group">
+            <div class="setting-group-head">
+                <span class="ico">🌐</span>
+                <div><h3 style="margin:0">Web tools</h3></div>
+            </div>
+            <div class="setting-row" style="border-top:none;padding-top:0">
+                <input id="enable-web-tools" class="switch" type="checkbox" @bind="_settings.EnableWebTools" />
+                <div class="setting-copy">
+                    <label for="enable-web-tools">Allow WebFetch and WebSearch</label>
+                    <div class="hint">
+                        Grants every agent standing permission to fetch URLs and search the web without
+                        being asked. Nobody answers permission prompts in a headless session, so leaving
+                        this off means those two tools never work at all.
+                    </div>
+                </div>
             </div>
         </div>
-        <input id="validate-paths" type="checkbox" @bind="_settings.ValidateWorkspacePaths" />
     </div>
 
-    <div class="field-row">
-        <div>
-            <label for="follow-symlinks">Follow workspace symlinks</label>
-            <div class="hint">
-                Allow existing symlinks while resolving workspace paths. With validation enabled,
-                their final target must still remain inside the workspace.
+    <div class="card">
+        <div class="setting-group">
+            <div class="setting-group-head">
+                <span class="ico">🎯</span>
+                <div><h3 style="margin:0">Goal tracking</h3></div>
+            </div>
+            <div class="setting-row" style="border-top:none;padding-top:0">
+                <input id="enable-goal" class="switch" type="checkbox" @bind="_settings.EnableGoal" />
+                <div class="setting-copy">
+                    <label for="enable-goal">Track a goal per session</label>
+                    <div class="hint">
+                        Shows the "Goal" field in the chat sidebar, lets agents read and set it over MCP,
+                        and guesses one after a couple of turns if nobody has set it yet — a guess is
+                        always shown for confirmation, never adopted automatically.
+                    </div>
+                </div>
             </div>
         </div>
-        <input id="follow-symlinks" type="checkbox" @bind="_settings.FollowWorkspaceSymlinks" />
     </div>
 
-    @if (!_settings.ValidateWorkspacePaths)
-    {
-        <div class="card" style="margin-top:1rem;border-color:var(--red,#f56565)">
-            <strong>Warning:</strong> path validation is disabled. Agents can read and write outside
-            their workspaces.
-        </div>
-    }
-    else if (_settings.FollowWorkspaceSymlinks)
-    {
-        <div class="card" style="margin-top:1rem;border-color:var(--amber,#f6c85f)">
-            Symlinks are enabled. Links to locations outside a workspace are still rejected while
-            path validation remains on.
-        </div>
-    }
+    <div class="card">
+        <div class="setting-group">
+            <div class="setting-group-head">
+                <span class="ico">💡</span>
+                <div><h3 style="margin:0">Prompting tips</h3></div>
+            </div>
 
-    <div class="divider"></div>
-    <div class="section-tag">Web tools</div>
-    <div class="field-row">
-        <div>
-            <label for="enable-web-tools">Allow WebFetch and WebSearch</label>
-            <div class="hint">
-                Grants every agent standing permission to fetch URLs and search the web without being
-                asked. Nobody answers permission prompts in a headless session, so leaving this off
-                means those two tools never work at all.
+            <div class="setting-row" style="border-top:none;padding-top:0">
+                <input id="enable-prompting-tips" class="switch" type="checkbox" @bind="_settings.EnablePromptingTips" />
+                <div class="setting-copy">
+                    <label for="enable-prompting-tips">Show prompting tips in chat</label>
+                    <div class="hint">
+                        Gives practical suggestions for clearer prompts and lower-cost requests. Tips are
+                        generated locally and do not use model tokens. Individual agents can override this.
+                    </div>
+                </div>
+            </div>
+
+            <div class="setting-row">
+                <input id="use-llm-prompting-tips" class="switch" type="checkbox" @bind="_settings.UseLlmForPromptingTips" />
+                <div class="setting-copy">
+                    <label for="use-llm-prompting-tips">Use LLM for prompting tips</label>
+                    <div class="hint">Asks the model to add a tailored tip to its answer. Warning: this uses extra tokens.</div>
+                </div>
+            </div>
+
+            <div class="setting-row">
+                <input id="enable-guided-quick-chat" class="switch" type="checkbox" @bind="_settings.EnableGuidedQuickChat" />
+                <div class="setting-copy">
+                    <label for="enable-guided-quick-chat">Guided prompting in quick chat</label>
+                    <div class="hint">
+                        Locally asks for missing goal, context, constraints, or output details before
+                        sending the request to the CLI. No LLM is used for the guidance.
+                    </div>
+                </div>
             </div>
         </div>
-        <input id="enable-web-tools" type="checkbox" @bind="_settings.EnableWebTools" />
     </div>
 
-    <div class="divider"></div>
-    <div class="section-tag">Goal tracking</div>
-    <div class="field-row">
-        <div>
-            <label for="enable-goal">Track a goal per session</label>
-            <div class="hint">
-                Shows the "Goal" field in the chat sidebar, lets agents read and set it over MCP, and
-                guesses one after a couple of turns if nobody has set it yet — a guess is always shown
-                for confirmation, never adopted automatically.
+    <div class="card card-wide">
+        <div class="setting-group">
+            <div class="setting-group-head">
+                <span class="ico">🧮</span>
+                <div><h3 style="margin:0">Token minimisation defaults</h3></div>
             </div>
+            <p class="small setting-group-desc">
+                These tactics are selected for new agents and quick chats. Existing agents keep their own
+                choices, and each chat can override them.
+            </p>
+            <TokenMinimisationPicker Value="_settings.DefaultTokenMinimisation"
+                                     ValueChanged="SetDefaultTokenMinimisation" />
         </div>
-        <input id="enable-goal" type="checkbox" @bind="_settings.EnableGoal" />
     </div>
 
-    <div class="divider"></div>
-    <div class="section-tag">Prompting tips</div>
-    <div class="field-row">
-        <div>
-            <label for="enable-prompting-tips">Show prompting tips in chat</label>
-            <div class="hint">
-                Gives practical suggestions for clearer prompts and lower-cost requests. Tips are
-                generated locally and do not use model tokens. Individual agents can override this.
-            </div>
-        </div>
-        <input id="enable-prompting-tips" type="checkbox" @bind="_settings.EnablePromptingTips" />
-    </div>
-    <div class="field-row">
-        <div>
-            <label for="use-llm-prompting-tips">Use LLM for prompting tips</label>
-            <div class="hint">Asks the model to add a tailored tip to its answer. Warning: this uses extra tokens.</div>
-        </div>
-        <input id="use-llm-prompting-tips" type="checkbox" @bind="_settings.UseLlmForPromptingTips" />
-    </div>
-
-    <div class="field-row">
-        <div>
-            <label for="enable-guided-quick-chat">Guided Prompting in Quick Chat</label>
-            <div class="hint">
-                Locally asks for missing goal, context, constraints, or output details before sending
-                the request to the CLI. No LLM is used for the guidance.
-            </div>
-        </div>
-        <input id="enable-guided-quick-chat" type="checkbox" @bind="_settings.EnableGuidedQuickChat" />
-    </div>
-
-    <div class="divider"></div>
-    <div class="section-tag">Token minimisation defaults</div>
-    <p class="small">
-        These tactics are selected for new agents and quick chats. Existing agents keep their own
-        choices, and each chat can override them.
-    </p>
-    <TokenMinimisationPicker Value="_settings.DefaultTokenMinimisation"
-                             ValueChanged="SetDefaultTokenMinimisation" />
-
-    <div class="btn-row" style="margin-top:1.2rem">
-        <button class="btn btn-primary" @onclick="SaveAsync">Save settings</button>
-        <span class="mono-dim">Workspace controls apply immediately; token defaults apply to new agents and quick chats.</span>
-    </div>
 </div>
 
 @code {
