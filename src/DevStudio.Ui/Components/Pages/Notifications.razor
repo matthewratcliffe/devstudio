@@ -1,0 +1,98 @@
+@page "/notifications"
+@implements IDisposable
+@inject INotificationService NotificationService
+
+<PageTitle>Notifications · devStudio</PageTitle>
+
+<div class="btn-row" style="margin-bottom:1.2rem">
+    <button class="btn btn-ghost" @onclick="DismissAllAsync" disabled="@(_notifications.Count == 0)">Clear all</button>
+    <span class="mono-dim">
+        Shown to everyone using the app, in real time. An agent raises one with <code>create_notification</code>
+        over MCP; dismissing it — by anyone — clears it for everyone.
+    </span>
+</div>
+
+@if (_notifications.Count == 0)
+{
+    <div class="empty">
+        <div class="big">🔔</div>
+        Nothing to see. Notifications raised by agents or workflows show up here.
+    </div>
+}
+else
+{
+    <div class="grid grid-auto">
+        @foreach (var notification in _notifications)
+        {
+            <div class="card">
+                <div class="card-head">
+                    <h3>@notification.Title</h3>
+                    <div class="spacer"></div>
+                    <span class="pill @KindClass(notification.Kind)">@notification.Kind</span>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(notification.Body))
+                {
+                    <p class="small">@notification.Body</p>
+                }
+
+                <dl class="kv" style="margin-bottom:0.8rem">
+                    <dt>Raised by</dt><dd>@notification.CreatedBy</dd>
+                    <dt>When</dt><dd>@notification.CreatedAt.ToLocalTime().ToString("g")</dd>
+                </dl>
+
+                <div class="btn-row">
+                    <button class="btn btn-sm btn-danger" @onclick="() => DismissAsync(notification)">Dismiss</button>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private IReadOnlyList<Notification> _notifications = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        NotificationService.Changed += OnChanged;
+        await ReloadAsync();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader("Notifications", "Shared across everyone using the app");
+    }
+
+    private async Task ReloadAsync()
+    {
+        _notifications = await NotificationService.GetAllAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OnChanged() => _ = ReloadAsync();
+
+    private async Task DismissAsync(Notification notification)
+    {
+        await NotificationService.DismissAsync(notification.Id);
+        Layout.Notify("Notification dismissed.", "ok");
+    }
+
+    private async Task DismissAllAsync()
+    {
+        await NotificationService.DismissAllAsync();
+        Layout.Notify("All notifications cleared.", "ok");
+    }
+
+    private static string KindClass(string kind) => kind switch
+    {
+        "ok" => "pill-lime",
+        "warn" => "pill-amber",
+        "err" => "pill-red",
+        _ => "pill-cyan",
+    };
+
+    public void Dispose() => NotificationService.Changed -= OnChanged;
+}

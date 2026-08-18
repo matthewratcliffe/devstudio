@@ -1036,10 +1036,10 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                 return;
 
             // Never adopted automatically — a guess only becomes the goal the session is actually
-            // held to once a person confirms or edits it from the sidebar.
+            // held to once a person confirms or edits it from the sidebar. Shown only in the sidebar's
+            // Goal card (Chat.razor) — not also appended to the transcript, to avoid showing the same
+            // guess twice.
             session.ProposedGoal = text;
-            AppendMessage(session, MessageRole.System,
-                $"Guessed goal for this conversation: \"{text}\" — confirm or edit it in the sidebar before it's treated as the goal.");
 
             await PersistAsync(session);
         }

@@ -621,6 +621,9 @@ select.select-sm { width: auto; font-size: 0.72rem; padding: 0.3em 1.6em 0.3em 0
 }
 .terminal-input { display: flex; gap: 0.5rem; padding: 0.6rem; border-top: 1px solid var(--border); background: var(--bg-1); }
 .terminal-input .prompt { color: var(--cyan); align-self: center; }
+.terminal-input input { flex: 1; background: transparent; border: none; color: var(--text-0); font-family: var(--font-mono); font-size: 0.82rem; }
+.terminal-input input:focus { outline: none; }
+.terminal-body .term-err { color: var(--red); }
 
 /* -- Misc ----------------------------------------------------------------- */
 

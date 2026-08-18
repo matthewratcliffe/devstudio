@@ -1,0 +1,124 @@
+@page "/terminal"
+@inject ICliCommandService Cli
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime Js
+
+<PageTitle>Terminal · devStudio</PageTitle>
+
+<p class="mono-dim" style="margin-bottom:1rem">
+    Drive the app from the command line — <code>sessions list</code>, <code>agents run code-review "fix the lint errors"</code>,
+    <code>workflows run nightly-triage -b</code>. Append <code>-b</code> to background a long-running command.
+    Type <code>help</code> for the full list, and use ↑ / ↓ to recall previous commands.
+</p>
+
+<div class="terminal">
+    <div class="terminal-bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="title">devstudio</span>
+    </div>
+
+    <div class="terminal-body" @ref="_outputRef">
+        @foreach (var line in _lines)
+        {
+            <div class="@(line.IsError ? "term-err" : "")">@line.Text</div>
+        }
+    </div>
+
+    <div class="terminal-input">
+        <span class="prompt">&gt;</span>
+        <input type="text" @ref="_inputRef" @bind="_draft" @bind:event="oninput"
+               @onkeydown="OnKeyDownAsync" placeholder="help" autocomplete="off" spellcheck="false" />
+    </div>
+</div>
+
+@code {
+    private sealed record Line(string Text, bool IsError);
+
+    private readonly List<Line> _lines = [];
+    private readonly List<string> _commandHistory = [];
+    private int _historyIndex = -1;
+    private string _draft = string.Empty;
+    private string _invokedBy = "operator";
+    private ElementReference _inputRef;
+    private ElementReference _outputRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthState.GetAuthenticationStateAsync();
+        _invokedBy = state.User.Identity?.Name ?? "operator";
+
+        _lines.Add(new Line("devStudio terminal. Type 'help' to see what's available.", false));
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            await Js.InvokeVoidAsync("aiShop.focus", _inputRef);
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "Enter":
+                await RunAsync();
+                break;
+
+            case "ArrowUp":
+                if (_commandHistory.Count > 0)
+                {
+                    _historyIndex = _historyIndex < 0
+                        ? _commandHistory.Count - 1
+                        : Math.Max(0, _historyIndex - 1);
+                    _draft = _commandHistory[_historyIndex];
+                }
+                break;
+
+            case "ArrowDown":
+                if (_historyIndex >= 0)
+                {
+                    _historyIndex++;
+                    _draft = _historyIndex < _commandHistory.Count ? _commandHistory[_historyIndex] : string.Empty;
+                    if (_historyIndex >= _commandHistory.Count)
+                        _historyIndex = -1;
+                }
+                break;
+        }
+    }
+
+    private async Task RunAsync()
+    {
+        var command = _draft.Trim();
+        _draft = string.Empty;
+        _historyIndex = -1;
+
+        if (command.Length == 0)
+            return;
+
+        _commandHistory.Add(command);
+        _lines.Add(new Line($"> {command}", false));
+        await ScrollToBottomAsync();
+
+        var result = await Cli.ExecuteAsync(command, _invokedBy);
+
+        if (result.ClearScreen)
+        {
+            _lines.Clear();
+        }
+        else
+        {
+            foreach (var line in result.Lines)
+                _lines.Add(new Line(line.Text, line.IsError));
+        }
+
+        await ScrollToBottomAsync();
+        await Js.InvokeVoidAsync("aiShop.focus", _inputRef);
+    }
+
+    private async Task ScrollToBottomAsync()
+    {
+        StateHasChanged();
+        await Task.Yield();
+        await Js.InvokeVoidAsync("aiShop.scrollToBottom", _outputRef, true);
+    }
+}

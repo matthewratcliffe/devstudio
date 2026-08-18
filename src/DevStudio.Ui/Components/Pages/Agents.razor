@@ -99,9 +99,21 @@
                 </div>
             </div>
 
-            <div class="field">
-                <label>Description</label>
-                <input type="text" @bind="_editing.Description" placeholder="What this agent is for" />
+            <div class="form-grid">
+                <div class="field">
+                    <label>Description</label>
+                    <input type="text" @bind="_editing.Description" placeholder="What this agent is for" />
+                </div>
+                <div class="field">
+                    <label>Category</label>
+                    <input type="text" @bind="_editing.Category" placeholder="Groups this agent in pick lists" list="agent-categories" />
+                    <datalist id="agent-categories">
+                        @foreach (var category in _agents.Select(a => a.Category).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().OrderBy(c => c, StringComparer.OrdinalIgnoreCase))
+                        {
+                            <option value="@category" />
+                        }
+                    </datalist>
+                </div>
             </div>
 
             <div class="field">

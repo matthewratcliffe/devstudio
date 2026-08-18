@@ -1,3 +1,5 @@
+using DevStudio.Application.Cli;
+using DevStudio.Application.Notifications;
 using DevStudio.Application.Queues;
 using DevStudio.Application.Sessions;
 using DevStudio.Application.Users;
@@ -17,6 +19,8 @@ public static class DependencyInjection
         services.AddSingleton<IQuickChatService, QuickChatService>();
         services.AddSingleton<IQueueService, QueueService>();
         services.AddSingleton<IUserService, UserService>();
+        services.AddSingleton<INotificationService, NotificationService>();
+        services.AddSingleton<ICliCommandService, CliCommandService>();
         return services;
     }
 }

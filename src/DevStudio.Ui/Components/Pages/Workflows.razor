@@ -116,9 +116,33 @@
                 </select>
             </div>
 
+            <div class="field">
+                <label>Instances</label>
+                <input type="number" min="1" @bind="_runInstanceCount" disabled="@_runUntilError" />
+            </div>
+
+            <div class="field">
+                <label>Seconds between instances</label>
+                <input type="number" min="0" @bind="_runIntervalSeconds" />
+            </div>
+
+            <div class="field">
+                <label>
+                    <input type="checkbox" @bind="_runUntilError" />
+                    Keep starting instances until one fails, then stop
+                </label>
+            </div>
+
+            @if (_batchRunning)
+            {
+                <p class="small mono-dim">Started @_batchStarted @(_runUntilError ? "instance(s) so far…" : $"of {_runInstanceCount}…")</p>
+            }
+
             <div class="btn-row">
-                <button class="btn btn-primary" @onclick="StartRunAsync">Start run</button>
-                <button class="btn btn-ghost" @onclick="() => _running = null">Cancel</button>
+                <button class="btn btn-primary" disabled="@_batchRunning" @onclick="StartRunAsync">
+                    @(_batchRunning ? "Starting…" : "Start run")
+                </button>
+                <button class="btn btn-ghost" disabled="@_batchRunning" @onclick="() => _running = null">Cancel</button>
             </div>
         </div>
     </div>
@@ -133,6 +157,11 @@
     private Workflow? _running;
     private readonly Dictionary<string, string> _inputs = [];
     private string _runProjectId = string.Empty;
+    private int _runInstanceCount = 1;
+    private int _runIntervalSeconds;
+    private bool _runUntilError;
+    private bool _batchRunning;
+    private int _batchStarted;
 
     protected override async Task OnInitializedAsync()
     {
@@ -164,6 +193,11 @@
         _running = workflow;
         _inputs.Clear();
         _runProjectId = string.Empty;
+        _runInstanceCount = 1;
+        _runIntervalSeconds = 0;
+        _runUntilError = false;
+        _batchRunning = false;
+        _batchStarted = 0;
 
         foreach (var input in workflow.Inputs)
             _inputs[input.Name] = input.DefaultValue ?? string.Empty;
@@ -174,19 +208,56 @@
         if (_running is null)
             return;
 
+        var workflow = _running;
+        var inputs = new Dictionary<string, string>(_inputs);
+        if (!string.IsNullOrWhiteSpace(_runProjectId))
+            inputs["projectId"] = _runProjectId;
+
+        var intervalMs = Math.Max(0, _runIntervalSeconds) * 1000;
+        var untilError = _runUntilError;
+        var count = untilError ? int.MaxValue : Math.Max(1, _runInstanceCount);
+
+        _batchRunning = true;
+        _batchStarted = 0;
+        string? firstRunId = null;
+
         try
         {
-            var inputs = new Dictionary<string, string>(_inputs);
-            if (!string.IsNullOrWhiteSpace(_runProjectId))
-                inputs["projectId"] = _runProjectId;
+            for (var i = 0; i < count; i++)
+            {
+                if (i > 0 && intervalMs > 0)
+                    await Task.Delay(intervalMs);
 
-            var run = await Engine.StartAsync(_running.Id, inputs, "manual");
+                try
+                {
+                    var run = await Engine.StartAsync(workflow.Id, inputs, "manual");
+                    firstRunId = firstRunId ?? run.Id;
+                    _batchStarted++;
+                    StateHasChanged();
+                }
+                catch (Exception ex)
+                {
+                    if (untilError)
+                    {
+                        Layout.Notify($"Stopped after {_batchStarted} instance(s): {ex.Message}", "err");
+                        break;
+                    }
+
+                    throw;
+                }
+            }
+
             _running = null;
-            Nav.NavigateTo($"/workflows/runs/{run.Id}");
+            if (firstRunId is not null)
+                Nav.NavigateTo($"/workflows/runs/{firstRunId}");
         }
         catch (Exception ex)
         {
             Layout.Notify(ex.Message, "err");
+        }
+        finally
+        {
+            _batchRunning = false;
         }
     }
 

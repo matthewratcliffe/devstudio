@@ -45,6 +45,28 @@ else
                       placeholder="Describe the work. Ctrl+Enter to start."></textarea>
         </div>
 
+        <div class="field">
+            <label>Instances</label>
+            <input type="number" min="1" @bind="_instanceCount" disabled="@_runUntilError" />
+        </div>
+
+        <div class="field">
+            <label>Seconds between instances</label>
+            <input type="number" min="0" @bind="_intervalSeconds" />
+        </div>
+
+        <div class="field">
+            <label>
+                <input type="checkbox" @bind="_runUntilError" />
+                Keep starting instances until one fails, then stop
+            </label>
+        </div>
+
+        @if (_starting && (_instanceCount > 1 || _runUntilError))
+        {
+            <p class="small mono-dim">Started @_startedCount @(_runUntilError ? "instance(s) so far…" : $"of {_instanceCount}…")</p>
+        }
+
         <div class="btn-row">
             <button class="btn btn-primary" disabled="@(_starting || string.IsNullOrWhiteSpace(_prompt))" @onclick="StartAsync">
                 @(_starting ? "Starting…" : "Start session")
@@ -63,6 +85,10 @@ else
     private string _prompt = string.Empty;
     private string _projectId = string.Empty;
     private bool _starting;
+    private int _instanceCount = 1;
+    private int _intervalSeconds;
+    private bool _runUntilError;
+    private int _startedCount;
 
     protected override async Task OnInitializedAsync()
     {
@@ -86,21 +112,58 @@ else
         if (_agent is null || string.IsNullOrWhiteSpace(_prompt))
             return;
 
+        var agentId = _agent.Id;
+        var prompt = _prompt.Trim();
+        var projectId = string.IsNullOrWhiteSpace(_projectId) ? null : _projectId;
+        var intervalMs = Math.Max(0, _intervalSeconds) * 1000;
+        var untilError = _runUntilError;
+        var count = untilError ? int.MaxValue : Math.Max(1, _instanceCount);
+
         _starting = true;
+        _startedCount = 0;
+        string? firstSessionId = null;
+
         try
         {
-            var session = await Sessions.StartAsync(new StartSessionRequest
+            for (var i = 0; i < count; i++)
             {
-                AgentId = _agent.Id,
-                Prompt = _prompt.Trim(),
-                ProjectId = string.IsNullOrWhiteSpace(_projectId) ? null : _projectId,
-            });
+                if (i > 0 && intervalMs > 0)
+                    await Task.Delay(intervalMs);
 
-            Nav.NavigateTo($"/chat/{session.Id}");
+                try
+                {
+                    var session = await Sessions.StartAsync(new StartSessionRequest
+                    {
+                        AgentId = agentId,
+                        Prompt = prompt,
+                        ProjectId = projectId,
+                    });
+
+                    firstSessionId ??= session.Id;
+                    _startedCount++;
+                    StateHasChanged();
+                }
+                catch (Exception ex)
+                {
+                    if (untilError)
+                    {
+                        Layout.Notify($"Stopped after {_startedCount} instance(s): {ex.Message}", "err");
+                        break;
+                    }
+
+                    throw;
+                }
+            }
+
+            if (firstSessionId is not null)
+                Nav.NavigateTo($"/chat/{firstSessionId}");
         }
         catch (Exception ex)
         {
             Layout.Notify(ex.Message, "err");
+        }
+        finally
+        {
             _starting = false;
         }
     }

@@ -361,10 +361,6 @@ else
                     <div class="card" style="border-color:var(--amber,#f6c85f);margin-bottom:0.6rem">
                         <div class="small"><strong>Suggested goal</strong></div>
                         <div class="mono-dim" style="margin:0.3rem 0">@_session.ProposedGoal</div>
-                        <div class="hint">
-                            Guessed from the conversation so far. It won't be treated as the goal until
-                            you confirm or edit it.
-                        </div>
                         <div class="btn-row" style="margin-top:0.5rem">
                             <button class="btn btn-sm btn-primary" @onclick="AcceptProposedGoalAsync">Use this</button>
                             <button class="btn btn-sm" @onclick="EditProposedGoal">Edit</button>

@@ -34,9 +34,14 @@
         <div class="field">
             <label for="agent">Agent</label>
             <select id="agent" @bind="_launchAgentId">
-                @foreach (var agent in _agents.Where(a => a.Enabled))
+                @foreach (var group in _agents.Where(a => a.Enabled).GroupedByCategory())
                 {
-                    <option value="@agent.Id">@agent.Name — @agent.Provider</option>
+                    <optgroup label="@group.Key">
+                        @foreach (var agent in group)
+                        {
+                            <option value="@agent.Id">@agent.Name — @agent.Provider</option>
+                        }
+                    </optgroup>
                 }
             </select>
         </div>

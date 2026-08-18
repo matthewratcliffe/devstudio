@@ -7,6 +7,10 @@ public sealed class Workflow : Entity
 {
     public string Name { get; set; } = "New workflow";
     public string Description { get; set; } = string.Empty;
+
+    /// <summary>Groups this workflow in pick lists. Empty falls into an "Uncategorized" bucket.</summary>
+    public string Category { get; set; } = string.Empty;
+
     /// <summary>Declared inputs, referenced in prompts as {{name}} and supplied at run time.</summary>
     public List<WorkflowInput> Inputs { get; set; } = [];
     public List<WorkflowStep> Steps { get; set; } = [];

@@ -37,6 +37,16 @@
         <NavLink class="nav-link" href="/images" @onclick="OnNavigate">
             <span class="ico">▩</span> Images
         </NavLink>
+        <NavLink class="nav-link" href="/notifications" @onclick="OnNavigate">
+            <span class="ico">🔔</span> Notifications
+            @if (NotificationCount > 0)
+            {
+                <span class="count">@NotificationCount</span>
+            }
+        </NavLink>
+        <NavLink class="nav-link" href="/terminal" @onclick="OnNavigate">
+            <span class="ico">❯_</span> Terminal
+        </NavLink>
     </div>
 
     <div class="nav-group">
@@ -100,6 +110,9 @@
 
     /// <summary>Queue items waiting or running, across every queue.</summary>
     [Parameter] public int QueuedCount { get; set; }
+
+    /// <summary>Active notifications, shared across every viewer.</summary>
+    [Parameter] public int NotificationCount { get; set; }
     [Parameter] public EventCallback OnNavigate { get; set; }
 
     private ReleaseStatus? _release;

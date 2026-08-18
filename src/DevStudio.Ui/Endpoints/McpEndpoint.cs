@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using DevStudio.Application.Abstractions;
+using DevStudio.Application.Notifications;
 using DevStudio.Application.Queues;
 using DevStudio.Application.Sessions;
 using DevStudio.Application.Workflows;
@@ -250,6 +251,10 @@ public static class McpEndpoint
             ("seed", "number", "Optional. The same seed and prompt reproduce the same image."),
             ("backend", "string", "Optional service: Pollinations, Cloudflare or Gemini. Defaults to the configured one."),
             ("sessionId", "string", "Optional. Your own session id, so the image is filed against this session.")), "prompt"),
+        Tool("create_notification", "Raise a notification shown to everyone using the app right now, in real time. Use it for things a human should see: a workflow finished, something needs attention, a run failed.", Props(
+            ("title", "string", "One line, shown bold in the list and the sidebar."),
+            ("body", "string", "Optional detail shown under the title."),
+            ("kind", "string", "Optional: info, ok, warn or err. Defaults to info.")), "title"),
     ];
 
     private static async Task<JsonObject> CallToolAsync(
@@ -534,6 +539,21 @@ public static class McpEndpoint
                     $"Generated a {image.Width}×{image.Height} image with {image.Backend} ({image.Model}). " +
                     $"Include this line in your reply exactly as written so the user can see it:\n\n" +
                     $"![{image.Prompt}]({images.UrlFor(image)})");
+            }
+
+            case "create_notification":
+            {
+                var notifications = services.GetRequiredService<INotificationService>();
+                var agentName = parameters?["_meta"]?["agentName"]?.GetValue<string>();
+
+                var notification = await notifications.CreateAsync(
+                    Required(arguments, "title"),
+                    arguments["body"]?.GetValue<string>() ?? string.Empty,
+                    arguments["kind"]?.GetValue<string>() ?? "info",
+                    agentName is null ? "mcp" : $"agent:{agentName}",
+                    ct);
+
+                return Text($"Notification {notification.Id} raised.");
             }
 
             default:
