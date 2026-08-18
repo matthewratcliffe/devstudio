@@ -236,7 +236,7 @@
         if (!firstRender)
             return;
 
-        Layout.SetHeader("New chat", "A conversation with no setup");
+        Layout.SetHeader("New chat", "A conversation with no setup", flush: true);
         await Js.InvokeVoidAsync("aiShop.sendOnEnter", _draftElement);
         await Js.InvokeVoidAsync("aiShop.focus", _draftElement);
     }
