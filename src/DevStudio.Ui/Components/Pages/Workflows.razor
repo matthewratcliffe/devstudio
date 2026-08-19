@@ -4,6 +4,7 @@
 @inject IEntityStore<Project> ProjectStore
 @inject IWorkflowEngine Engine
 @inject NavigationManager Nav
+@using DevStudio.Ui.Services
 
 <PageTitle>Workflows · devStudio</PageTitle>
 
@@ -15,40 +16,62 @@
     </span>
 </div>
 
-<div class="grid grid-auto" style="margin-bottom:1.6rem">
-    @foreach (var workflow in _workflows)
+@foreach (var group in _workflows.GroupedByCategory())
+{
+    @if (group.Key == CategoryGrouping.Uncategorized)
     {
-        <div class="card">
-            <div class="card-head">
-                <h3>@workflow.Name</h3>
-                <div class="spacer"></div>
-                @if (workflow.TeamSourcePath is { Length: > 0 } source)
-                {
-                    <span class="pill" title="From the team settings repository: @source">team</span>
-                }
-                <span class="pill">@workflow.Steps.Count steps</span>
-            </div>
-            <p class="small">@workflow.Description</p>
-
-            <div class="btn-row" style="margin-bottom:0.8rem">
-                @foreach (var input in workflow.Inputs)
-                {
-                    <span class="pill">@input.Name</span>
-                }
-                @if (workflow.ProjectId is not null)
-                {
-                    <span class="pill pill-cyan"><span class="dot"></span>@ProjectName(workflow.ProjectId)</span>
-                }
-            </div>
-
-            <div class="btn-row">
-                <button class="btn btn-sm btn-primary" @onclick="() => OpenRunDialog(workflow)">Run</button>
-                <a class="btn btn-sm" href="/workflows/@workflow.Id/edit">Edit</a>
-                <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(workflow)">Delete</button>
-            </div>
+        <div class="grid grid-auto" style="margin-bottom:1.2rem">
+            @foreach (var workflow in group)
+            {
+                @WorkflowCard(workflow)
+            }
         </div>
     }
-</div>
+    else
+    {
+        <details class="side-accordion" open style="margin-bottom:1.2rem">
+            <summary class="section-tag">@group.Key <span class="mono-dim">(@group.Count())</span></summary>
+            <div class="grid grid-auto">
+                @foreach (var workflow in group)
+                {
+                    @WorkflowCard(workflow)
+                }
+            </div>
+        </details>
+    }
+}
+
+@code {
+    private RenderFragment WorkflowCard(Workflow workflow) => @<div class="card">
+        <div class="card-head">
+            <h3>@workflow.Name</h3>
+            <div class="spacer"></div>
+            @if (workflow.TeamSourcePath is { Length: > 0 } source)
+            {
+                <span class="pill" title="From the team settings repository: @source">team</span>
+            }
+            <span class="pill">@workflow.Steps.Count steps</span>
+        </div>
+        <p class="small">@workflow.Description</p>
+
+        <div class="btn-row" style="margin-bottom:0.8rem">
+            @foreach (var input in workflow.Inputs)
+            {
+                <span class="pill">@input.Name</span>
+            }
+            @if (workflow.ProjectId is not null)
+            {
+                <span class="pill pill-cyan"><span class="dot"></span>@ProjectName(workflow.ProjectId)</span>
+            }
+        </div>
+
+        <div class="btn-row">
+            <button class="btn btn-sm btn-primary" @onclick="() => OpenRunDialog(workflow)">Run</button>
+            <a class="btn btn-sm" href="/workflows/@workflow.Id/edit">Edit</a>
+            <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(workflow)">Delete</button>
+        </div>
+    </div>;
+}
 
 @if (_workflows.Count == 0)
 {

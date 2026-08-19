@@ -11,6 +11,7 @@
 @inject IGitService Git
 @inject NavigationManager Nav
 @inject Microsoft.Extensions.Options.IOptions<OrchestratorOptions> Options
+@using DevStudio.Ui.Services
 
 <PageTitle>Agents · devStudio</PageTitle>
 
@@ -19,53 +20,75 @@
     <span class="mono-dim">Each agent is bound to one CLI. Add as many as you like.</span>
 </div>
 
-<div class="grid grid-auto">
-    @foreach (var agent in _agents)
+@foreach (var group in _agents.GroupedByCategory())
+{
+    @if (group.Key == CategoryGrouping.Uncategorized)
     {
-        <div class="card">
-            <div class="card-head">
-                <h3>@agent.Name</h3>
-                <div class="spacer"></div>
-                @if (agent.TeamSourcePath is { Length: > 0 } source)
-                {
-                    <span class="pill" title="From the team settings repository: @source">team</span>
-                }
-                <span class="pill @ProviderCss(agent)">
-                    <span class="dot"></span>@ProviderLabel(agent)
-                </span>
-            </div>
-            <p class="small">@(string.IsNullOrWhiteSpace(agent.Description) ? "No description." : agent.Description)</p>
-
-            <div class="btn-row" style="margin-bottom:0.7rem">
-                <span class="pill">@agent.PermissionMode</span>
-                @if (agent.UseWorktree && agent.RepositoryId is not null)
-                {
-                    <span class="pill">worktree</span>
-                }
-                @if (agent.SkillIds.Count > 0)
-                {
-                    <span class="pill">@agent.SkillIds.Count skills</span>
-                }
-                @if (agent.McpServerIds.Count > 0)
-                {
-                    <span class="pill">@agent.McpServerIds.Count mcp</span>
-                }
-                @if (!agent.Enabled)
-                {
-                    <span class="pill pill-red">disabled</span>
-                }
-            </div>
-
-            <div class="btn-row">
-                <button class="btn btn-sm btn-primary" @onclick="() => StartChat(agent)">Chat</button>
-                <button class="btn btn-sm" @onclick="() => Edit(agent)">Edit</button>
-                <a class="btn btn-sm" href="@HistoryUrl(agent)">History</a>
-                <button class="btn btn-sm btn-ghost" @onclick="() => DuplicateAsync(agent)">Duplicate</button>
-                <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(agent)">Delete</button>
-            </div>
+        <div class="grid grid-auto" style="margin-bottom:1.2rem">
+            @foreach (var agent in group)
+            {
+                @AgentCard(agent)
+            }
         </div>
     }
-</div>
+    else
+    {
+        <details class="side-accordion" open style="margin-bottom:1.2rem">
+            <summary class="section-tag">@group.Key <span class="mono-dim">(@group.Count())</span></summary>
+            <div class="grid grid-auto">
+                @foreach (var agent in group)
+                {
+                    @AgentCard(agent)
+                }
+            </div>
+        </details>
+    }
+}
+
+@code {
+    private RenderFragment AgentCard(Agent agent) => @<div class="card">
+        <div class="card-head">
+            <h3>@agent.Name</h3>
+            <div class="spacer"></div>
+            @if (agent.TeamSourcePath is { Length: > 0 } source)
+            {
+                <span class="pill" title="From the team settings repository: @source">team</span>
+            }
+            <span class="pill @ProviderCss(agent)">
+                <span class="dot"></span>@ProviderLabel(agent)
+            </span>
+        </div>
+        <p class="small">@(string.IsNullOrWhiteSpace(agent.Description) ? "No description." : agent.Description)</p>
+
+        <div class="btn-row" style="margin-bottom:0.7rem">
+            <span class="pill">@agent.PermissionMode</span>
+            @if (agent.UseWorktree && agent.RepositoryId is not null)
+            {
+                <span class="pill">worktree</span>
+            }
+            @if (agent.SkillIds.Count > 0)
+            {
+                <span class="pill">@agent.SkillIds.Count skills</span>
+            }
+            @if (agent.McpServerIds.Count > 0)
+            {
+                <span class="pill">@agent.McpServerIds.Count mcp</span>
+            }
+            @if (!agent.Enabled)
+            {
+                <span class="pill pill-red">disabled</span>
+            }
+        </div>
+
+        <div class="btn-row">
+            <button class="btn btn-sm btn-primary" @onclick="() => StartChat(agent)">Chat</button>
+            <button class="btn btn-sm" @onclick="() => Edit(agent)">Edit</button>
+            <a class="btn btn-sm" href="@HistoryUrl(agent)">History</a>
+            <button class="btn btn-sm btn-ghost" @onclick="() => DuplicateAsync(agent)">Duplicate</button>
+            <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(agent)">Delete</button>
+        </div>
+    </div>;
+}
 
 @if (_agents.Count == 0)
 {

@@ -35,6 +35,14 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
 
         /// <summary>Distinguishes a guidance interrupt from the user pressing stop.</summary>
         public bool InterruptedForGuidance { get; set; }
+
+        /// <summary>
+        /// The last raw usage reading from a CLI that reports absolute totals rather than
+        /// per-request amounts (Claude resends the whole conversation, so its input_tokens grows
+        /// every turn). Kept per live session so each bubble can show what that turn actually
+        /// added instead of the whole growing context.
+        /// </summary>
+        public TokenUsage? LastRawUsage { get; set; }
     }
 
     private readonly ConcurrentDictionary<string, LiveSession> _live = new();
@@ -862,7 +870,18 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                         // reports several and they add up rather than replace each other.
                         if (evt.Usage is { IsEmpty: false } usage)
                         {
-                            Count(assistant, usage);
+                            // Claude resends the whole conversation on every request, so its
+                            // input_tokens is the size of the context so far, not what this
+                            // request added — summing it turn over turn would make each bubble
+                            // read as the running total. Only the growth since the last reading
+                            // belongs on the message; the session's own cumulative counters are
+                            // real spend and are left as reported.
+                            var forMessage = agent.Provider == AiProvider.Claude
+                                ? RawUsageDelta(live.LastRawUsage, usage)
+                                : usage;
+                            live.LastRawUsage = usage;
+
+                            Count(assistant, forMessage);
                             Count(session, usage);
                             Notify(session);
                         }
@@ -1328,6 +1347,18 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
 
         AppendMessage(session, MessageRole.System, $"Model has changed from {before} to {after}.");
     }
+
+    /// <summary>
+    /// The part of an absolute usage reading that is new since the last one, for CLIs (Claude)
+    /// that report the size of the whole conversation on every request rather than what that
+    /// request alone added. Output and cache-write tokens are each request's own, not cumulative,
+    /// so only the input side is diffed; a shrink (a fresh context after compaction) is treated as
+    /// entirely new rather than negative.
+    /// </summary>
+    private static TokenUsage RawUsageDelta(TokenUsage? previous, TokenUsage current) =>
+        previous is null
+            ? current
+            : current with { Input = Math.Max(0, current.Input - previous.Input) };
 
     private static void Count(ChatMessage message, TokenUsage usage)
     {
