@@ -49,7 +49,28 @@ public sealed class OrchestratorOptions
 
     public string ClaudeExecutable { get; set; } = "claude";
     public string CodexExecutable { get; set; } = "codex";
+
+    /// <summary>
+    /// Base URL an opencode server should be listening on, e.g. <c>http://localhost:4096</c>. Unlike
+    /// Claude Code and Codex, opencode is driven over its HTTP API rather than shelled out to per
+    /// turn, so this is a server to point at rather than a plain executable. That server does not
+    /// have to already be running: <see cref="OpencodeAutoStart"/> is what starts it.
+    /// </summary>
+    public string OpencodeBaseUrl { get; set; } = "http://localhost:4096";
+
+    /// <summary>
+    /// Executable used to start opencode's own server (<c>opencode serve</c>) when nothing is
+    /// already listening on <see cref="OpencodeBaseUrl"/>.
+    /// </summary>
     public string OpencodeExecutable { get; set; } = "opencode";
+
+    /// <summary>
+    /// Whether DevStudio should start its own <c>opencode serve</c> process when
+    /// <see cref="OpencodeBaseUrl"/> is not already answering. False expects an operator to run and
+    /// manage the server themselves — e.g. a shared instance several DevStudio containers point at.
+    /// </summary>
+    public bool OpencodeAutoStart { get; set; } = true;
+
     public string GitExecutable { get; set; } = "git";
     public string GitHubCliExecutable { get; set; } = "gh";
     public string GitLabCliExecutable { get; set; } = "glab";

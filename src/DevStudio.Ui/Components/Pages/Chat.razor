@@ -238,8 +238,8 @@ else
                         <textarea @bind="_draft" @bind:event="oninput" @onkeydown="OnKeyDown" @ref="_draftElement"
                                   placeholder="@(_session.IsLive ? "The agent is working — your message will be queued." : "Send another turn. Enter to send, Shift+Enter for a new line.")"></textarea>
                         <div style="display:flex;flex-direction:column;gap:0.4rem">
-                            <button class="btn btn-primary" disabled="@string.IsNullOrWhiteSpace(_draft)" @onclick="SendAsync">Send</button>
-                            <button class="btn btn-guidance btn-sm" disabled="@string.IsNullOrWhiteSpace(_draft)"
+                            <button class="btn btn-primary" disabled="@(_loadingModels || string.IsNullOrWhiteSpace(_draft))" @onclick="SendAsync">@(_loadingModels ? "Loading models…" : "Send")</button>
+                            <button class="btn btn-guidance btn-sm" disabled="@(_loadingModels || string.IsNullOrWhiteSpace(_draft))"
                                     title="Steer the agent now instead of queueing a turn"
                                     @onclick="SendGuidanceAsync">Guide ⚡</button>
                             @if (_session.IsLive)
@@ -405,7 +405,7 @@ else
                 <details class="side-accordion">
                 <summary class="section-tag">Model</summary>
                 <ModelPicker Value="_model" ValueChanged="SetModelAsync" Models="_models" Efforts="_efforts"
-                             DefaultLabel="Agent default" InUse="@ModelNow" OpeningInUse="@HandoverPending" />
+                             DefaultLabel="Agent default" InUse="@ModelNow" OpeningInUse="@HandoverPending" Loading="_loadingModels" />
                 <div class="mono-dim">
                     Applies from your next message.
                     @if (_session.HandoverRequested)
@@ -606,6 +606,7 @@ else
     private IReadOnlyList<CliProvider> _cliProviders = [];
     private IReadOnlyList<string> _models = [];
     private IReadOnlyList<string> _efforts = [];
+    private bool _loadingModels;
     private Agent? _agent;
     private SessionModelSettings _model = new();
     private string _selectedCli = string.Empty;
@@ -657,7 +658,7 @@ else
                 _session.OpeningEffort,
                 _session.OpeningTurns);
 
-            LoadModelChoices();
+            await LoadModelChoicesAsync();
         }
 
         await RefreshFilesAsync();
@@ -950,13 +951,30 @@ else
     private static string KeyOf(ChatSession session) =>
         session.CliProviderId is { Length: > 0 } id ? $"custom:{id}" : session.Provider.ToString();
 
-    private void LoadModelChoices()
+    private async Task LoadModelChoicesAsync()
     {
         if (_session is null)
             return;
 
-        _models = ProviderModels.Models(_session.Provider, _session.CliProviderId, Options.Value, _cliProviders);
-        _efforts = ProviderModels.Efforts(_session.Provider, _session.CliProviderId, Options.Value, _cliProviders);
+        // Rendered before the network call rather than after: this is what actually shows the
+        // "loading" state while ModelsAsync is out asking the CLI, instead of only ever appearing
+        // and disappearing in the same frame once the await completes. Sending is disabled for the
+        // same window — picking a model, or sending at all, before the switch has actually settled
+        // risks running against whatever was selected for the previous provider.
+        _loadingModels = true;
+        StateHasChanged();
+
+        try
+        {
+            _models = await ProviderModels.ModelsAsync(_session.Provider, _session.CliProviderId, Options.Value, _cliProviders, Clis);
+            _efforts = ProviderModels.Efforts(_session.Provider, _session.CliProviderId, Options.Value, _cliProviders);
+        }
+        finally
+        {
+            _loadingModels = false;
+        }
+
+        StateHasChanged();
     }
 
     private int OpeningTurns => _model.OpeningTurns ?? _agent?.OpeningTurns ?? 0;
@@ -989,7 +1007,7 @@ else
 
             // Another CLI offers other models, and a name from the one being left would be passed
             // straight through and rejected.
-            LoadModelChoices();
+            await LoadModelChoicesAsync();
             await SetModelAsync(new SessionModelSettings(
                 Keep(_model.Model, _models),
                 Keep(_model.Effort, _efforts),

@@ -87,9 +87,13 @@ public static class WindowsCommandLine
             .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         // An explicit extension is used as given; only a bare name gets the PATHEXT treatment.
+        // PATHEXT candidates come before the bare name itself: cmd.exe resolves an extensionless
+        // command by trying each PATHEXT extension in turn, never the bare file, so a directory that
+        // holds both an npm POSIX shim (plain "opencode", not runnable by CreateProcess) and its
+        // Windows counterpart ("opencode.cmd") has to prefer the one Windows can actually launch.
         var candidates = Path.HasExtension(fileName)
             ? [fileName]
-            : extensions.Select(extension => fileName + extension).Prepend(fileName);
+            : extensions.Select(extension => fileName + extension).Append(fileName);
 
         var directories = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

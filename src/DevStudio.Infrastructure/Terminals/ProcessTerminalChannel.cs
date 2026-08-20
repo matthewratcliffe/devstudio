@@ -44,13 +44,15 @@ internal sealed class ProcessTerminalChannel : ITerminalChannel
             {
                 // npm command entry points are .cmd files. CreateProcess cannot execute those
                 // scripts directly when shell execution is disabled, so route them through cmd.
+                //
+                // This goes through Arguments (one raw string), not ArgumentList: an ArgumentList
+                // entry gets Win32-quoted again on its way into the real command line, and since
+                // this string already contains its own literal quotes, that second pass turns them
+                // into \" and cmd fails to recognise the command at all.
                 info.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
-                info.ArgumentList.Add("/d");
-                info.ArgumentList.Add("/s");
-                info.ArgumentList.Add("/c");
-                info.ArgumentList.Add(string.Join(" ",
-                    new[] { $"\"{executable}\"" }
-                        .Concat(arguments.Select(WindowsCommandLine.Quote))));
+                var inner = string.Join(" ",
+                    new[] { $"\"{executable}\"" }.Concat(arguments.Select(WindowsCommandLine.Quote)));
+                info.Arguments = $"/d /s /c \"{inner}\"";
             }
             else
             {
