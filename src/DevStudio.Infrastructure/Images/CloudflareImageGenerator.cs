@@ -68,7 +68,7 @@ public sealed class CloudflareImageGenerator : IImageGenerator
         using var client = CreateClient();
         using var content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
 
-        var url = $"https://api.cloudflare.com/client/v4/accounts/{settings.AccountId}/ai/run/{model}";
+        var url = $"https://api.cloudflare.com/client/v4/accounts/{settings.AccountId.Trim()}/ai/run/{model}";
         using var response = await client.PostAsync(url, content, ct);
 
         var payload = await response.Content.ReadAsByteArrayAsync(ct);
@@ -99,7 +99,7 @@ public sealed class CloudflareImageGenerator : IImageGenerator
     {
         var client = _clients.CreateClient(nameof(CloudflareImageGenerator));
         client.Timeout = TimeSpan.FromSeconds(_settings.Current.TimeoutSeconds);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _settings.Current.Cloudflare.ApiToken);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _settings.Current.Cloudflare.ApiToken.Trim());
 
         return client;
     }

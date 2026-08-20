@@ -68,6 +68,7 @@ public static class DependencyInjection
         services.AddSingleton<IProviderCli, CodexCli>();
         services.AddSingleton<IProviderCli, OpencodeCli>();
         services.AddSingleton<IProviderCliRegistry, ProviderCliRegistry>();
+        services.AddSingleton<IOpencodeServerManager, OpencodeServerManager>();
 
         // User-defined providers that are not plain commands: an ACP agent driven over its stdio,
         // and OpenAI-compatible endpoints, whose conversations the orchestrator has to remember.

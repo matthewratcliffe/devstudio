@@ -92,9 +92,9 @@
                     <textarea @bind="_prompt" @bind:event="oninput" @onkeydown="OnKeyDown" @ref="_draftElement"
                               placeholder="Ask anything. Enter to send, Shift+Enter for a new line."></textarea>
                     <div style="display:flex;flex-direction:column;gap:0.4rem">
-                        <button class="btn btn-primary" disabled="@(_starting || string.IsNullOrWhiteSpace(_prompt))"
+                        <button class="btn btn-primary" disabled="@(_starting || _loadingModels || string.IsNullOrWhiteSpace(_prompt))"
                                 @onclick="HandleSendAsync">
-                            @(_starting ? "Starting…" : "Send")
+                            @(_starting ? "Starting…" : _loadingModels ? "Loading models…" : "Send")
                         </button>
                     </div>
                 </div>
@@ -135,7 +135,7 @@
 
         <div class="divider"></div>
         <div class="section-tag">Model</div>
-        <ModelPicker @bind-Value="_model" Models="_models" Efforts="_efforts" />
+        <ModelPicker @bind-Value="_model" Models="_models" Efforts="_efforts" Loading="_loadingModels" />
 
         <div class="divider"></div>
         <div class="section-tag">Token minimisation</div>
@@ -191,6 +191,7 @@
     private TokenTactics _tokenMinimisation = new GlobalSettings().DefaultTokenMinimisation;
     private IReadOnlyList<string> _models = [];
     private IReadOnlyList<string> _efforts = [];
+    private bool _loadingModels;
 
     // Read-only unless asked otherwise: a chat window should not edit anything by surprise.
     private PermissionMode _permissionMode = PermissionMode.Plan;
@@ -215,7 +216,7 @@
         _tokenMinimisation = globalSettings?.DefaultTokenMinimisation ?? _tokenMinimisation;
         _guidedQuickChat = globalSettings?.EnableGuidedQuickChat == true;
         _selected = _clis.Count > 0 ? Key(_clis[0]) : string.Empty;
-        LoadModelChoices();
+        await LoadModelChoicesAsync();
 
         var all = await Sessions.GetAllAsync();
         _recent = all.Where(s => s.Title.StartsWith("Quick chat", StringComparison.Ordinal) || s.AgentName.StartsWith("Quick chat", StringComparison.Ordinal))
@@ -247,10 +248,10 @@
     /// Another CLI has other models, and a model name from the old one would be passed straight
     /// through and rejected — so the choices are reloaded and anything now meaningless is dropped.
     /// </summary>
-    private void SelectCli(ChangeEventArgs args)
+    private async Task SelectCli(ChangeEventArgs args)
     {
         _selected = args.Value?.ToString() ?? string.Empty;
-        LoadModelChoices();
+        await LoadModelChoicesAsync();
 
         _model = new SessionModelSettings(
             Keep(_model.Model, _models),
@@ -260,11 +261,25 @@
             _model.OpeningTurns);
     }
 
-    private void LoadModelChoices()
+    private async Task LoadModelChoicesAsync()
     {
         var (provider, cliProviderId) = Resolve();
-        _models = ProviderModels.Models(provider, cliProviderId, Options.Value, _cliProviders);
-        _efforts = ProviderModels.Efforts(provider, cliProviderId, Options.Value, _cliProviders);
+
+        // Rendered before the network call rather than after: this is what actually shows the
+        // "loading" state while ModelsAsync is out asking the CLI, instead of only ever appearing
+        // and disappearing in the same frame once the await completes.
+        _loadingModels = true;
+        StateHasChanged();
+
+        try
+        {
+            _models = await ProviderModels.ModelsAsync(provider, cliProviderId, Options.Value, _cliProviders, Clis);
+            _efforts = ProviderModels.Efforts(provider, cliProviderId, Options.Value, _cliProviders);
+        }
+        finally
+        {
+            _loadingModels = false;
+        }
     }
 
     private static string? Keep(string? value, IReadOnlyList<string> offered) =>

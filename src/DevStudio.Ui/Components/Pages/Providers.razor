@@ -61,21 +61,27 @@
                         <a href="/cli-providers">CLI providers</a> page, or sign in from a shell.
                     </p>
                 }
-                <div class="field" style="margin-bottom:0.6rem" hidden="@(cli.SupportedLoginMethods.Count == 0)">
-                    <label>Sign-in method</label>
-                    <select value="@MethodFor(account.Id, cli.SupportedLoginMethods)"
-                            @onchange="e => SetMethod(account.Id, e.Value?.ToString())">
-                        @foreach (var method in cli.SupportedLoginMethods)
-                        {
-                            <option value="@method">@method.Describe()</option>
-                        }
-                    </select>
-                    <span class="hint">@MethodHint(MethodFor(account.Id, cli.SupportedLoginMethods))</span>
-                </div>
+                else
+                {
+                    <div class="field" style="margin-bottom:0.6rem">
+                        <label>Sign-in method</label>
+                        <select value="@MethodFor(account.Id, cli.SupportedLoginMethods)"
+                                @onchange="e => SetMethod(account.Id, e.Value?.ToString())">
+                            @foreach (var method in cli.SupportedLoginMethods)
+                            {
+                                <option value="@method">@method.Describe()</option>
+                            }
+                        </select>
+                        <span class="hint">@MethodHint(MethodFor(account.Id, cli.SupportedLoginMethods))</span>
+                    </div>
+                }
 
                 <div class="btn-row">
-                    <button class="btn btn-sm btn-primary" @onclick="() => StartLoginAsync(account, cli.SupportedLoginMethods)">Log in</button>
-                    <button class="btn btn-sm btn-ghost" @onclick="() => StartLogoutAsync(account)">Log out</button>
+                    @if (cli.SupportedLoginMethods.Count > 0)
+                    {
+                        <button class="btn btn-sm btn-primary" @onclick="() => StartLoginAsync(account, cli.SupportedLoginMethods)">Log in</button>
+                        <button class="btn btn-sm btn-ghost" @onclick="() => StartLogoutAsync(account)">Log out</button>
+                    }
                     @if (!account.IsDefault)
                     {
                         <button class="btn btn-sm btn-ghost" @onclick="() => MakeDefaultAsync(account)">Make default</button>
@@ -423,6 +429,13 @@
 
     private async Task SaveImageSettingsAsync()
     {
+        // Pasted credentials routinely carry a leading/trailing space or newline picked up from the
+        // clipboard, which a provider's API rejects outright — trim before it ever reaches a request.
+        _imageSettings.Pollinations.ApiToken = _imageSettings.Pollinations.ApiToken.Trim();
+        _imageSettings.Cloudflare.AccountId = _imageSettings.Cloudflare.AccountId.Trim();
+        _imageSettings.Cloudflare.ApiToken = _imageSettings.Cloudflare.ApiToken.Trim();
+        _imageSettings.Gemini.ApiKey = _imageSettings.Gemini.ApiKey.Trim();
+
         await ImageSetup.SaveAsync(_imageSettings);
         Layout.Notify("Image settings saved.", "ok");
     }

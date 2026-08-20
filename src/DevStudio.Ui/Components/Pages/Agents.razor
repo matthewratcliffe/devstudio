@@ -11,6 +11,7 @@
 @inject IGitService Git
 @inject NavigationManager Nav
 @inject Microsoft.Extensions.Options.IOptions<OrchestratorOptions> Options
+@inject IProviderCliRegistry Clis
 @using DevStudio.Ui.Services
 
 <PageTitle>Agents · devStudio</PageTitle>
@@ -463,6 +464,12 @@
     private bool _handover;
     private IReadOnlyList<string> _branches = [];
 
+    /// <summary>
+    /// Live model list for the CLI being edited, when it can offer one — currently just opencode.
+    /// Fetched once when the editor opens rather than per render, since it is a network call.
+    /// </summary>
+    private IReadOnlyList<string> _liveModels = [];
+
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 
     protected override void OnAfterRender(bool firstRender)
@@ -503,14 +510,27 @@
             _ => null,
         };
 
-    /// <summary>Model choices for the agent's provider, from configuration or the CLI definition.</summary>
-    private IReadOnlyList<string> ModelsFor(Agent agent) => agent.Provider switch
+    /// <summary>
+    /// Model choices for the agent's provider: whatever <see cref="_liveModels"/> most recently
+    /// fetched for this provider, merged over configuration or the CLI definition's fixed list.
+    /// </summary>
+    private IReadOnlyList<string> ModelsFor(Agent agent)
     {
-        AiProvider.Claude => Options.Value.ClaudeModels,
-        AiProvider.Codex => Options.Value.CodexModels,
-        AiProvider.Opencode => Options.Value.OpencodeModels,
-        _ => _cliProviders.FirstOrDefault(c => c.Id == agent.CliProviderId)?.Models ?? [],
-    };
+        var configured = agent.Provider switch
+        {
+            AiProvider.Claude => Options.Value.ClaudeModels,
+            AiProvider.Codex => Options.Value.CodexModels,
+            AiProvider.Opencode => Options.Value.OpencodeModels,
+            _ => _cliProviders.FirstOrDefault(c => c.Id == agent.CliProviderId)?.Models ?? [],
+        };
+
+        if (_liveModels.Count == 0)
+            return configured;
+
+        return _liveModels
+            .Concat(configured.Where(m => !_liveModels.Contains(m, StringComparer.OrdinalIgnoreCase)))
+            .ToList();
+    }
 
     private IReadOnlyList<string> EffortsFor(Agent agent) => agent.Provider switch
     {
@@ -610,11 +630,12 @@
     private static string HistoryUrl(Agent agent) =>
         $"/sessions?AgentId={Uri.EscapeDataString(agent.Id)}&Name={Uri.EscapeDataString(agent.Name)}";
 
-    private void Edit(Agent agent)
+    private async Task Edit(Agent agent)
     {
         _isNew = string.IsNullOrWhiteSpace(agent.Name) || _agents.All(a => a.Id != agent.Id);
         // Edit a copy so cancelling leaves the stored agent untouched.
         _editing = Clone(agent);
+        _liveModels = [];
 
         // A model that is not in the list is still valid — show it in the free-text box.
         _customModel = !string.IsNullOrWhiteSpace(_editing.Model) && !ModelsFor(_editing).Contains(_editing.Model);
@@ -622,6 +643,33 @@
         _handover = _editing.OpeningTurns > 0;
 
         _ = LoadBranchesAsync();
+        _ = LoadLiveModelsAsync(_editing);
+    }
+
+    /// <summary>
+    /// Asks the CLI itself what models it currently has, for providers that can answer that. Runs
+    /// in the background so opening the editor never waits on a network call; the list fills in
+    /// once it arrives.
+    /// </summary>
+    private async Task LoadLiveModelsAsync(Agent agent)
+    {
+        IProviderCli cli;
+        try
+        {
+            cli = await Clis.ResolveAsync(agent.Provider, agent.CliProviderId);
+        }
+        catch
+        {
+            return;
+        }
+
+        var models = await cli.GetAvailableModelsAsync();
+        if (_editing != agent || models.Count == 0)
+            return;
+
+        _liveModels = models;
+        _customModel = !string.IsNullOrWhiteSpace(_editing.Model) && !ModelsFor(_editing).Contains(_editing.Model);
+        StateHasChanged();
     }
 
     private void Cancel() => _editing = null;

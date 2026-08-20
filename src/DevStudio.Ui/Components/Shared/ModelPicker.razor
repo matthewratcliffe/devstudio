@@ -5,9 +5,14 @@
     <div class="in-use">Running now: <strong>@InUse</strong></div>
 }
 
+@if (Loading)
+{
+    <div class="mono-dim">Loading models…</div>
+}
+
 <div class="field">
     <label>Model @if (Marked && !OpeningInUse) { <span class="in-use-tag">in use</span> }</label>
-    <select value="@(Value.Model ?? string.Empty)"
+    <select value="@(Value.Model ?? string.Empty)" disabled="@Loading"
             @onchange="e => EmitAsync(Value with { Model = Blank(e.Value?.ToString()) })">
         <option value="">@DefaultLabel</option>
         @foreach (var model in Models)
@@ -19,7 +24,7 @@
 
 <div class="field">
     <label>Thinking level @if (Marked && !OpeningInUse) { <span class="in-use-tag">in use</span> }</label>
-    <select value="@(Value.Effort ?? string.Empty)"
+    <select value="@(Value.Effort ?? string.Empty)" disabled="@Loading"
             @onchange="e => EmitAsync(Value with { Effort = Blank(e.Value?.ToString()) })">
         <option value="">@DefaultLabel</option>
         @foreach (var effort in Efforts)
@@ -30,7 +35,7 @@
 </div>
 
 <label class="check">
-    <input type="checkbox" checked="@_handover" @onchange="ToggleAsync" />
+    <input type="checkbox" checked="@_handover" disabled="@Loading" @onchange="ToggleAsync" />
     <span>Open on a different model</span>
 </label>
 
@@ -38,7 +43,7 @@
 {
     <div class="field">
         <label>Opening model @if (Marked && OpeningInUse) { <span class="in-use-tag">in use</span> }</label>
-        <select value="@(Value.OpeningModel ?? string.Empty)"
+        <select value="@(Value.OpeningModel ?? string.Empty)" disabled="@Loading"
                 @onchange="e => EmitAsync(Value with { OpeningModel = Blank(e.Value?.ToString()) })">
             <option value="">Same as above</option>
             @foreach (var model in Models)
@@ -50,7 +55,7 @@
 
     <div class="field">
         <label>Opening thinking level @if (Marked && OpeningInUse) { <span class="in-use-tag">in use</span> }</label>
-        <select value="@(Value.OpeningEffort ?? string.Empty)"
+        <select value="@(Value.OpeningEffort ?? string.Empty)" disabled="@Loading"
                 @onchange="e => EmitAsync(Value with { OpeningEffort = Blank(e.Value?.ToString()) })">
             <option value="">Same as above</option>
             @foreach (var effort in Efforts)
@@ -62,7 +67,7 @@
 
     <div class="field">
         <label>Opening turns</label>
-        <input type="number" min="1" max="99" value="@(Value.OpeningTurns ?? 2)"
+        <input type="number" min="1" max="99" value="@(Value.OpeningTurns ?? 2)" disabled="@Loading"
                @onchange="e => EmitAsync(Value with { OpeningTurns = Turns(e.Value?.ToString()) })" />
     </div>
 
@@ -77,6 +82,14 @@
 
     [Parameter] public IReadOnlyList<string> Models { get; set; } = [];
     [Parameter] public IReadOnlyList<string> Efforts { get; set; } = [];
+
+    /// <summary>
+    /// True while a live model list is being fetched (currently just opencode's). Every field is
+    /// disabled for the moment: picking from the old list, or sending a message that will run
+    /// against whatever model happened to be selected before the switch, is exactly the mistake
+    /// this is here to prevent.
+    /// </summary>
+    [Parameter] public bool Loading { get; set; }
 
     /// <summary>What the empty option falls back to — the CLI's own default, or the agent's choice.</summary>
     [Parameter] public string DefaultLabel { get; set; } = "CLI default";
