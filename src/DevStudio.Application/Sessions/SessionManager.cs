@@ -760,6 +760,11 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         var assistant = AppendMessage(session, MessageRole.Agent, string.Empty, streaming: true,
             model: choice.Model, effort: choice.Effort);
         session.Status = SessionStatus.Running;
+
+        // A fresh bubble has not reported any raw usage of its own yet, so the next reading is
+        // this bubble's whole contribution rather than the growth since a reading that belonged
+        // to the previous bubble.
+        live.LastRawUsage = null;
         Notify(session);
 
         try
@@ -845,6 +850,10 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                             assistant.IsStreaming = false;
                             assistant = AppendMessage(session, MessageRole.Agent, string.Empty, streaming: true,
                                 model: choice.Model, effort: choice.Effort);
+
+                            // Same reasoning as the turn's opening bubble: this one starts with no
+                            // raw usage of its own to diff against yet.
+                            live.LastRawUsage = null;
                         }
 
                         Notify(session);
