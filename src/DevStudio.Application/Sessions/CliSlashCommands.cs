@@ -66,6 +66,15 @@ public static class CliSlashCommands
     public static IReadOnlyList<CliSlashCommand> For(AiProvider provider, string? draft)
     {
         var commands = provider == AiProvider.Claude ? Claude : provider == AiProvider.Codex ? Codex : [];
+        return Filter(commands, draft);
+    }
+
+    /// <summary>
+    /// Narrows an arbitrary command list (e.g. a CLI's live-queried commands) to what matches the
+    /// draft, the same way <see cref="For"/> narrows the built-in lists.
+    /// </summary>
+    public static IReadOnlyList<CliSlashCommand> Filter(IReadOnlyList<CliSlashCommand> commands, string? draft)
+    {
         var query = Query(draft);
 
         if (query is null)

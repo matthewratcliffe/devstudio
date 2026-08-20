@@ -1,3 +1,4 @@
+using DevStudio.Application.Sessions;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Providers;
 
@@ -148,6 +149,15 @@ public interface IProviderCli
     /// </summary>
     Task<IReadOnlyList<string>> GetAvailableModelsAsync(CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<string>>([]);
+
+    /// <summary>
+    /// Slash commands this CLI currently knows about, queried live where the CLI can answer that
+    /// (e.g. opencode's server, which knows exactly what commands are registered for the project).
+    /// Empty by default — most CLIs offer no such introspection, so the UI falls back to the fixed
+    /// list in <c>CliSlashCommands</c> instead.
+    /// </summary>
+    Task<IReadOnlyList<CliSlashCommand>> GetAvailableSlashCommandsAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<CliSlashCommand>>([]);
 
     /// <summary>Argument list that starts an interactive login in a terminal session.</summary>
     (string FileName, IReadOnlyList<string> Arguments) BuildLoginCommand(LoginMethod method = LoginMethod.Browser);
