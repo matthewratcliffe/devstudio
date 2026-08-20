@@ -140,7 +140,13 @@ public sealed class OrchestratorOptions
     /// <summary>Reasoning levels passed to codex as model_reasoning_effort.</summary>
     public List<string> CodexEfforts { get; set; } = ["minimal", "low", "medium", "high"];
 
-    public List<string> OpencodeEfforts { get; set; } = [];
+    /// <summary>
+    /// Reasoning variant names passed to opencode's <c>variant</c> field. Not every model supports
+    /// every name — opencode's own models.dev data defines which variants a given model actually
+    /// offers — but this is the union seen across its models, same as the other providers' fixed
+    /// lists not every one of their models supports either.
+    /// </summary>
+    public List<string> OpencodeEfforts { get; set; } = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
     /// <summary>Hard cap on agent turns running at once.</summary>
     public int MaxConcurrentSessions { get; set; } = 6;

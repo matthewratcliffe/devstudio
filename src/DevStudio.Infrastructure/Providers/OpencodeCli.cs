@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
@@ -23,6 +24,18 @@ public sealed class OpencodeCli : IProviderCli
     private readonly IOpencodeServerManager _server;
     private readonly OrchestratorOptions _options;
     private readonly ILogger<OpencodeCli> _logger;
+
+    /// <summary>
+    /// Roughly how full each opencode session's context is, keyed by opencode's own session id and
+    /// updated from the token usage every turn reports. Opencode holds a session's whole history
+    /// itself — there is nothing here to inspect but what it tells us after the fact — so this is
+    /// the only signal available for deciding a session is close enough to its model's limit to
+    /// compact before the next turn, rather than after it fails.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, int> _sessionContextTokens = new();
+
+    /// <summary>Each model's context window, fetched once per "providerID/modelID" and assumed stable for the server's lifetime.</summary>
+    private readonly ConcurrentDictionary<string, int> _modelContextLimits = new();
 
     public OpencodeCli(
         IHttpClientFactory clients,
@@ -85,15 +98,25 @@ public sealed class OpencodeCli : IProviderCli
 
         // A resumed conversation is an existing opencode session id; a fresh one has to be created
         // first, since opencode has no notion of a stateless turn.
-        var sessionId = request.ResumeSessionId;
-        if (string.IsNullOrWhiteSpace(sessionId))
+        var resuming = !string.IsNullOrWhiteSpace(request.ResumeSessionId);
+        var sessionId = resuming ? request.ResumeSessionId! : await CreateSessionAsync(client, ct);
+
+        // A session opencode already holds a lot of history for is compacted before this turn adds
+        // to it, rather than finding out mid-request that the context is full: opencode has no
+        // notion of trimming its own history, so the only way back from "too large" is a fresh
+        // session, and doing that after the model has already refused the request means the prompt
+        // that triggered it is lost along with everything before it.
+        string? carriedSummary = null;
+        if (resuming && await ContextNearlyFullAsync(client, sessionId, request.Model, ct))
         {
-            using var createBody = new StringContent("{}", Encoding.UTF8, "application/json");
-            using var createResponse = await client.PostAsync("session", createBody, ct);
-            createResponse.EnsureSuccessStatusCode();
-            var created = JsonNode.Parse(await createResponse.Content.ReadAsStringAsync(ct));
-            sessionId = created?["id"]?.GetValue<string>()
-                ?? throw new InvalidOperationException("opencode did not return a session id.");
+            var (freshSessionId, summary) = await CompactAsync(client, sessionId, request.Model, ct);
+            _sessionContextTokens.TryRemove(sessionId, out _);
+            sessionId = freshSessionId;
+            carriedSummary = summary;
+            await events.WriteAsync(AgentEvent.Log(
+                summary is null
+                    ? "opencode's context was nearly full; started a fresh session to continue in."
+                    : "opencode's context was nearly full; summarised the conversation into a fresh session."), ct);
         }
 
         await events.WriteAsync(new AgentEvent(AgentEventKind.SessionId, sessionId), ct);
@@ -142,6 +165,9 @@ public sealed class OpencodeCli : IProviderCli
                     ? request.Prompt
                     : $"{request.SystemPrompt}\n\n---\n\n{request.Prompt}";
 
+                if (carriedSummary is { Length: > 0 })
+                    prompt = $"Continuing an earlier conversation that was summarised to free up context:\n\n{carriedSummary}\n\n---\n\n{prompt}";
+
                 endpoint = $"session/{sessionId}/message";
                 body = new JsonObject
                 {
@@ -152,21 +178,18 @@ public sealed class OpencodeCli : IProviderCli
 
             if (!string.IsNullOrWhiteSpace(request.Model))
             {
-                // opencode names a model as "provider/model"; anything without a slash is assumed
-                // to already belong to the provider its server was configured with.
-                var slash = request.Model.IndexOf('/');
-                var model = new JsonObject();
-                if (slash > 0)
-                {
-                    model["providerID"] = request.Model[..slash];
-                    model["modelID"] = request.Model[(slash + 1)..];
-                }
-                else
-                {
-                    model["modelID"] = request.Model;
-                }
+                var (providerId, modelId) = ParseModel(request.Model);
+                var model = new JsonObject { ["modelID"] = modelId };
+                if (providerId is not null)
+                    model["providerID"] = providerId;
                 body["model"] = model;
             }
+
+            // opencode has no separate "reasoning effort" knob — a model that supports it exposes
+            // named variants instead (e.g. "low"/"high"/"max"), which set differ per model, and this
+            // is the field both the message and command endpoints use to pick one.
+            if (!string.IsNullOrWhiteSpace(request.Effort))
+                body["variant"] = request.Effort;
 
             using var messageBody = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
             using var messageResponse = await client.PostAsync(endpoint, messageBody, ct);
@@ -271,7 +294,15 @@ public sealed class OpencodeCli : IProviderCli
             }
 
             foreach (var evt in TranslateEvent(node, sessionId, userMessageId, toolsSeen, toolsCompleted, textSent, usageCounted))
+            {
+                // Cache tokens count toward the context this session is carrying just as much as
+                // fresh input does, and output becomes part of the history the next turn resends —
+                // this total is the closest available reading of how full the session is right now.
+                if (evt is { Kind: AgentEventKind.Usage, Usage: { IsEmpty: false } usage })
+                    _sessionContextTokens[sessionId] = usage.Total;
+
                 await events.WriteAsync(evt, CancellationToken.None);
+            }
         }
     }
 
@@ -378,9 +409,17 @@ public sealed class OpencodeCli : IProviderCli
                     var status = part["state"]?["status"]?.GetValue<string>();
                     var toolName = part["tool"]?.GetValue<string>() ?? "tool";
 
-                    if (toolsSeen.Add(callId))
+                    // "pending" carries no title and often no input yet — the call's arguments are
+                    // still streaming in from the model — so waiting for the next state before
+                    // reporting the call avoids showing it as a bare tool name with nothing about
+                    // what it is actually about to do.
+                    if (status != "pending" && toolsSeen.Add(callId))
                     {
-                        yield return new AgentEvent(AgentEventKind.Tool, DescribeToolInput(part["state"]?["input"]))
+                        var description = part["state"]?["title"]?.GetValue<string>();
+                        if (string.IsNullOrEmpty(description))
+                            description = DescribeToolInput(part["state"]?["input"]);
+
+                        yield return new AgentEvent(AgentEventKind.Tool, description)
                         {
                             ToolName = toolName,
                             ToolCallId = callId,
@@ -474,6 +513,132 @@ public sealed class OpencodeCli : IProviderCli
             _logger.LogDebug(ex, "Could not check opencode's registered commands");
             return null;
         }
+    }
+
+    private static async Task<string> CreateSessionAsync(HttpClient client, CancellationToken ct)
+    {
+        using var createBody = new StringContent("{}", Encoding.UTF8, "application/json");
+        using var createResponse = await client.PostAsync("session", createBody, ct);
+        createResponse.EnsureSuccessStatusCode();
+        var created = JsonNode.Parse(await createResponse.Content.ReadAsStringAsync(ct));
+        return created?["id"]?.GetValue<string>()
+            ?? throw new InvalidOperationException("opencode did not return a session id.");
+    }
+
+    /// <summary>opencode names a model as "provider/model"; anything without a slash belongs to whatever provider its server was configured with.</summary>
+    private static (string? ProviderId, string? ModelId) ParseModel(string? model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+            return (null, null);
+
+        var slash = model.IndexOf('/');
+        return slash > 0 ? (model[..slash], model[(slash + 1)..]) : (null, model);
+    }
+
+    /// <summary>
+    /// Whether the session is close enough to its model's context window that this turn risks the
+    /// server rejecting it outright — "close enough" being 85% of the limit, which leaves room for
+    /// the prompt about to be sent and the reply it asks for. False whenever either side of that
+    /// comparison is unknown, since there is nothing safe to compact towards.
+    /// </summary>
+    private async Task<bool> ContextNearlyFullAsync(HttpClient client, string sessionId, string? model, CancellationToken ct)
+    {
+        if (!_sessionContextTokens.TryGetValue(sessionId, out var used))
+            return false;
+
+        var (providerId, modelId) = ParseModel(model);
+        if (providerId is null || modelId is null)
+            return false;
+
+        var limit = await GetContextLimitAsync(client, providerId, modelId, ct);
+        return limit is > 0 && used >= limit * 0.85;
+    }
+
+    private async Task<int?> GetContextLimitAsync(HttpClient client, string providerId, string modelId, CancellationToken ct)
+    {
+        var key = $"{providerId}/{modelId}";
+        if (_modelContextLimits.TryGetValue(key, out var cached))
+            return cached;
+
+        try
+        {
+            using var response = await client.GetAsync("config/providers", ct);
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            var result = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct));
+            var limit = (result?["providers"] as JsonArray)?
+                .FirstOrDefault(p => p?["id"]?.GetValue<string>() == providerId)?
+                ["models"]?[modelId]?["limit"]?["context"]?.GetValue<double>();
+
+            if (limit is not > 0)
+                return null;
+
+            var context = (int)limit.Value;
+            _modelContextLimits[key] = context;
+            return context;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not read opencode's context limit for {Model}", key);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Rolls a session that is close to its context limit into a fresh one: asks it for a short
+    /// summary of itself while it still has room to answer, then starts a new session to carry that
+    /// summary forward. Best-effort — if the summary request fails (the session may already be too
+    /// full to answer even that), the fresh session is still returned with no summary rather than
+    /// letting the turn that triggered this fail alongside it.
+    /// </summary>
+    private async Task<(string SessionId, string? Summary)> CompactAsync(HttpClient client, string oldSessionId, string? model, CancellationToken ct)
+    {
+        string? summary = null;
+        try
+        {
+            var body = new JsonObject
+            {
+                ["messageID"] = "msg_" + Guid.NewGuid().ToString("N"),
+                ["parts"] = new JsonArray(new JsonObject
+                {
+                    ["type"] = "text",
+                    ["text"] = "Summarise this conversation so it can continue in a fresh session with no "
+                        + "history: what was asked for, what has been done and where, decisions made and "
+                        + "why, and anything still outstanding. Be specific about file paths. Answer with "
+                        + "the summary alone.",
+                }),
+            };
+
+            var (providerId, modelId) = ParseModel(model);
+            if (providerId is not null && modelId is not null)
+                body["model"] = new JsonObject { ["providerID"] = providerId, ["modelID"] = modelId };
+
+            using var content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
+            using var response = await client.PostAsync($"session/{oldSessionId}/message", content, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct));
+                if (result?["info"]?["error"] is null && result?["parts"] is JsonArray parts)
+                {
+                    var text = new StringBuilder();
+                    foreach (var part in parts)
+                    {
+                        if (part?["type"]?.GetValue<string>() == "text" && part["text"]?.GetValue<string>() is { Length: > 0 } piece)
+                            text.Append(piece);
+                    }
+
+                    summary = text.Length > 0 ? text.ToString().Trim() : null;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not summarise opencode session {SessionId} before compacting", oldSessionId);
+        }
+
+        return (await CreateSessionAsync(client, ct), summary);
     }
 
     private static string DescribeError(JsonObject error)
