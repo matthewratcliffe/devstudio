@@ -606,6 +606,7 @@ else
     private IReadOnlyList<CliProvider> _cliProviders = [];
     private IReadOnlyList<string> _models = [];
     private IReadOnlyList<string> _efforts = [];
+    private IReadOnlyList<CliSlashCommand> _liveSlashCommands = [];
     private bool _loadingModels;
     private Agent? _agent;
     private SessionModelSettings _model = new();
@@ -659,6 +660,7 @@ else
                 _session.OpeningTurns);
 
             await LoadModelChoicesAsync();
+            await LoadSlashCommandsAsync();
         }
 
         await RefreshFilesAsync();
@@ -781,7 +783,11 @@ else
         _session is null ? null : CommandHints.For(_session);
 
     private IReadOnlyList<CliSlashCommand> SlashCommandCompletions =>
-        _session is null ? [] : CliSlashCommands.For(_session.Provider, _draft);
+        _session is null
+            ? []
+            : _session.Provider == AiProvider.Opencode
+                ? CliSlashCommands.Filter(_liveSlashCommands, _draft)
+                : CliSlashCommands.For(_session.Provider, _draft);
 
     private async Task CompleteSlashCommand(CliSlashCommand command)
     {
@@ -974,6 +980,24 @@ else
             _loadingModels = false;
         }
 
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Opencode's commands come from its own server, not a fixed list, so they are fetched live
+    /// the same way its models are. Every other provider's commands are the static lists in
+    /// <see cref="CliSlashCommands"/> and need no fetch.
+    /// </summary>
+    private async Task LoadSlashCommandsAsync()
+    {
+        if (_session is not { Provider: AiProvider.Opencode })
+        {
+            _liveSlashCommands = [];
+            return;
+        }
+
+        var cli = await Clis.ResolveAsync(_session.Provider, _session.CliProviderId);
+        _liveSlashCommands = await cli.GetAvailableSlashCommandsAsync();
         StateHasChanged();
     }
 

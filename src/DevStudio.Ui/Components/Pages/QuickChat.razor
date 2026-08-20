@@ -191,6 +191,7 @@
     private TokenTactics _tokenMinimisation = new GlobalSettings().DefaultTokenMinimisation;
     private IReadOnlyList<string> _models = [];
     private IReadOnlyList<string> _efforts = [];
+    private IReadOnlyList<CliSlashCommand> _liveSlashCommands = [];
     private bool _loadingModels;
 
     // Read-only unless asked otherwise: a chat window should not edit anything by surprise.
@@ -217,6 +218,7 @@
         _guidedQuickChat = globalSettings?.EnableGuidedQuickChat == true;
         _selected = _clis.Count > 0 ? Key(_clis[0]) : string.Empty;
         await LoadModelChoicesAsync();
+        await LoadSlashCommandsAsync();
 
         var all = await Sessions.GetAllAsync();
         _recent = all.Where(s => s.Title.StartsWith("Quick chat", StringComparison.Ordinal) || s.AgentName.StartsWith("Quick chat", StringComparison.Ordinal))
@@ -252,6 +254,7 @@
     {
         _selected = args.Value?.ToString() ?? string.Empty;
         await LoadModelChoicesAsync();
+        await LoadSlashCommandsAsync();
 
         _model = new SessionModelSettings(
             Keep(_model.Model, _models),
@@ -284,6 +287,20 @@
 
     private static string? Keep(string? value, IReadOnlyList<string> offered) =>
         value is not null && offered.Contains(value) ? value : null;
+
+    /// <summary>Same reasoning as <c>LoadModelChoicesAsync</c>: opencode's commands come from its own server.</summary>
+    private async Task LoadSlashCommandsAsync()
+    {
+        var (provider, cliProviderId) = Resolve();
+        if (provider != AiProvider.Opencode)
+        {
+            _liveSlashCommands = [];
+            return;
+        }
+
+        var cli = await Clis.ResolveAsync(provider, cliProviderId);
+        _liveSlashCommands = await cli.GetAvailableSlashCommandsAsync();
+    }
 
     private async Task StartAsync()
     {
@@ -396,7 +413,11 @@
     /// has started.
     /// </summary>
     private IReadOnlyList<CliSlashCommand> SlashCommandCompletions =>
-        string.IsNullOrWhiteSpace(_selected) ? [] : CliSlashCommands.For(Resolve().Provider, _prompt);
+        string.IsNullOrWhiteSpace(_selected)
+            ? []
+            : Resolve().Provider == AiProvider.Opencode
+                ? CliSlashCommands.Filter(_liveSlashCommands, _prompt)
+                : CliSlashCommands.For(Resolve().Provider, _prompt);
 
     private void CompleteSlashCommand(CliSlashCommand command) => _prompt = command.Name + " ";
 }

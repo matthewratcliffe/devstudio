@@ -3,6 +3,8 @@ using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
+using DevStudio.Application.Sessions;
+using DevStudio.Domain.Agents;
 using DevStudio.Domain.Providers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -108,19 +110,46 @@ public sealed class OpencodeCli : IProviderCli
         // resolves once the whole turn is finished. Both hit the same session, so listening on
         // one and posting to the other gets deltas as they happen and a definitive finish signal.
         using var eventsCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var listenTask = Task.Run(() => ListenAsync(client, sessionId, userMessageId, events, eventsCts.Token), CancellationToken.None);
+        var listenTask = Task.Run(() => ListenAsync(client, sessionId, userMessageId, request.PermissionMode, events, eventsCts.Token), CancellationToken.None);
 
         try
         {
-            var prompt = string.IsNullOrWhiteSpace(request.SystemPrompt)
-                ? request.Prompt
-                : $"{request.SystemPrompt}\n\n---\n\n{request.Prompt}";
+            var slashCommand = ParseSlashCommand(request.Prompt);
+            var commandName = slashCommand is null
+                ? null
+                : await ResolveCommandNameAsync(client, slashCommand.Value.Name, ct);
 
-            var body = new JsonObject
+            JsonObject body;
+            string endpoint;
+
+            if (slashCommand is { } parsed && commandName is not null)
             {
-                ["messageID"] = userMessageId,
-                ["parts"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = prompt }),
-            };
+                // opencode's slash commands are a server-side concept — a template it expands and
+                // runs — not something the model interprets from plain text the way Claude Code's
+                // and Codex's own CLI processes do, so it needs its own endpoint rather than just
+                // being typed into the message body.
+                endpoint = $"session/{sessionId}/command";
+                body = new JsonObject
+                {
+                    ["messageID"] = userMessageId,
+                    ["command"] = commandName,
+                    ["arguments"] = parsed.Arguments,
+                };
+            }
+            else
+            {
+                var prompt = string.IsNullOrWhiteSpace(request.SystemPrompt)
+                    ? request.Prompt
+                    : $"{request.SystemPrompt}\n\n---\n\n{request.Prompt}";
+
+                endpoint = $"session/{sessionId}/message";
+                body = new JsonObject
+                {
+                    ["messageID"] = userMessageId,
+                    ["parts"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = prompt }),
+                };
+            }
+
             if (!string.IsNullOrWhiteSpace(request.Model))
             {
                 // opencode names a model as "provider/model"; anything without a slash is assumed
@@ -140,7 +169,7 @@ public sealed class OpencodeCli : IProviderCli
             }
 
             using var messageBody = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
-            using var messageResponse = await client.PostAsync($"session/{sessionId}/message", messageBody, ct);
+            using var messageResponse = await client.PostAsync(endpoint, messageBody, ct);
 
             if (!messageResponse.IsSuccessStatusCode)
             {
@@ -189,7 +218,7 @@ public sealed class OpencodeCli : IProviderCli
     /// cancelled. Runs alongside the blocking <c>/message</c> call so the transcript fills in live
     /// rather than arriving as one lump when the turn finishes.
     /// </summary>
-    private async Task ListenAsync(HttpClient client, string sessionId, string userMessageId, ChannelWriter<AgentEvent> events, CancellationToken ct)
+    private async Task ListenAsync(HttpClient client, string sessionId, string userMessageId, PermissionMode permissionMode, ChannelWriter<AgentEvent> events, CancellationToken ct)
     {
         using var response = await client.GetAsync("event", HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
@@ -233,9 +262,55 @@ public sealed class OpencodeCli : IProviderCli
                 continue;
             }
 
+            if (node?["type"]?.GetValue<string>() == "permission.asked")
+            {
+                var evt = await RespondToPermissionAsync(client, node, sessionId, permissionMode, ct);
+                if (evt is not null)
+                    await events.WriteAsync(evt, CancellationToken.None);
+                continue;
+            }
+
             foreach (var evt in TranslateEvent(node, sessionId, userMessageId, toolsSeen, toolsCompleted, textSent, usageCounted))
                 await events.WriteAsync(evt, CancellationToken.None);
         }
+    }
+
+    /// <summary>
+    /// Answers a permission prompt from the turn's permission mode. Nobody is watching a scheduled
+    /// run, so the mode is the whole of the answer: anything short of a mode that allows edits is a
+    /// refusal, mirroring <c>AcpCli</c>'s handling of the same decision for ACP-driven providers.
+    /// </summary>
+    private async Task<AgentEvent?> RespondToPermissionAsync(HttpClient client, JsonNode node, string sessionId, PermissionMode permissionMode, CancellationToken ct)
+    {
+        var properties = node["properties"];
+        if (properties?["sessionID"]?.GetValue<string>() != sessionId)
+            return null;
+
+        var permissionId = properties["id"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(permissionId))
+            return null;
+
+        var allow = permissionMode is PermissionMode.AcceptEdits or PermissionMode.Unrestricted;
+        var reply = allow ? "once" : "reject";
+
+        try
+        {
+            using var body = new StringContent(
+                new JsonObject { ["reply"] = reply }.ToJsonString(), Encoding.UTF8, "application/json");
+            using var response = await client.PostAsync($"permission/{permissionId}/reply", body, ct);
+            response.EnsureSuccessStatusCode();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not reply to opencode permission request {PermissionId}", permissionId);
+            return null;
+        }
+
+        if (allow)
+            return null;
+
+        var tool = properties["permission"]?.GetValue<string>() ?? "a tool";
+        return new AgentEvent(AgentEventKind.PermissionDenied, tool) { ToolName = tool };
     }
 
     /// <summary>Maps one <c>/event</c> frame onto transcript events, ignoring anything outside the turn's session.</summary>
@@ -351,6 +426,56 @@ public sealed class OpencodeCli : IProviderCli
         return string.Empty;
     }
 
+    /// <summary>A leading "/name rest-of-text" in a prompt, the same shape Claude Code and Codex treat as a slash command.</summary>
+    private readonly record struct SlashCommand(string Name, string Arguments);
+
+    private static SlashCommand? ParseSlashCommand(string prompt)
+    {
+        var text = prompt.TrimStart();
+        if (!text.StartsWith('/'))
+            return null;
+
+        var newline = text.IndexOfAny(['\r', '\n']);
+        var line = newline < 0 ? text : text[..newline];
+
+        var space = line.IndexOfAny([' ', '\t']);
+        var name = (space < 0 ? line : line[..space])[1..];
+        if (name.Length == 0)
+            return null;
+
+        var arguments = space < 0 ? string.Empty : line[(space + 1)..].TrimStart();
+        return new SlashCommand(name, arguments);
+    }
+
+    /// <summary>
+    /// Confirms a parsed "/name" actually names one of opencode's registered commands before this
+    /// turn is routed to the command endpoint — otherwise ordinary text that merely starts with a
+    /// slash (a path, a fraction) would be misread as a command and fail.
+    /// </summary>
+    private async Task<string?> ResolveCommandNameAsync(HttpClient client, string name, CancellationToken ct)
+    {
+        try
+        {
+            using var response = await client.GetAsync("command", ct);
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            var commands = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct)) as JsonArray ?? [];
+            foreach (var command in commands)
+            {
+                if (string.Equals(command?["name"]?.GetValue<string>(), name, StringComparison.OrdinalIgnoreCase))
+                    return command!["name"]!.GetValue<string>();
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not check opencode's registered commands");
+            return null;
+        }
+    }
+
     private static string DescribeError(JsonObject error)
     {
         var message = error["data"]?["message"]?.GetValue<string>();
@@ -424,6 +549,42 @@ public sealed class OpencodeCli : IProviderCli
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Could not list opencode's available models");
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Commands the server currently has registered for the project — its own built-ins plus
+    /// whatever a project or user has defined — so the UI can offer live autocomplete instead of a
+    /// list that would go stale the moment someone adds a command file.
+    /// </summary>
+    public async Task<IReadOnlyList<CliSlashCommand>> GetAvailableSlashCommandsAsync(CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(_options.OpencodeBaseUrl))
+            return [];
+
+        try
+        {
+            await _server.EnsureRunningAsync(ct);
+
+            using var client = CreateClient();
+            using var response = await client.GetAsync("command", ct);
+            if (!response.IsSuccessStatusCode)
+                return [];
+
+            var commands = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct)) as JsonArray ?? [];
+            return [.. commands
+                .Select(command => command?["name"]?.GetValue<string>() is { Length: > 0 } name
+                    ? new CliSlashCommand(
+                        "/" + name,
+                        command["description"]?.GetValue<string>() ?? string.Empty,
+                        "/" + name + (command["hints"] is JsonArray { Count: > 0 } ? " <args>" : ""))
+                    : null)
+                .Where(command => command is not null)!];
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not list opencode's registered commands");
             return [];
         }
     }
