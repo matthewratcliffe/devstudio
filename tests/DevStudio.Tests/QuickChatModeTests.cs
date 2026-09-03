@@ -28,7 +28,11 @@ public class QuickChatModeTests : IDisposable
             Options.Create(new OrchestratorOptions { DataPath = _root }),
             NullLogger<JsonEntityStore<ChatSession>>.Instance);
 
-        _service = new QuickChatService(_agents, new StubRegistry(), _sessions, sessions);
+        _service = new QuickChatService(
+            _agents,
+            new TestExecutionHost(new StubRegistry(), null!, null!),
+            _sessions,
+            sessions);
     }
 
     [Fact]

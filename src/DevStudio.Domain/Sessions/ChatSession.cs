@@ -248,7 +248,21 @@ public sealed class ChatSession : Entity
     public SessionStatus Status { get; set; } = SessionStatus.Pending;
     public SessionTrigger Trigger { get; set; } = SessionTrigger.Manual;
 
-    /// <summary>Directory the CLI runs in — a worktree path when the agent isolates its work.</summary>
+    /// <summary>
+    /// The machine this conversation's turns run on, or null for this one. Recorded on the session
+    /// rather than read off the agent each turn: an agent can be repointed later, and a transcript
+    /// that then claimed its old turns ran somewhere they did not would be a lie about what happened.
+    /// </summary>
+    public string? RemoteInstanceId { get; set; }
+
+    /// <summary>Its name at the time, so the transcript still says where it ran after it is deleted.</summary>
+    public string? RemoteInstanceName { get; set; }
+
+    /// <summary>
+    /// Directory the CLI runs in — a worktree path when the agent isolates its work. A path on
+    /// <see cref="RemoteInstanceId"/>'s filesystem when the session runs elsewhere, which is why
+    /// nothing local ever opens it directly.
+    /// </summary>
     public string WorkingDirectory { get; set; } = string.Empty;
     public string? ProjectId { get; set; }
 

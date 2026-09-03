@@ -13,6 +13,12 @@ public sealed record StartSessionRequest
     /// <summary>Overrides the agent's own project, so one agent can serve several projects.</summary>
     public string? ProjectId { get; init; }
 
+    /// <summary>
+    /// Runs this conversation on another machine, overriding the agent's own choice. Null follows
+    /// the agent, which is what everything that does not care about remoting passes.
+    /// </summary>
+    public string? RemoteInstanceId { get; init; }
+
     /// <summary>Extra MCP servers for this conversation, beyond the agent's own.</summary>
     public IReadOnlyList<string> McpServerIds { get; init; } = [];
 

@@ -2,10 +2,8 @@
 @inject IProviderCliRegistry Clis
 @inject IQuickChatService QuickChats
 @inject ISessionManager Sessions
-@inject IEntityStore<McpServer> McpStore
 @inject IEntityStore<GlobalSettings> SettingsStore
-@inject IEntityStore<CliProvider> CliProviderStore
-@inject Microsoft.Extensions.Options.IOptions<OrchestratorOptions> Options
+@inject ExecutionTargets Targets
 @inject IJSRuntime Js
 @inject NavigationManager Nav
 
@@ -99,7 +97,7 @@
                     </div>
                 </div>
                 <div class="mono-dim" style="margin-top:0.4rem">
-                    @SelectedName · @ModeSummary · scratch workspace
+                    @SelectedName · @ModeSummary · scratch workspace@(_remoteInstanceId is null ? "" : " on the selected instance")
                 </div>
                 @if (_guidance is not null)
                 {
@@ -112,14 +110,26 @@
     <aside class="chat-side">
         <div class="section-tag">New chat</div>
 
+        <RemoteInstancePicker Value="_remoteInstanceId" ValueChanged="SelectInstance"
+                              Hint="Everything below comes from that machine, and this chat runs there." />
+
+        @if (_targetError is { Length: > 0 })
+        {
+            <div class="setting-callout warn">@_targetError</div>
+        }
+
         <div class="field">
             <label>Talk to</label>
             <select value="@_selected" @onchange="SelectCli">
                 @foreach (var cli in _clis)
                 {
-                    <option value="@Key(cli)">@cli.DisplayName</option>
+                    <option value="@cli.Key">@cli.DisplayName</option>
                 }
             </select>
+            @if (_clis.Count == 0)
+            {
+                <span class="hint">That machine is not offering any CLI right now.</span>
+            }
         </div>
 
         <div class="field">
@@ -169,9 +179,15 @@
 @code {
     [CascadingParameter] private MainLayout Layout { get; set; } = default!;
 
-    private IReadOnlyList<IProviderCli> _clis = [];
-    private IReadOnlyList<CliProvider> _cliProviders = [];
+    private IReadOnlyList<RemoteCliDescriptor> _clis = [];
     private List<ChatSession> _recent = [];
+
+    /// <summary>The machine this chat will run on. Null is this one.</summary>
+    private string? _remoteInstanceId;
+
+    /// <summary>Set when the chosen machine could not be asked what it offers.</summary>
+    private string? _targetError;
+
     private string _selected = string.Empty;
     private string _prompt = string.Empty;
     private bool _starting;
@@ -179,7 +195,7 @@
     private PromptGuidance? _guidance;
     private readonly List<(string Role, string Text)> _guidanceTranscript = [];
     private ElementReference _draftElement;
-    private IReadOnlyList<McpServer> _mcpServers = [];
+    private IReadOnlyList<RemoteNamedItem> _mcpServers = [];
     private readonly HashSet<string> _selectedMcp = [];
 
     private SessionModelSettings _model = new();
@@ -206,19 +222,15 @@
     };
 
     private string SelectedName =>
-        _clis.FirstOrDefault(c => Key(c) == _selected)?.DisplayName ?? "no CLI";
+        _clis.FirstOrDefault(c => c.Key == _selected)?.DisplayName ?? "no CLI";
 
     protected override async Task OnInitializedAsync()
     {
-        _clis = await Clis.GetAllAsync();
-        _cliProviders = await CliProviderStore.GetAllAsync();
-        _mcpServers = (await McpStore.GetAllAsync()).Where(s => s.Enabled).ToList();
         var globalSettings = await SettingsStore.GetAsync(GlobalSettings.WellKnownId);
         _tokenMinimisation = globalSettings?.DefaultTokenMinimisation ?? _tokenMinimisation;
         _guidedQuickChat = globalSettings?.EnableGuidedQuickChat == true;
-        _selected = _clis.Count > 0 ? Key(_clis[0]) : string.Empty;
-        await LoadModelChoicesAsync();
-        await LoadSlashCommandsAsync();
+
+        await LoadTargetAsync();
 
         var all = await Sessions.GetAllAsync();
         _recent = all.Where(s => s.Title.StartsWith("Quick chat", StringComparison.Ordinal) || s.AgentName.StartsWith("Quick chat", StringComparison.Ordinal))
@@ -237,14 +249,53 @@
         await Js.InvokeVoidAsync("aiShop.focus", _draftElement);
     }
 
-    /// <summary>Built-ins are keyed by provider; custom CLIs by their definition id.</summary>
-    private static string Key(IProviderCli cli) =>
-        cli.DefinitionId is { Length: > 0 } id ? $"custom:{id}" : cli.Provider.ToString();
-
     private (AiProvider Provider, string? CliProviderId) Resolve() =>
         _selected.StartsWith("custom:", StringComparison.Ordinal)
             ? (AiProvider.Custom, _selected["custom:".Length..])
             : (Enum.TryParse<AiProvider>(_selected, out var provider) ? provider : AiProvider.Claude, null);
+
+    /// <summary>
+    /// Reloads everything that belongs to the chosen machine: which CLIs it has, what models each of
+    /// them offers, and which MCP servers it can wire in. All of it is that machine's, so all of it
+    /// has to be re-read rather than filtered.
+    /// </summary>
+    private async Task SelectInstance(string? remoteInstanceId)
+    {
+        _remoteInstanceId = remoteInstanceId;
+
+        // Servers on the old machine are not servers on this one, and an id kept across the move
+        // would silently attach nothing.
+        _selectedMcp.Clear();
+
+        await LoadTargetAsync();
+    }
+
+    private async Task LoadTargetAsync()
+    {
+        _loadingModels = true;
+        StateHasChanged();
+
+        try
+        {
+            var (config, error) = await Targets.ConfigAsync(_remoteInstanceId);
+            _targetError = error;
+            _clis = config.Clis;
+            _mcpServers = config.McpServers;
+
+            // Keep the CLI if the new machine also has it — moving a chat from one machine to
+            // another usually means running the same thing somewhere else.
+            if (!_clis.Any(c => c.Key == _selected))
+                _selected = _clis.Count > 0 ? _clis[0].Key : string.Empty;
+
+            ApplyCliChoice();
+        }
+        finally
+        {
+            _loadingModels = false;
+        }
+
+        await LoadSlashCommandsAsync();
+    }
 
     /// <summary>
     /// Another CLI has other models, and a model name from the old one would be passed straight
@@ -253,8 +304,16 @@
     private async Task SelectCli(ChangeEventArgs args)
     {
         _selected = args.Value?.ToString() ?? string.Empty;
-        await LoadModelChoicesAsync();
+        ApplyCliChoice();
+
         await LoadSlashCommandsAsync();
+    }
+
+    private void ApplyCliChoice()
+    {
+        var chosen = _clis.FirstOrDefault(c => c.Key == _selected);
+        _models = chosen?.Models ?? [];
+        _efforts = chosen?.Efforts ?? [];
 
         _model = new SessionModelSettings(
             Keep(_model.Model, _models),
@@ -264,42 +323,34 @@
             _model.OpeningTurns);
     }
 
-    private async Task LoadModelChoicesAsync()
-    {
-        var (provider, cliProviderId) = Resolve();
-
-        // Rendered before the network call rather than after: this is what actually shows the
-        // "loading" state while ModelsAsync is out asking the CLI, instead of only ever appearing
-        // and disappearing in the same frame once the await completes.
-        _loadingModels = true;
-        StateHasChanged();
-
-        try
-        {
-            _models = await ProviderModels.ModelsAsync(provider, cliProviderId, Options.Value, _cliProviders, Clis);
-            _efforts = ProviderModels.Efforts(provider, cliProviderId, Options.Value, _cliProviders);
-        }
-        finally
-        {
-            _loadingModels = false;
-        }
-    }
-
     private static string? Keep(string? value, IReadOnlyList<string> offered) =>
         value is not null && offered.Contains(value) ? value : null;
 
-    /// <summary>Same reasoning as <c>LoadModelChoicesAsync</c>: opencode's commands come from its own server.</summary>
+    /// <summary>
+    /// opencode's commands come from its own running server, so they can only be asked for where
+    /// that server is. On a remote instance they are left to the fixed list rather than adding a
+    /// round trip for a hint — the CLI still accepts every command it knows, listed here or not.
+    /// </summary>
     private async Task LoadSlashCommandsAsync()
     {
         var (provider, cliProviderId) = Resolve();
-        if (provider != AiProvider.Opencode)
+
+        if (provider != AiProvider.Opencode || _remoteInstanceId is not null)
         {
             _liveSlashCommands = [];
             return;
         }
 
-        var cli = await Clis.ResolveAsync(provider, cliProviderId);
-        _liveSlashCommands = await cli.GetAvailableSlashCommandsAsync();
+        try
+        {
+            var cli = await Clis.ResolveAsync(provider, cliProviderId);
+            _liveSlashCommands = await cli.GetAvailableSlashCommandsAsync();
+        }
+        catch
+        {
+            // A CLI that is not running has no commands to offer, which is not worth a message.
+            _liveSlashCommands = [];
+        }
     }
 
     private async Task StartAsync()
@@ -364,7 +415,7 @@
 
             var session = await QuickChats.StartAsync(
                 provider, cliProviderId, prompt, _selectedMcp.ToList(), _permissionMode, _model,
-                _tokenMinimisation);
+                _tokenMinimisation, _remoteInstanceId);
 
             Nav.NavigateTo($"/chat/{session.Id}");
         }

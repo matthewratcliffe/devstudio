@@ -1,0 +1,61 @@
+@using DevStudio.Domain.Remoting
+@using DevStudio.Ui.Services
+@inject ExecutionTargets Targets
+
+@*
+    Where the work runs. Hidden entirely when nothing has been paired: a dropdown with one option is
+    a field that only ever costs a reader a moment, and most installations have no remote at all.
+*@
+@if (_instances.Count > 0)
+{
+    <div class="field">
+        <label>@Label</label>
+        <select value="@(Value ?? string.Empty)" @onchange="Choose" disabled="@Disabled">
+            <option value="">This machine</option>
+            @foreach (var instance in _instances)
+            {
+                <option value="@instance.Id">@instance.Name</option>
+            }
+        </select>
+        <span class="hint">@Hint</span>
+    </div>
+}
+
+@code {
+    /// <summary>The chosen instance id, or null for this machine.</summary>
+    [Parameter] public string? Value { get; set; }
+
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    [Parameter] public string Label { get; set; } = "Runs on";
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>
+    /// Said in the caller's terms. On an agent it is a lasting choice; on a chat it applies to that
+    /// conversation, and cannot be changed once it has started.
+    /// </summary>
+    [Parameter] public string Hint { get; set; } =
+        "The machine the CLI runs on. Its logins, checkouts and MCP servers are the ones offered below.";
+
+    private IReadOnlyList<RemoteInstance> _instances = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _instances = await Targets.InstancesAsync();
+
+        // An instance that was chosen and has since been unpaired or switched off would otherwise
+        // sit in the field as a blank selection that silently means "this machine". Saying so is
+        // better than a session quietly running in the wrong place.
+        if (Value is { Length: > 0 } chosen && _instances.All(i => i.Id != chosen))
+            await ValueChanged.InvokeAsync(null);
+    }
+
+    private async Task Choose(ChangeEventArgs args)
+    {
+        var chosen = args.Value?.ToString();
+        Value = string.IsNullOrWhiteSpace(chosen) ? null : chosen;
+
+        await ValueChanged.InvokeAsync(Value);
+    }
+}

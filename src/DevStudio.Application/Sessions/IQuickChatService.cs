@@ -19,6 +19,8 @@ public interface IQuickChatService
         PermissionMode? permissionMode = null,
         SessionModelSettings? model = null,
         TokenTactics? tokenMinimisation = null,
+        // The machine the CLI runs on. Null is this one.
+        string? remoteInstanceId = null,
         CancellationToken ct = default);
 
     /// <summary>

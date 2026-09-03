@@ -135,6 +135,10 @@
                 <span class="hint">The run happens in this project's folder, with its instructions and files.</span>
             </div>
 
+            <RemoteInstancePicker Value="_editing.RemoteInstanceId"
+                                  ValueChanged="v => _editing.RemoteInstanceId = v"
+                                  Hint="Overrides where the agent normally runs. Leave on this machine to follow the agent." />
+
             @if (_editing.Target == ScheduleTarget.Agent)
             {
                 <div class="field">
@@ -379,6 +383,7 @@
         Target = schedule.Target,
         TargetId = schedule.TargetId,
         ProjectId = schedule.ProjectId,
+        RemoteInstanceId = schedule.RemoteInstanceId,
         Prompt = schedule.Prompt,
         Inputs = new Dictionary<string, string>(schedule.Inputs),
         Enabled = schedule.Enabled,

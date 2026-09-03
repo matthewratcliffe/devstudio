@@ -39,6 +39,12 @@ public sealed class Schedule : Entity
     /// <summary>Runs the target inside this project's folder, with its instructions applied.</summary>
     public string? ProjectId { get; set; }
 
+    /// <summary>
+    /// Runs on another machine, overriding whatever the agent is set to. Null — the ordinary case —
+    /// follows the agent, so a schedule does not have to be edited when the agent is moved.
+    /// </summary>
+    public string? RemoteInstanceId { get; set; }
+
     /// <summary>Prompt sent when the target is an agent.</summary>
     public string Prompt { get; set; } = string.Empty;
     /// <summary>Input values when the target is a workflow.</summary>

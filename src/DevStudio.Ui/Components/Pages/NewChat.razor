@@ -39,6 +39,9 @@ else
             </select>
         </div>
 
+        <RemoteInstancePicker Value="_remoteInstanceId" ValueChanged="v => _remoteInstanceId = v"
+                              Hint="For these sessions only. Leave on this machine to follow the agent's own setting." />
+
         <div class="field">
             <label>First prompt</label>
             <textarea @bind="_prompt" @bind:event="oninput" rows="6" @onkeydown="OnKeyDown"
@@ -84,6 +87,9 @@ else
     private IReadOnlyList<Project> _projects = [];
     private string _prompt = string.Empty;
     private string _projectId = string.Empty;
+
+    /// <summary>Overrides where the agent runs, for these sessions only. Null follows the agent.</summary>
+    private string? _remoteInstanceId;
     private bool _starting;
     private int _instanceCount = 1;
     private int _intervalSeconds;
@@ -115,6 +121,7 @@ else
         var agentId = _agent.Id;
         var prompt = _prompt.Trim();
         var projectId = string.IsNullOrWhiteSpace(_projectId) ? null : _projectId;
+        var remoteInstanceId = _remoteInstanceId;
         var intervalMs = Math.Max(0, _intervalSeconds) * 1000;
         var untilError = _runUntilError;
         var count = untilError ? int.MaxValue : Math.Max(1, _instanceCount);
@@ -137,6 +144,7 @@ else
                         AgentId = agentId,
                         Prompt = prompt,
                         ProjectId = projectId,
+                        RemoteInstanceId = remoteInstanceId,
                     });
 
                     firstSessionId ??= session.Id;

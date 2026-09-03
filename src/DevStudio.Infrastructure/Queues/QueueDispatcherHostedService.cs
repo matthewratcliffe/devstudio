@@ -154,6 +154,7 @@ public sealed class QueueDispatcherHostedService : BackgroundService
                 Title = $"{queue.Name} · {Summarise(item)}",
                 Trigger = SessionTrigger.Queue,
                 ProjectId = queue.ProjectId,
+                RemoteInstanceId = queue.RemoteInstanceId,
                 QueueItemId = item.Id,
             },
             TimeSpan.FromMinutes(Math.Max(1, queue.TimeoutMinutes)));

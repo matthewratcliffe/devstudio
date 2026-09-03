@@ -95,6 +95,17 @@ public sealed class Agent : Entity
     /// <summary>Optional account to use when the primary account is unavailable or out of capacity.</summary>
     public string? FallbackAccountId { get; set; }
 
+    /// <summary>
+    /// The machine this agent's work runs on. Null — the ordinary case — is the one it is configured
+    /// on. Set to a <c>RemoteInstance</c> id and the CLI, its login, the checkout and the workspace
+    /// are all that machine's; the agent, its sessions and their transcripts stay here.
+    ///
+    /// It follows that <see cref="RepositoryId"/>, <see cref="AccountId"/>, <see cref="SkillIds"/>
+    /// and <see cref="McpServerIds"/> then name things on the remote, which is why choosing an
+    /// instance reloads every one of those pickers.
+    /// </summary>
+    public string? RemoteInstanceId { get; set; }
+
     /// <summary>Repository the agent works in. Null means the project or scratch workspace.</summary>
     public string? RepositoryId { get; set; }
 

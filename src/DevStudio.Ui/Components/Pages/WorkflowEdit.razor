@@ -29,6 +29,10 @@ else
                 </select>
             </div>
         </div>
+
+        <RemoteInstancePicker Value="_workflow.RemoteInstanceId"
+                              ValueChanged="v => _workflow.RemoteInstanceId = v"
+                              Hint="Applies to every step. Steps hand their working directory to the next one, and a directory does not cross machines — so this is set once for the whole workflow." />
         <div class="form-grid">
             <div class="field">
                 <label>Description</label>

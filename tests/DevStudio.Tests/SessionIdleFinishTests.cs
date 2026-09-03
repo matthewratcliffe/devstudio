@@ -33,9 +33,7 @@ public class SessionIdleFinishTests : IDisposable
         _sessions = new SessionManager(
             _store,
             new JsonEntityStore<Agent>(options, NullLogger<JsonEntityStore<Agent>>.Instance),
-            new StubRegistry(),
-            new StubWorkspace(_root),
-            new StubAccounts(_root),
+            new TestExecutionHost(new StubRegistry(), new StubWorkspace(_root), new StubAccounts(_root)),
             new JsonEntityStore<Domain.Projects.Project>(options, NullLogger<JsonEntityStore<Domain.Projects.Project>>.Instance),
             new JsonEntityStore<GlobalSettings>(options, NullLogger<JsonEntityStore<GlobalSettings>>.Instance),
             options,
@@ -163,6 +161,27 @@ public class SessionIdleFinishTests : IDisposable
             IReadOnlyList<string>? extraServerIds,
             CancellationToken ct = default) =>
             PrepareAsync(agent, sessionId, projectId, ct);
+
+
+        public Task<WorkspacePlan> PlanAsync(
+
+            Agent agent,
+
+            string sessionId,
+
+            string? projectId,
+
+            IReadOnlyList<string>? extraServerIds,
+
+            CancellationToken ct = default) =>
+
+            Task.FromResult(new WorkspacePlan { Agent = agent, SessionId = sessionId, ProjectId = projectId });
+
+
+        public Task<SessionWorkspace> PrepareAsync(WorkspacePlan plan, CancellationToken ct = default) =>
+
+            PrepareAsync(plan.Agent, plan.SessionId, plan.ProjectId, ct);
+
 
         public Task ReleaseAsync(SessionWorkspace workspace, CancellationToken ct = default) => Task.CompletedTask;
         public Task MaterialiseSkillsAsync(Agent agent, string workspacePath, CancellationToken ct = default) => Task.CompletedTask;

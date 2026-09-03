@@ -16,6 +16,10 @@ public sealed class WorkflowRun : Entity
     public string WorkflowId { get; set; } = string.Empty;
     public string WorkflowName { get; set; } = string.Empty;
     public string? ProjectId { get; set; }
+
+    /// <summary>The machine every step of this run executes on, captured when it started.</summary>
+    public string? RemoteInstanceId { get; set; }
+
     public RunStatus Status { get; set; } = RunStatus.Pending;
     public Dictionary<string, string> Inputs { get; set; } = [];
     public List<WorkflowStepRun> Steps { get; set; } = [];

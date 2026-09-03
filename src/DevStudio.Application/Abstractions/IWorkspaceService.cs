@@ -7,6 +7,43 @@ namespace DevStudio.Application.Abstractions;
 /// <summary>Where a session will run, which worktree it owns, and which project it belongs to.</summary>
 public sealed record SessionWorkspace(string Path, string? RepositoryId, Worktree? Worktree, string? ProjectId = null);
 
+/// <summary>A project file carried to wherever the workspace is being built, contents and all.</summary>
+public sealed record SuppliedFile(string FileName, byte[] Content);
+
+/// <summary>
+/// A workspace request with nothing left to look up: the repository and base branch are already
+/// chosen, and any project files come with their bytes attached.
+///
+/// This exists because a session can be prepared on another machine. Over there the agent's project
+/// does not exist — projects are orchestration, and orchestration stays with the session — so
+/// everything the project contributes has to be resolved on this side first and carried across.
+/// The local path resolves its own plan and then follows exactly the same code, which is what keeps
+/// the two from drifting.
+/// </summary>
+public sealed record WorkspacePlan
+{
+    public required Agent Agent { get; init; }
+    public required string SessionId { get; init; }
+
+    /// <summary>Repository to work in, already resolved from the agent and its project.</summary>
+    public string? RepositoryId { get; init; }
+
+    /// <summary>Branch a worktree is cut from, already resolved. Null falls back to the repo default.</summary>
+    public string? BaseBranch { get; init; }
+
+    /// <summary>Only used to name the fallback workspace directory when there is no repository.</summary>
+    public string? ProjectId { get; init; }
+
+    /// <summary>MCP servers the session brings beyond the agent's own.</summary>
+    public IReadOnlyList<string>? ExtraServerIds { get; init; }
+
+    /// <summary>
+    /// The project's uploaded files. Supplied explicitly so a remote build gets them without
+    /// needing the project; a local build reads its own and passes them the same way.
+    /// </summary>
+    public IReadOnlyList<SuppliedFile> ProjectFiles { get; init; } = [];
+}
+
 /// <summary>
 /// Prepares the directory an agent session runs in: worktree or project folder, the agent's skills,
 /// its MCP configuration, and the project's uploaded files.
@@ -17,6 +54,24 @@ public interface IWorkspaceService
 
     /// <summary>Prepares a workspace whose session brings MCP servers of its own.</summary>
     Task<SessionWorkspace> PrepareAsync(
+        Agent agent,
+        string sessionId,
+        string? projectId,
+        IReadOnlyList<string>? extraServerIds,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Prepares a workspace from a plan that has already been resolved. Every other overload ends
+    /// up here; a remote host is handed the plan directly because it cannot resolve one itself.
+    /// </summary>
+    Task<SessionWorkspace> PrepareAsync(WorkspacePlan plan, CancellationToken ct = default);
+
+    /// <summary>
+    /// Turns an agent and project into a plan by reading the local stores. Called before dispatching
+    /// work to another machine, which is why it is separate from preparing: the resolution happens
+    /// here, the building happens over there.
+    /// </summary>
+    Task<WorkspacePlan> PlanAsync(
         Agent agent,
         string sessionId,
         string? projectId,
