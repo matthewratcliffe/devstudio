@@ -154,6 +154,10 @@
                 <span class="hint">Every item is processed in this project's folder, with its instructions and files.</span>
             </div>
 
+            <RemoteInstancePicker Value="_editing.RemoteInstanceId"
+                                  ValueChanged="v => _editing.RemoteInstanceId = v"
+                                  Hint="Overrides where the agent normally runs. Leave on this machine to follow the agent." />
+
             @if (_editing.Target == QueueTarget.Agent)
             {
                 <div class="field">
@@ -345,6 +349,7 @@
         Target = queue.Target,
         TargetId = queue.TargetId,
         ProjectId = queue.ProjectId,
+        RemoteInstanceId = queue.RemoteInstanceId,
         PromptTemplate = queue.PromptTemplate,
         Inputs = new Dictionary<string, string>(queue.Inputs),
         MaxConcurrent = queue.MaxConcurrent,

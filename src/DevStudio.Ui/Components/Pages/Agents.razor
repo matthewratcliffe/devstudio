@@ -1,17 +1,12 @@
 @page "/agents"
 @inject IEntityStore<Agent> AgentStore
 @inject IEntityStore<GlobalSettings> SettingsStore
-@inject IEntityStore<Skill> SkillStore
 @inject IEntityStore<McpServer> McpStore
 @inject IEntityStore<Project> ProjectStore
-@inject IEntityStore<GitRepository> RepositoryStore
-@inject IEntityStore<ProviderAccount> AccountStore
 @inject IEntityStore<CliProvider> CliProviderStore
 @inject ISessionManager Sessions
-@inject IGitService Git
 @inject NavigationManager Nav
-@inject Microsoft.Extensions.Options.IOptions<OrchestratorOptions> Options
-@inject IProviderCliRegistry Clis
+@inject ExecutionTargets Targets
 @using DevStudio.Ui.Services
 
 <PageTitle>Agents · devStudio</PageTitle>
@@ -116,13 +111,21 @@
                         <option value="@AiProvider.Claude">Claude Code (claude)</option>
                         <option value="@AiProvider.Codex">OpenAI Codex (codex)</option>
                         <option value="@AiProvider.Opencode">OpenCode (opencode)</option>
-                        @if (_cliProviders.Count > 0)
+                        @if (_target.Clis.Any(c => c.CliProviderId is { Length: > 0 }))
                         {
                             <option value="@AiProvider.Custom">Custom CLI…</option>
                         }
                     </select>
                 </div>
             </div>
+
+            <RemoteInstancePicker Value="_editing.RemoteInstanceId" ValueChanged="SelectInstanceAsync"
+                                  Hint="Where this agent's sessions run. Its repository, login, skills and MCP servers below all come from that machine." />
+
+            @if (_targetError is { Length: > 0 })
+            {
+                <div class="setting-callout warn">@_targetError</div>
+            }
 
             <div class="form-grid">
                 <div class="field">
@@ -207,7 +210,7 @@
                     <select value="@(_editing.RepositoryId ?? string.Empty)"
                             @onchange="e => SelectRepositoryAsync(e.Value?.ToString())">
                         <option value="">None (scratch or project folder)</option>
-                        @foreach (var repository in _repositories)
+                        @foreach (var repository in _target.Repositories)
                         {
                             <option value="@repository.Id">@repository.Name</option>
                         }
@@ -221,12 +224,16 @@
                     <label>Which CLI</label>
                     <select @bind="_editing.CliProviderId">
                         <option value="">Pick one</option>
-                        @foreach (var cli in _cliProviders.Where(c => c.Enabled))
+                        @foreach (var cli in _target.Clis.Where(c => c.CliProviderId is { Length: > 0 }))
                         {
-                            <option value="@cli.Id">@cli.Name — @cli.Executable</option>
+                            <option value="@cli.CliProviderId">@cli.DisplayName</option>
                         }
                     </select>
-                    <span class="hint">Defined on the <a href="/cli-providers">CLI providers</a> page.</span>
+                    <span class="hint">
+                        @(_editing.RemoteInstanceId is null
+                            ? "Defined on the CLI providers page."
+                            : "Defined on that instance's own CLI providers page.")
+                    </span>
                 </div>
             }
 
@@ -297,8 +304,7 @@
                 <label>Account</label>
                 <select @bind="_editing.AccountId">
                     <option value="">Default for this CLI</option>
-                    @foreach (var account in _accounts.Where(a => a.Provider == _editing.Provider
-                        && (_editing.Provider != AiProvider.Custom || a.CliProviderId == _editing.CliProviderId)))
+                    @foreach (var account in AccountsForProvider())
                     {
                         <option value="@account.Id">@account.Name</option>
                     }
@@ -310,9 +316,7 @@
                 <label>Fallback account</label>
                 <select @bind="_editing.FallbackAccountId">
                     <option value="">Automatic fallback</option>
-                    @foreach (var account in _accounts.Where(a => a.Provider == _editing.Provider
-                        && a.Id != _editing.AccountId
-                        && (_editing.Provider != AiProvider.Custom || a.CliProviderId == _editing.CliProviderId)))
+                    @foreach (var account in AccountsForProvider().Where(a => a.Id != _editing.AccountId))
                     {
                         <option value="@account.Id">@account.Name</option>
                     }
@@ -392,11 +396,11 @@
             <div class="grid grid-2">
                 <div>
                     <div class="section-tag">Skills</div>
-                    @if (_skills.Count == 0)
+                    @if (_target.Skills.Count == 0)
                     {
-                        <p class="mono-dim">No skills defined yet.</p>
+                        <p class="mono-dim">No skills defined on that machine.</p>
                     }
-                    @foreach (var skill in _skills)
+                    @foreach (var skill in _target.Skills)
                     {
                         <div class="check">
                             <input type="checkbox" checked="@_editing.SkillIds.Contains(skill.Id)"
@@ -407,11 +411,11 @@
                 </div>
                 <div>
                     <div class="section-tag">MCP servers</div>
-                    @if (_mcpServers.Count == 0)
+                    @if (_target.McpServers.Count == 0)
                     {
-                        <p class="mono-dim">No MCP servers registered yet.</p>
+                        <p class="mono-dim">No MCP servers registered on that machine.</p>
                     }
-                    @foreach (var server in _mcpServers)
+                    @foreach (var server in _target.McpServers)
                     {
                         <div class="check">
                             <input type="checkbox" checked="@(_editing.McpServerIds.Contains(server.Id) || server.IsDefault)"
@@ -436,12 +440,19 @@
     [CascadingParameter] private MainLayout Layout { get; set; } = default!;
 
     private IReadOnlyList<Agent> _agents = [];
-    private IReadOnlyList<Skill> _skills = [];
     private IReadOnlyList<McpServer> _mcpServers = [];
     private IReadOnlyList<Project> _projects = [];
-    private IReadOnlyList<GitRepository> _repositories = [];
-    private IReadOnlyList<ProviderAccount> _accounts = [];
     private IReadOnlyList<CliProvider> _cliProviders = [];
+
+    /// <summary>
+    /// What the machine the agent being edited runs on has to offer. Every picker in the editor
+    /// reads from this rather than from the local stores, because a repository, a login, a skill and
+    /// an MCP server all exist on one machine and naming one that lives somewhere else would produce
+    /// an agent that fails on its first turn.
+    /// </summary>
+    private RemoteHostConfig _target = RemoteHostConfig.Empty(string.Empty);
+
+    private string? _targetError;
     private TokenTactics _defaultTokenMinimisation = new GlobalSettings().DefaultTokenMinimisation;
 
     private string PromptingTipsValue => _editing?.PromptingTips switch
@@ -464,12 +475,6 @@
     private bool _handover;
     private IReadOnlyList<string> _branches = [];
 
-    /// <summary>
-    /// Live model list for the CLI being edited, when it can offer one — currently just opencode.
-    /// Fetched once when the editor opens rather than per render, since it is a network call.
-    /// </summary>
-    private IReadOnlyList<string> _liveModels = [];
-
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 
     protected override void OnAfterRender(bool firstRender)
@@ -482,11 +487,8 @@
     {
         // Quick-chat agents are created behind the scenes and are not configurable here.
         _agents = (await AgentStore.GetAllAsync()).Where(a => !a.IsQuickChat).ToList();
-        _skills = await SkillStore.GetAllAsync();
         _mcpServers = await McpStore.GetAllAsync();
         _projects = await ProjectStore.GetAllAsync();
-        _repositories = await RepositoryStore.GetAllAsync();
-        _accounts = await AccountStore.GetAllAsync();
         _cliProviders = await CliProviderStore.GetAllAsync();
         _defaultTokenMinimisation = (await SettingsStore.GetAsync(GlobalSettings.WellKnownId))?.DefaultTokenMinimisation
                                     ?? _defaultTokenMinimisation;
@@ -511,37 +513,38 @@
         };
 
     /// <summary>
-    /// Model choices for the agent's provider: whatever <see cref="_liveModels"/> most recently
-    /// fetched for this provider, merged over configuration or the CLI definition's fixed list.
+    /// The CLI the agent is set to, as the machine it runs on describes it. Both model and effort
+    /// lists come from there — a remote's Claude may well be a different build with different models
+    /// from this one's.
     /// </summary>
-    private IReadOnlyList<string> ModelsFor(Agent agent)
+    private RemoteCliDescriptor? DescriptorFor(Agent agent) =>
+        agent.Provider == AiProvider.Custom
+            ? _target.Clis.FirstOrDefault(c => c.CliProviderId == agent.CliProviderId)
+            : _target.Clis.FirstOrDefault(c => c.Provider == agent.Provider && c.CliProviderId is null);
+
+    /// <summary>
+    /// Logins on the chosen machine that belong to the CLI the agent is set to. The account list
+    /// carries its provider in <c>Detail</c>, which is what makes this filterable without a second
+    /// round trip.
+    /// </summary>
+    private IEnumerable<RemoteNamedItem> AccountsForProvider()
     {
-        var configured = agent.Provider switch
-        {
-            AiProvider.Claude => Options.Value.ClaudeModels,
-            AiProvider.Codex => Options.Value.CodexModels,
-            AiProvider.Opencode => Options.Value.OpencodeModels,
-            _ => _cliProviders.FirstOrDefault(c => c.Id == agent.CliProviderId)?.Models ?? [],
-        };
+        if (_editing is null)
+            return [];
 
-        if (_liveModels.Count == 0)
-            return configured;
+        var key = _editing.Provider == AiProvider.Custom
+            ? $"Custom:{_editing.CliProviderId}"
+            : _editing.Provider.ToString();
 
-        return _liveModels
-            .Concat(configured.Where(m => !_liveModels.Contains(m, StringComparer.OrdinalIgnoreCase)))
-            .ToList();
+        return _target.Accounts.Where(a => a.Detail == key);
     }
 
-    private IReadOnlyList<string> EffortsFor(Agent agent) => agent.Provider switch
-    {
-        AiProvider.Claude => Options.Value.ClaudeEfforts,
-        AiProvider.Codex => Options.Value.CodexEfforts,
-        AiProvider.Opencode => Options.Value.OpencodeEfforts,
-        _ => _cliProviders.FirstOrDefault(c => c.Id == agent.CliProviderId)?.Efforts ?? [],
-    };
+    private IReadOnlyList<string> ModelsFor(Agent agent) => DescriptorFor(agent)?.Models ?? [];
+
+    private IReadOnlyList<string> EffortsFor(Agent agent) => DescriptorFor(agent)?.Efforts ?? [];
 
     private string DefaultBranch =>
-        _repositories.FirstOrDefault(r => r.Id == _editing?.RepositoryId)?.DefaultBranch ?? "main";
+        _target.Repositories.FirstOrDefault(r => r.Id == _editing?.RepositoryId)?.Detail ?? "main";
 
     private string BranchPlaceholder =>
         _editing?.RepositoryId is null ? "pick a repository first" : "loading branches...";
@@ -558,18 +561,52 @@
     {
         _branches = [];
 
-        var repository = _repositories.FirstOrDefault(r => r.Id == _editing?.RepositoryId);
-        if (repository is null)
+        if (_editing?.RepositoryId is not { Length: > 0 } repositoryId)
             return;
 
-        try
+        // Asked of whichever machine holds the checkout. The list is a convenience and the field
+        // falls back to free text, so an unreachable instance costs nothing here.
+        _branches = await Targets.BranchesAsync(_editing.RemoteInstanceId, repositoryId);
+    }
+
+    /// <summary>
+    /// Reloads everything the editor offers from the machine the agent now points at. Called when
+    /// the editor opens and whenever the instance is changed, which is what makes every dependent
+    /// picker follow the choice.
+    /// </summary>
+    private async Task LoadTargetAsync()
+    {
+        (_target, _targetError) = await Targets.ConfigAsync(_editing?.RemoteInstanceId);
+    }
+
+    private async Task SelectInstanceAsync(string? remoteInstanceId)
+    {
+        if (_editing is null)
+            return;
+
+        _editing.RemoteInstanceId = remoteInstanceId;
+
+        // Repositories, logins, skills and MCP servers are all named by ids that belong to one
+        // machine. Carrying them over would leave the agent pointing at things that are not there,
+        // and the failure would not show up until its first turn.
+        _editing.RepositoryId = null;
+        _editing.BaseBranch = null;
+        _editing.AccountId = null;
+        _editing.FallbackAccountId = null;
+        _editing.SkillIds.Clear();
+        _editing.McpServerIds.Clear();
+        _branches = [];
+
+        await LoadTargetAsync();
+
+        // The CLI may not exist over there either.
+        if (DescriptorFor(_editing) is null)
         {
-            _branches = await Git.ListBranchesAsync(repository);
-        }
-        catch (Exception ex)
-        {
-            // The list is a convenience; the field falls back to free text.
-            Layout.Notify($"Could not list branches: {ex.Message}", "err");
+            _editing.CliProviderId = null;
+            _editing.Model = null;
+            _editing.Effort = null;
+            _editing.OpeningModel = null;
+            _editing.OpeningEffort = null;
         }
     }
 
@@ -635,41 +672,18 @@
         _isNew = string.IsNullOrWhiteSpace(agent.Name) || _agents.All(a => a.Id != agent.Id);
         // Edit a copy so cancelling leaves the stored agent untouched.
         _editing = Clone(agent);
-        _liveModels = [];
+        _handover = _editing.OpeningTurns > 0;
+        _branches = [];
+
+        // Awaited rather than left running: every picker below is built from it, and an editor that
+        // opened with empty dropdowns and filled them in a moment later would invite a choice made
+        // before the real options arrived.
+        await LoadTargetAsync();
 
         // A model that is not in the list is still valid — show it in the free-text box.
         _customModel = !string.IsNullOrWhiteSpace(_editing.Model) && !ModelsFor(_editing).Contains(_editing.Model);
 
-        _handover = _editing.OpeningTurns > 0;
-
-        _ = LoadBranchesAsync();
-        _ = LoadLiveModelsAsync(_editing);
-    }
-
-    /// <summary>
-    /// Asks the CLI itself what models it currently has, for providers that can answer that. Runs
-    /// in the background so opening the editor never waits on a network call; the list fills in
-    /// once it arrives.
-    /// </summary>
-    private async Task LoadLiveModelsAsync(Agent agent)
-    {
-        IProviderCli cli;
-        try
-        {
-            cli = await Clis.ResolveAsync(agent.Provider, agent.CliProviderId);
-        }
-        catch
-        {
-            return;
-        }
-
-        var models = await cli.GetAvailableModelsAsync();
-        if (_editing != agent || models.Count == 0)
-            return;
-
-        _liveModels = models;
-        _customModel = !string.IsNullOrWhiteSpace(_editing.Model) && !ModelsFor(_editing).Contains(_editing.Model);
-        StateHasChanged();
+        await LoadBranchesAsync();
     }
 
     private void Cancel() => _editing = null;

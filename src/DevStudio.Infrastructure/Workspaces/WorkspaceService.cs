@@ -67,43 +67,65 @@ public sealed class WorkspaceService : IWorkspaceService
         string sessionId,
         string? projectId,
         IReadOnlyList<string>? extraServerIds,
+        CancellationToken ct = default) =>
+        await PrepareAsync(await PlanAsync(agent, sessionId, projectId, extraServerIds, ct), ct);
+
+    public async Task<WorkspacePlan> PlanAsync(
+        Agent agent,
+        string sessionId,
+        string? projectId,
+        IReadOnlyList<string>? extraServerIds,
         CancellationToken ct = default)
     {
         projectId ??= agent.ProjectId;
         var project = projectId is null ? null : await _projects.GetAsync(projectId, ct);
 
-        var repositoryId = agent.RepositoryId ?? project?.RepositoryId;
+        return new WorkspacePlan
+        {
+            Agent = agent,
+            SessionId = sessionId,
+            RepositoryId = agent.RepositoryId ?? project?.RepositoryId,
+            BaseBranch = agent.BaseBranch ?? project?.BaseBranch,
+            ProjectId = projectId,
+            ExtraServerIds = extraServerIds,
+            ProjectFiles = projectId is null ? [] : ReadLibrary(ProjectFilesPath(projectId)),
+        };
+    }
+
+    public async Task<SessionWorkspace> PrepareAsync(WorkspacePlan plan, CancellationToken ct = default)
+    {
+        var agent = plan.Agent;
         SessionWorkspace workspace;
         var isLocalRepository = false;
 
-        if (!string.IsNullOrWhiteSpace(repositoryId) &&
-            await _repositories.GetAsync(repositoryId!, ct) is { } repository)
+        if (!string.IsNullOrWhiteSpace(plan.RepositoryId) &&
+            await _repositories.GetAsync(plan.RepositoryId!, ct) is { } repository)
         {
             isLocalRepository = repository.IsLocal;
 
             if (agent.UseWorktree)
             {
-                var branch = $"agent/{TemplateRenderer.Slugify(agent.Name)}/{sessionId[..8]}";
-                var baseBranch = agent.BaseBranch ?? project?.BaseBranch ?? repository.DefaultBranch;
+                var branch = $"agent/{TemplateRenderer.Slugify(agent.Name)}/{plan.SessionId[..8]}";
+                var baseBranch = plan.BaseBranch ?? repository.DefaultBranch;
                 var worktree = await _git.CreateWorktreeAsync(repository, branch, baseBranch, ephemeral: true, ct);
-                worktree.SessionId = sessionId;
+                worktree.SessionId = plan.SessionId;
                 await _repositories.UpsertAsync(repository, ct);
-                workspace = new SessionWorkspace(worktree.Path, repository.Id, worktree, projectId);
+                workspace = new SessionWorkspace(worktree.Path, repository.Id, worktree, plan.ProjectId);
             }
             else
             {
-                workspace = new SessionWorkspace(repository.LocalPath, repository.Id, null, projectId);
+                workspace = new SessionWorkspace(repository.LocalPath, repository.Id, null, plan.ProjectId);
             }
         }
-        else if (project is not null)
+        else if (plan.ProjectId is not null)
         {
-            var path = ProjectWorkspacePath(project.Id);
+            var path = ProjectWorkspacePath(plan.ProjectId);
             Directory.CreateDirectory(path);
-            workspace = new SessionWorkspace(path, null, null, projectId);
+            workspace = new SessionWorkspace(path, null, null, plan.ProjectId);
         }
         else
         {
-            var path = Path.Combine(_options.ScratchPath, sessionId[..8]);
+            var path = Path.Combine(_options.ScratchPath, plan.SessionId[..8]);
             Directory.CreateDirectory(path);
             workspace = new SessionWorkspace(path, null, null, null);
         }
@@ -111,11 +133,10 @@ public sealed class WorkspaceService : IWorkspaceService
         await TrySyncStandardsFilesAsync(ct);
 
         await MaterialiseSkillsAsync(agent, workspace.Path, ct);
-        await MaterialiseMcpAsync(agent, workspace.Path, extraServerIds, ct);
+        await MaterialiseMcpAsync(agent, workspace.Path, plan.ExtraServerIds, ct);
         await MaterialiseGlobalFilesAsync(workspace.Path, ct);
 
-        if (projectId is not null)
-            await MaterialiseProjectFilesAsync(projectId, workspace.Path, ct);
+        WriteSuppliedFiles(plan.ProjectFiles, Path.Combine(workspace.Path, "project-files"));
 
         // Everything staged above is untracked. In a volume clone nobody sees it; in a checkout an
         // IDE on the host has open it reads as a dozen stray files, and gets committed by accident.
@@ -368,6 +389,60 @@ public sealed class WorkspaceService : IWorkspaceService
     public async Task MaterialiseProjectFilesAsync(string projectId, string workspacePath, CancellationToken ct = default)
     {
         await CopyLibraryAsync(ProjectFilesPath(projectId), Path.Combine(workspacePath, "project-files"));
+    }
+
+    /// <summary>
+    /// Reads an uploaded library off disk so it can travel to another machine. Only used on the
+    /// dispatching side; a workspace built here copies from disk instead.
+    /// </summary>
+    private IReadOnlyList<SuppliedFile> ReadLibrary(string source)
+    {
+        if (!Directory.Exists(source))
+            return [];
+
+        var files = new List<SuppliedFile>();
+
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            try
+            {
+                files.Add(new SuppliedFile(Path.GetFileName(file), File.ReadAllBytes(file)));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not read reference file {File} for dispatch", file);
+            }
+        }
+
+        return files;
+    }
+
+    /// <summary>
+    /// Same staging rule as <see cref="CopyLibraryAsync"/>: an existing file is left alone unless
+    /// the supplied one is different, so notes an agent left beside a reference file survive.
+    /// </summary>
+    private void WriteSuppliedFiles(IReadOnlyList<SuppliedFile> files, string target)
+    {
+        if (files.Count == 0)
+            return;
+
+        Directory.CreateDirectory(target);
+
+        foreach (var file in files)
+        {
+            var destination = Path.Combine(target, Path.GetFileName(file.FileName));
+            try
+            {
+                if (File.Exists(destination) && File.ReadAllBytes(destination).AsSpan().SequenceEqual(file.Content))
+                    continue;
+
+                File.WriteAllBytes(destination, file.Content);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not stage reference file {File}", file.FileName);
+            }
+        }
     }
 
     private Task CopyLibraryAsync(string source, string target)

@@ -120,6 +120,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
             ProjectId = inputs.TryGetValue("projectId", out var projectOverride) && !string.IsNullOrWhiteSpace(projectOverride)
                 ? projectOverride
                 : workflow.ProjectId,
+            RemoteInstanceId = workflow.RemoteInstanceId,
             Inputs = resolved,
             TriggeredBy = triggeredBy,
             Status = RunStatus.Pending,
@@ -237,6 +238,7 @@ public sealed class WorkflowEngine : IWorkflowEngine
                     Title = $"{run.WorkflowName} · {step.Name}",
                     Trigger = SessionTrigger.Workflow,
                     ProjectId = run.ProjectId,
+                    RemoteInstanceId = run.RemoteInstanceId,
                     WorkflowRunId = run.Id,
                     WorkingDirectoryOverride = step.ReuseWorkspace ? sharedWorkspace : null,
                 },

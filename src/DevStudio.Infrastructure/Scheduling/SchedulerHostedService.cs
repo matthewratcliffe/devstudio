@@ -146,6 +146,7 @@ public sealed class SchedulerHostedService : BackgroundService
                     Trigger = SessionTrigger.Schedule,
                     ScheduleId = schedule.Id,
                     ProjectId = schedule.ProjectId,
+                    RemoteInstanceId = schedule.RemoteInstanceId,
                 });
 
                 schedule.LastRunId = session.Id;

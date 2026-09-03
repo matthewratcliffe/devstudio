@@ -49,6 +49,12 @@ public sealed class WorkQueue : Entity
     public string? ProjectId { get; set; }
 
     /// <summary>
+    /// Processes items on another machine, overriding whatever the agent is set to. Null follows the
+    /// agent — which is what lets a queue's work be moved by repointing one agent.
+    /// </summary>
+    public string? RemoteInstanceId { get; set; }
+
+    /// <summary>
     /// Prompt sent when the target is an agent. Supports {{item.title}}, {{item.body}}, {{item.key}}
     /// and every payload entry, both bare and as {{payload.name}}. Empty sends the item's title and
     /// body on their own.

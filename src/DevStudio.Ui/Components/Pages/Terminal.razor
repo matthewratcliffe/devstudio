@@ -1,20 +1,47 @@
 @page "/terminal"
+@implements IAsyncDisposable
 @inject ICliCommandService Cli
+@inject ExecutionTargets Targets
+@inject IExecutionHostResolver Hosts
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime Js
 
 <PageTitle>Terminal · devStudio</PageTitle>
 
-<p class="mono-dim" style="margin-bottom:1rem">
-    Drive the app from the command line — <code>sessions list</code>, <code>agents run code-review "fix the lint errors"</code>,
-    <code>workflows run nightly-triage -b</code>. Append <code>-b</code> to background a long-running command.
-    Type <code>help</code> for the full list, and use ↑ / ↓ to recall previous commands.
-</p>
+@if (_remoteInstanceId is null)
+{
+    <p class="mono-dim" style="margin-bottom:1rem">
+        Drive the app from the command line — <code>sessions list</code>, <code>agents run code-review "fix the lint errors"</code>,
+        <code>workflows run nightly-triage -b</code>. Append <code>-b</code> to background a long-running command.
+        Type <code>help</code> for the full list, and use ↑ / ↓ to recall previous commands.
+    </p>
+}
+else
+{
+    @* A different thing entirely, so it says so. On this machine the prompt drives the app; on
+       another it is that machine's shell, because the app over there is not the one holding your
+       sessions and 'sessions list' would answer about the wrong one. *@
+    <p class="mono-dim" style="margin-bottom:1rem">
+        Running a shell on <strong>@_target.HostName</strong> through
+        <code>@(_target.IsWindows ? "cmd /c" : "sh -lc")</code>. This is that machine's command line,
+        not this app's — output streams back as it is printed.
+    </p>
+}
+
+<div style="max-width:24rem;margin-bottom:1rem">
+    <RemoteInstancePicker Value="_remoteInstanceId" ValueChanged="SelectInstanceAsync"
+                          Label="Runs on"
+                          Hint="This machine drives the app. Another machine gives you its shell." />
+</div>
 
 <div class="terminal">
     <div class="terminal-bar">
         <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-        <span class="title">devstudio</span>
+        <span class="title">@(_remoteInstanceId is null ? "devstudio" : _target.HostName)</span>
+        @if (_running is not null)
+        {
+            <span class="pill pill-live"><span class="dot"></span>running</span>
+        }
     </div>
 
     <div class="terminal-body" @ref="_outputRef">
@@ -42,6 +69,17 @@
     private ElementReference _inputRef;
     private ElementReference _outputRef;
 
+    /// <summary>The machine the prompt drives. Null is this app's own command line.</summary>
+    private string? _remoteInstanceId;
+
+    private RemoteHostConfig _target = RemoteHostConfig.Empty(Environment.MachineName);
+
+    /// <summary>The remote command in flight, if there is one.</summary>
+    private ITerminalSession? _running;
+
+    /// <summary>Where the running command's output starts, so it can be redrawn in place.</summary>
+    private int _remoteBufferAt;
+
     protected override async Task OnInitializedAsync()
     {
         var state = await AuthState.GetAuthenticationStateAsync();
@@ -58,6 +96,14 @@
 
     private async Task OnKeyDownAsync(KeyboardEventArgs e)
     {
+        // The one key that has to reach the far side rather than this page: a remote command with no
+        // way to interrupt it is one you can only get rid of by leaving.
+        if (e.CtrlKey && e.Key is "c" or "C" && _running is not null)
+        {
+            await _running.SendControlAsync('c');
+            return;
+        }
+
         switch (e.Key)
         {
             case "Enter":
@@ -86,6 +132,24 @@
         }
     }
 
+    private async Task SelectInstanceAsync(string? remoteInstanceId)
+    {
+        // A shell that is still running belongs to the machine being left; it cannot follow.
+        await StopRemoteAsync();
+
+        _remoteInstanceId = remoteInstanceId;
+        (_target, var error) = await Targets.ConfigAsync(_remoteInstanceId);
+
+        _lines.Clear();
+        _lines.Add(error is { Length: > 0 }
+            ? new Line(error, true)
+            : new Line(
+                _remoteInstanceId is null
+                    ? "devStudio terminal. Type 'help' to see what's available."
+                    : $"Shell on {_target.HostName}. Commands run there, not here.",
+                false));
+    }
+
     private async Task RunAsync()
     {
         var command = _draft.Trim();
@@ -98,6 +162,12 @@
         _commandHistory.Add(command);
         _lines.Add(new Line($"> {command}", false));
         await ScrollToBottomAsync();
+
+        if (_remoteInstanceId is not null)
+        {
+            await RunRemoteAsync(command);
+            return;
+        }
 
         var result = await Cli.ExecuteAsync(command, _invokedBy);
 
@@ -115,10 +185,81 @@
         await Js.InvokeVoidAsync("aiShop.focus", _inputRef);
     }
 
+    /// <summary>
+    /// Runs one command on the far side and mirrors its output as it is printed. One command at a
+    /// time: this is a window onto a process, not a session with a shell, and two running at once
+    /// would interleave into something unreadable.
+    /// </summary>
+    private async Task RunRemoteAsync(string command)
+    {
+        if (_running is not null)
+        {
+            _lines.Add(new Line("Something is still running. Press Ctrl-C to stop it first.", true));
+            await ScrollToBottomAsync();
+            return;
+        }
+
+        try
+        {
+            var host = await Hosts.ResolveAsync(_remoteInstanceId);
+            var (fileName, arguments) = _target.ShellFor(command);
+
+            _running = await host.Terminals.StartAsync(fileName, arguments);
+
+            // The buffer arrives whole each time, so the mirrored output replaces what was there
+            // rather than appending — which is also what makes a redrawing command look right.
+            _running.Updated += OnRemoteUpdated;
+            _remoteBufferAt = _lines.Count;
+            OnRemoteUpdated();
+        }
+        catch (Exception ex)
+        {
+            _lines.Add(new Line(ex.Message, true));
+            await ScrollToBottomAsync();
+        }
+    }
+
+    private void OnRemoteUpdated() => _ = InvokeAsync(async () =>
+    {
+        if (_running is null)
+            return;
+
+        // Everything from where this command's output began is replaced by the current buffer.
+        _lines.RemoveRange(_remoteBufferAt, _lines.Count - _remoteBufferAt);
+
+        foreach (var line in _running.Buffer.Split('\n'))
+            _lines.Add(new Line(line.TrimEnd('\r'), false));
+
+        if (!_running.IsRunning)
+        {
+            var code = _running.ExitCode;
+            if (code is not null and not 0)
+                _lines.Add(new Line($"exit {code}", true));
+
+            await StopRemoteAsync();
+        }
+
+        await ScrollToBottomAsync();
+    });
+
+    private async Task StopRemoteAsync()
+    {
+        if (_running is null)
+            return;
+
+        var running = _running;
+        _running = null;
+
+        running.Updated -= OnRemoteUpdated;
+        await running.DisposeAsync();
+    }
+
     private async Task ScrollToBottomAsync()
     {
         StateHasChanged();
         await Task.Yield();
         await Js.InvokeVoidAsync("aiShop.scrollToBottom", _outputRef, true);
     }
+
+    public async ValueTask DisposeAsync() => await StopRemoteAsync();
 }

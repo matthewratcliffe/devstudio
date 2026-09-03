@@ -16,6 +16,13 @@ public sealed class Workflow : Entity
     public List<WorkflowStep> Steps { get; set; } = [];
     /// <summary>Default project for every step that does not name its own.</summary>
     public string? ProjectId { get; set; }
+
+    /// <summary>
+    /// Runs every step on another machine, overriding what each step's agent is set to. Null follows
+    /// the agents. Set on the workflow rather than per step because steps hand their working
+    /// directory to the next one, and a directory does not cross machines.
+    /// </summary>
+    public string? RemoteInstanceId { get; set; }
     public bool Enabled { get; set; } = true;
 
     /// <summary>

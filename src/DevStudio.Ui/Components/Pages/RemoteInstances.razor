@@ -1,0 +1,409 @@
+@page "/remote-instances"
+@using DevStudio.Application.Remoting
+@using DevStudio.Domain.Remoting
+@implements IDisposable
+@inject IEntityStore<RemoteInstance> InstanceStore
+@inject IRemoteInstancePairing Pairing
+@inject IRemoteAccessService Access
+
+<PageTitle>Remote instances · devStudio</PageTitle>
+
+<div class="card" style="margin-bottom:1.2rem">
+    <div class="section-tag">Two machines, one orchestrator</div>
+    <p class="small">
+        A remote instance is another devStudio you can run work on. Pick one from the
+        <strong>Runs on</strong> dropdown in a chat or on an agent and the CLI, its login, the checkout
+        and the workspace are all that machine's — while the conversation, its transcript and the
+        agent itself stay here, so there is still one place you look for your work.
+    </p>
+    <p class="small">
+        Pairing goes one way and has to be accepted at the other end. You ask, somebody at that
+        machine approves, and it hands back a key good for five years. Nothing is granted by knowing
+        an address.
+    </p>
+</div>
+
+<div class="card" style="margin-bottom:1.2rem">
+    <div class="card-head">
+        <h3>Requests to this machine</h3>
+        <span class="spacer"></span>
+        @if (_pending.Count > 0)
+        {
+            <span class="pill pill-amber"><span class="dot"></span>@_pending.Count waiting</span>
+        }
+    </div>
+
+    @if (_grants.Count == 0)
+    {
+        <p class="mono-dim">Nothing has asked to run work here.</p>
+    }
+    else
+    {
+        <div class="list">
+            @foreach (var grant in _grants)
+            {
+                <div class="list-row">
+                    <div>
+                        <strong>@grant.InstanceName</strong>
+                        <span class="mono-dim"> @grant.MachineName · @grant.RemoteAddress</span>
+                        <div class="mono-dim">
+                            @GrantSummary(grant)
+                        </div>
+                    </div>
+                    <span class="spacer"></span>
+
+                    @if (grant.Status == RemoteGrantStatus.Pending && !grant.IsExpiredRequest)
+                    {
+                        @* The code is the whole point of the screen: it is what tells you this is the
+                           request you just made and not one that arrived at the same moment. *@
+                        <span class="pill pill-amber">code @grant.VerificationCode</span>
+                        <div class="btn-row">
+                            <button class="btn btn-sm btn-primary" @onclick="() => ApproveAsync(grant)">Approve</button>
+                            <button class="btn btn-sm btn-danger" @onclick="() => DenyAsync(grant)">Deny</button>
+                        </div>
+                    }
+                    else if (grant.Status == RemoteGrantStatus.Approved)
+                    {
+                        <span class="pill pill-lime"><span class="dot"></span>approved</span>
+                        <button class="btn btn-sm btn-danger" @onclick="() => RevokeAsync(grant)">Revoke</button>
+                    }
+                    else
+                    {
+                        <span class="pill pill-red"><span class="dot"></span>@grant.Status.ToString().ToLowerInvariant()</span>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<div class="btn-row" style="margin-bottom:1rem">
+    <button class="btn btn-primary" @onclick="New">Add an instance</button>
+    <span class="mono-dim">Instances this machine can send work to.</span>
+</div>
+
+@if (_instances.Count == 0)
+{
+    <div class="empty">
+        <div class="big">⇄</div>
+        No remote instances yet. Add one with the address of another devStudio on your network.
+    </div>
+}
+else
+{
+    <div class="grid grid-auto">
+        @foreach (var instance in _instances)
+        {
+            <div class="card">
+                <div class="card-head">
+                    <h3>@instance.Name</h3>
+                    <span class="spacer"></span>
+                    <span class="pill @StateClass(instance)"><span class="dot"></span>@StateLabel(instance)</span>
+                </div>
+
+                <p class="small">@(string.IsNullOrWhiteSpace(instance.Description) ? "No description." : instance.Description)</p>
+                <div class="mono-dim">@instance.BaseUrl</div>
+
+                @if (instance.HostName is { Length: > 0 })
+                {
+                    <div class="mono-dim">@instance.HostName @(instance.HostVersion is { Length: > 0 } v ? $"· v{v}" : "")</div>
+                }
+
+                @if (instance.State == RemoteInstanceState.AwaitingApproval)
+                {
+                    <div class="setting-callout warn">
+                        Waiting for approval on @instance.Name. Open its Remote instances page and
+                        approve the request showing code <strong>@instance.VerificationCode</strong>.
+                    </div>
+                }
+
+                @if (instance.LastError is { Length: > 0 } error)
+                {
+                    <div class="mono-dim" style="color:var(--red)">@error</div>
+                }
+
+                @if (instance.LastConnectedAt is { } seen)
+                {
+                    <div class="mono-dim">last reached <Ago Value="seen" /></div>
+                }
+
+                <div class="btn-row">
+                    @if (instance.State == RemoteInstanceState.AwaitingApproval)
+                    {
+                        <button class="btn btn-sm btn-primary" @onclick="() => PollAsync(instance)">Check for approval</button>
+                    }
+                    else if (string.IsNullOrWhiteSpace(instance.AccessToken))
+                    {
+                        <button class="btn btn-sm btn-primary" @onclick="() => RequestAsync(instance)">Request access</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-sm" @onclick="() => TestAsync(instance)">Test connection</button>
+                    }
+
+                    <button class="btn btn-sm btn-ghost" @onclick="() => Edit(instance)">Edit</button>
+
+                    @if (!string.IsNullOrWhiteSpace(instance.AccessToken))
+                    {
+                        <button class="btn btn-sm btn-ghost" @onclick="() => ForgetAsync(instance)">Forget key</button>
+                    }
+
+                    <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(instance)">Delete</button>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (_editing is not null)
+{
+    <div class="modal-backdrop">
+        <div class="modal">
+            <h2>@(_isNew ? "Add an instance" : "Edit instance")</h2>
+
+            <div class="form-grid">
+                <div class="field">
+                    <label>Name</label>
+                    <input @bind="_editing.Name" />
+                    <span class="hint">What you will see in the "Runs on" dropdown.</span>
+                </div>
+
+                <div class="field">
+                    <label>Address</label>
+                    <input @bind="_editing.BaseUrl" placeholder="http://desk.lan:7080" />
+                    <span class="hint">Where that devStudio is reachable from this machine.</span>
+                </div>
+
+                <div class="field">
+                    <label>Description</label>
+                    <input @bind="_editing.Description" />
+                    <span class="hint">Optional. What is on that machine that is not on this one.</span>
+                </div>
+
+                <div class="field">
+                    <label class="check">
+                        <input type="checkbox" @bind="_editing.Enabled" />
+                        <span>Enabled</span>
+                    </label>
+                    <span class="hint">Off keeps it configured but offers it nowhere.</span>
+                </div>
+            </div>
+
+            <div class="btn-row">
+                <button class="btn btn-primary" @onclick="SaveAsync">Save</button>
+                <button class="btn btn-ghost" @onclick="() => _editing = null">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private IReadOnlyList<RemoteInstance> _instances = [];
+    private IReadOnlyList<RemoteAccessGrant> _grants = [];
+    private RemoteInstance? _editing;
+    private bool _isNew;
+
+    private List<RemoteAccessGrant> _pending =>
+        _grants.Where(g => g.Status == RemoteGrantStatus.Pending && !g.IsExpiredRequest).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+
+        // A request arriving while this page is open should appear without a refresh — the whole
+        // flow is "ask on one machine, walk to the other", and the walk is short.
+        InstanceStore.Changed += OnChanged;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader("Remote instances", "Other machines this one can run work on");
+    }
+
+    public void Dispose() => InstanceStore.Changed -= OnChanged;
+
+    private void OnChanged(RemoteInstance _) => InvokeAsync(async () =>
+    {
+        await ReloadAsync();
+        StateHasChanged();
+    });
+
+    private async Task ReloadAsync()
+    {
+        _instances = (await InstanceStore.GetAllAsync())
+            .OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        _grants = await Access.GetAllAsync();
+    }
+
+    private void New()
+    {
+        _isNew = true;
+        _editing = new RemoteInstance();
+    }
+
+    private void Edit(RemoteInstance instance)
+    {
+        _isNew = false;
+
+        // Cloned so Cancel costs nothing. Same reason the other CRUD pages do it.
+        _editing = new RemoteInstance
+        {
+            Id = instance.Id,
+            CreatedAt = instance.CreatedAt,
+            Name = instance.Name,
+            BaseUrl = instance.BaseUrl,
+            Description = instance.Description,
+            Enabled = instance.Enabled,
+            State = instance.State,
+            AccessToken = instance.AccessToken,
+            TokenExpiresAt = instance.TokenExpiresAt,
+            PairingRequestId = instance.PairingRequestId,
+            VerificationCode = instance.VerificationCode,
+            HostName = instance.HostName,
+            HostVersion = instance.HostVersion,
+            LastConnectedAt = instance.LastConnectedAt,
+            LastError = instance.LastError,
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_editing is null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(_editing.Name))
+        {
+            Layout.Notify("An instance needs a name.", "err");
+            return;
+        }
+
+        if (!Uri.TryCreate(_editing.BaseUrl, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            Layout.Notify("The address must be a full http or https URL.", "err");
+            return;
+        }
+
+        await InstanceStore.UpsertAsync(_editing);
+        _editing = null;
+
+        await ReloadAsync();
+        Layout.Notify("Instance saved.", "ok");
+    }
+
+    private async Task DeleteAsync(RemoteInstance instance)
+    {
+        await InstanceStore.DeleteAsync(instance.Id);
+        await ReloadAsync();
+        Layout.Notify($"{instance.Name} removed.", "ok");
+    }
+
+    /// <summary>
+    /// Every one of these talks to another machine, so each is wrapped: an unhandled exception in a
+    /// click handler takes the circuit down and the operator loses the page.
+    /// </summary>
+    private async Task RunAsync(Func<Task<RemoteInstance>> action, string okMessage)
+    {
+        try
+        {
+            var result = await action();
+            await ReloadAsync();
+
+            if (result.LastError is { Length: > 0 } error)
+                Layout.Notify(error, "err");
+            else
+                Layout.Notify(okMessage, "ok");
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify(ex.Message, "err");
+        }
+    }
+
+    private Task RequestAsync(RemoteInstance instance) =>
+        RunAsync(() => Pairing.RequestAccessAsync(instance.Id), "Access requested. Approve it on the other machine.");
+
+    private Task PollAsync(RemoteInstance instance) =>
+        RunAsync(() => Pairing.PollAsync(instance.Id), "Checked.");
+
+    private Task TestAsync(RemoteInstance instance) =>
+        RunAsync(() => Pairing.TestAsync(instance.Id), "Reachable.");
+
+    private Task ForgetAsync(RemoteInstance instance) =>
+        RunAsync(() => Pairing.ForgetAsync(instance.Id), "Key forgotten. Request access again to reconnect.");
+
+    private async Task ApproveAsync(RemoteAccessGrant grant)
+    {
+        try
+        {
+            await Access.ApproveAsync(grant.Id);
+            await ReloadAsync();
+            Layout.Notify($"{grant.InstanceName} can now run work on this machine.", "ok");
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify(ex.Message, "err");
+        }
+    }
+
+    private async Task DenyAsync(RemoteAccessGrant grant)
+    {
+        try
+        {
+            await Access.DenyAsync(grant.Id);
+            await ReloadAsync();
+            Layout.Notify("Request denied.", "ok");
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify(ex.Message, "err");
+        }
+    }
+
+    private async Task RevokeAsync(RemoteAccessGrant grant)
+    {
+        try
+        {
+            await Access.RevokeAsync(grant.Id);
+            await ReloadAsync();
+            Layout.Notify($"{grant.InstanceName} can no longer run work here.", "ok");
+        }
+        catch (Exception ex)
+        {
+            Layout.Notify(ex.Message, "err");
+        }
+    }
+
+    private static string GrantSummary(RemoteAccessGrant grant) => grant.Status switch
+    {
+        RemoteGrantStatus.Pending when grant.IsExpiredRequest => "request expired without a decision",
+        RemoteGrantStatus.Pending => "waiting for a decision",
+        RemoteGrantStatus.Approved when grant.LastSeenAt is { } seen => $"last used {seen.LocalDateTime:d MMM HH:mm}",
+        RemoteGrantStatus.Approved => "approved, not used yet",
+        RemoteGrantStatus.Denied => "denied",
+        _ => "revoked",
+    };
+
+    private static string StateClass(RemoteInstance instance) => instance.State switch
+    {
+        RemoteInstanceState.Connected => "pill-lime",
+        RemoteInstanceState.AwaitingApproval => "pill-amber",
+        RemoteInstanceState.Denied => "pill-red",
+        RemoteInstanceState.Disconnected => "pill-amber",
+        _ => "pill-cyan",
+    };
+
+    private static string StateLabel(RemoteInstance instance) => instance.State switch
+    {
+        RemoteInstanceState.Connected => "paired",
+        RemoteInstanceState.AwaitingApproval => "awaiting approval",
+        RemoteInstanceState.Denied => "refused",
+        RemoteInstanceState.Disconnected => "unreachable",
+        _ => "not paired",
+    };
+}

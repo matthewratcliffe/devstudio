@@ -6,6 +6,7 @@ using DevStudio.Application.Common;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Globals;
 using DevStudio.Domain.Projects;
+using DevStudio.Application.Remoting;
 using DevStudio.Domain.Providers;
 using DevStudio.Domain.Sessions;
 using Microsoft.Extensions.Logging;
@@ -26,6 +27,14 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         public required CancellationTokenSource Cancellation { get; init; }
         public required SessionWorkspace Workspace { get; init; }
         public required Agent Agent { get; init; }
+
+        /// <summary>
+        /// The machine this conversation's turns run on. Resolved once when the session goes live
+        /// and held for its lifetime: a session that started on the desk machine keeps running there
+        /// even if the agent is repointed mid-conversation, because its workspace and the CLI's own
+        /// conversation id are both over there and neither can follow it anywhere.
+        /// </summary>
+        public required IExecutionHost Host { get; init; }
         public Task Pump { get; set; } = Task.CompletedTask;
         public TaskCompletionSource Idle { get; set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int QueuedTurns;
@@ -49,9 +58,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
     private readonly ConcurrentDictionary<string, byte> _deleting = new();
     private readonly IEntityStore<ChatSession> _sessions;
     private readonly IEntityStore<Agent> _agents;
-    private readonly IProviderCliRegistry _clis;
-    private readonly IWorkspaceService _workspaces;
-    private readonly IAccountService _accounts;
+    private readonly IExecutionHostResolver _hosts;
     private readonly IEntityStore<Project> _projects;
     private readonly IEntityStore<GlobalSettings> _globalSettings;
     private readonly OrchestratorOptions _options;
@@ -61,9 +68,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
     public SessionManager(
         IEntityStore<ChatSession> sessions,
         IEntityStore<Agent> agents,
-        IProviderCliRegistry clis,
-        IWorkspaceService workspaces,
-        IAccountService accounts,
+        IExecutionHostResolver hosts,
         IEntityStore<Project> projects,
         IEntityStore<GlobalSettings> globalSettings,
         IOptions<OrchestratorOptions> options,
@@ -71,9 +76,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
     {
         _sessions = sessions;
         _agents = agents;
-        _clis = clis;
-        _workspaces = workspaces;
-        _accounts = accounts;
+        _hosts = hosts;
         _projects = projects;
         _globalSettings = globalSettings;
         _options = options.Value;
@@ -128,20 +131,28 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         // the very turn it was chosen for.
         request.Model?.ApplyTo(session);
 
+        // Where this runs, settled before anything is provisioned: the workspace, the login and the
+        // CLI all have to come from the same machine, and resolving it here is what guarantees they
+        // do. The request wins over the agent so one agent can be sent to a different machine for a
+        // single run without being edited.
+        var host = await _hosts.ResolveAsync(request.RemoteInstanceId ?? agent.RemoteInstanceId, ct);
+        session.RemoteInstanceId = host.RemoteInstanceId;
+        session.RemoteInstanceName = host.RemoteInstanceId is null ? null : host.DisplayName;
+
         SessionWorkspace workspace;
         if (!string.IsNullOrWhiteSpace(request.WorkingDirectoryOverride))
         {
             // A workflow step reusing the previous step's directory still needs its own skills and MCP config.
             workspace = new SessionWorkspace(request.WorkingDirectoryOverride!, agent.RepositoryId, null, session.ProjectId);
-            await _workspaces.MaterialiseSkillsAsync(agent, workspace.Path, ct);
-            await _workspaces.MaterialiseMcpAsync(agent, workspace.Path, session.McpServerIds, ct);
+            await host.Workspaces.MaterialiseSkillsAsync(agent, workspace.Path, ct);
+            await host.Workspaces.MaterialiseMcpAsync(agent, workspace.Path, session.McpServerIds, ct);
         }
         else
         {
-            workspace = await _workspaces.PrepareAsync(agent, session.Id, session.ProjectId, session.McpServerIds, ct);
+            workspace = await host.Workspaces.PrepareAsync(agent, session.Id, session.ProjectId, session.McpServerIds, ct);
         }
 
-        var account = await _accounts.ResolveAsync(agent, session.ProjectId, ct);
+        var account = await host.Accounts.ResolveAsync(agent, session.ProjectId, ct);
         session.AccountId = account.AccountId;
         session.AccountName = account.Name;
 
@@ -157,6 +168,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             Cancellation = new CancellationTokenSource(),
             Workspace = workspace,
             Agent = agent,
+            Host = host,
         };
         _live[session.Id] = live;
 
@@ -348,10 +360,13 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         session.Guidance = Published(session, session.Guidance, list => list.Add(message));
         AppendMessage(session, MessageRole.Guidance, message.Text);
 
-        // Route one: on disk, readable by any agent without an MCP server configured.
+        // Route one: on disk, readable by any agent without an MCP server configured. On whichever
+        // disk the session is running on — a steer written here for a session running elsewhere
+        // would sit in a directory the agent never looks at.
         try
         {
-            await _workspaces.WriteGuidanceAsync(session.WorkingDirectory, session.Guidance, ct);
+            var host = await HostForAsync(session, ct);
+            await host.Workspaces.WriteGuidanceAsync(session.WorkingDirectory, session.Guidance, ct);
         }
         catch (Exception ex)
         {
@@ -693,6 +708,16 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The host a session belongs to, whether or not it is live. Live sessions answer from the host
+    /// they were started with rather than resolving again, so nothing they do mid-conversation can
+    /// end up on a different machine from the turn that is running.
+    /// </summary>
+    private async Task<IExecutionHost> HostForAsync(ChatSession session, CancellationToken ct) =>
+        _live.TryGetValue(session.Id, out var live)
+            ? live.Host
+            : await _hosts.ResolveAsync(session.RemoteInstanceId, ct);
+
     /// <summary>Hands the worktree back once the session is finished with it.</summary>
     private async Task ReleaseWorkspaceAsync(LiveSession live)
     {
@@ -701,7 +726,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
 
         try
         {
-            await _workspaces.ReleaseAsync(live.Workspace, CancellationToken.None);
+            await live.Host.Workspaces.ReleaseAsync(live.Workspace, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -770,14 +795,14 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         try
         {
             // Rewritten every turn so servers added mid-conversation are picked up.
-            var mcpServerNames = await _workspaces.MaterialiseMcpAsync(
+            var mcpServerNames = await live.Host.Workspaces.MaterialiseMcpAsync(
                 agent, session.WorkingDirectory, session.McpServerIds, turnCts.Token);
 
-            var cli = await _clis.ResolveAsync(agent.Provider, agent.CliProviderId, turnCts.Token);
+            var cli = await live.Host.Clis.ResolveAsync(agent.Provider, agent.CliProviderId, turnCts.Token);
             session.CliProviderName = agent.Provider == AiProvider.Custom ? cli.DisplayName : null;
             // Composed per turn, so token tactics switched on or off mid-conversation are in force
             // from the next message without anything being restarted.
-            var systemPrompt = await _workspaces.ComposeSystemPromptAsync(
+            var systemPrompt = await live.Host.Workspaces.ComposeSystemPromptAsync(
                 agent, session.ProjectId, session.Id, TokenMinimisation.For(agent, session),
                 HandoverTarget(agent, session, choice), turnCts.Token);
 
@@ -785,7 +810,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
                 systemPrompt = $"{systemPrompt}\n\n{LlmPromptingTipInstruction}";
 
             // Re-resolved each turn so moving a project onto another account takes effect straight away.
-            var account = await _accounts.ResolveAsync(agent, session.ProjectId, turnCts.Token);
+            var account = await live.Host.Accounts.ResolveAsync(agent, session.ProjectId, turnCts.Token);
             session.AccountId = account.AccountId;
             session.AccountName = account.Name;
             var request = new TurnRequest
@@ -1036,10 +1061,10 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(live.Cancellation.Token);
             cts.CancelAfter(TimeSpan.FromMinutes(Math.Max(1, _options.TurnTimeoutMinutes)));
 
-            var account = await _accounts.ResolveAsync(live.Agent, session.ProjectId, cts.Token);
+            var account = await live.Host.Accounts.ResolveAsync(live.Agent, session.ProjectId, cts.Token);
             var goal = new System.Text.StringBuilder();
 
-            var cli = await _clis.ResolveAsync(live.Agent.Provider, live.Agent.CliProviderId, cts.Token);
+            var cli = await live.Host.Clis.ResolveAsync(live.Agent.Provider, live.Agent.CliProviderId, cts.Token);
             var choice = ModelSchedule.For(live.Agent, session);
 
             await foreach (var evt in cli.RunTurnAsync(new TurnRequest
@@ -1133,10 +1158,10 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(live.Cancellation.Token);
             cts.CancelAfter(TimeSpan.FromMinutes(Math.Max(1, _options.TurnTimeoutMinutes)));
 
-            var account = await _accounts.ResolveAsync(live.Agent, session.ProjectId, cts.Token);
+            var account = await live.Host.Accounts.ResolveAsync(live.Agent, session.ProjectId, cts.Token);
             var summary = new System.Text.StringBuilder();
 
-            var summariser = await _clis.ResolveAsync(live.Agent.Provider, live.Agent.CliProviderId, cts.Token);
+            var summariser = await live.Host.Clis.ResolveAsync(live.Agent.Provider, live.Agent.CliProviderId, cts.Token);
 
             // Whatever the conversation is running on now, which after a handover is the cheaper
             // model — right for a summary.
@@ -1220,9 +1245,21 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
 
         agent = await ApplyProjectProviderAsync(agent, session.ProjectId, ct);
 
-        if (string.IsNullOrWhiteSpace(session.WorkingDirectory) || !Directory.Exists(session.WorkingDirectory))
+        // Back to wherever it was running. Not to wherever the agent points now: the CLI's own
+        // conversation id, which is what makes this a continuation rather than a new chat, lives on
+        // that machine and means nothing on any other.
+        var host = await _hosts.ResolveAsync(session.RemoteInstanceId, ct);
+
+        // A remote session's directory is on the far side, so asking this filesystem about it would
+        // answer "gone" every time and re-provision a workspace that is sitting there intact. Only a
+        // directory that was never recorded is rebuilt, and the far side decides the rest.
+        var missing = session.RemoteInstanceId is null
+            ? string.IsNullOrWhiteSpace(session.WorkingDirectory) || !Directory.Exists(session.WorkingDirectory)
+            : string.IsNullOrWhiteSpace(session.WorkingDirectory);
+
+        if (missing)
         {
-            var prepared = await _workspaces.PrepareAsync(agent, session.Id, session.ProjectId, ct);
+            var prepared = await host.Workspaces.PrepareAsync(agent, session.Id, session.ProjectId, ct);
             session.WorkingDirectory = prepared.Path;
         }
 
@@ -1233,6 +1270,7 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
             Cancellation = new CancellationTokenSource(),
             Workspace = new SessionWorkspace(session.WorkingDirectory, session.RepositoryId, null, session.ProjectId),
             Agent = agent,
+            Host = host,
         };
 
         var live = _live.GetOrAdd(sessionId, candidate);

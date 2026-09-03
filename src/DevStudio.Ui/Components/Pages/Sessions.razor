@@ -80,7 +80,11 @@ else
                                @onchange="e => ToggleSelected(session.Id, e)" />
                     </td>
                     <td style="cursor:pointer" @onclick="() => Open(session)">@session.Title</td>
-                    <td class="mono-dim">@session.AgentName · @session.Provider</td>
+                    @* The instance is named only when there is one, so a list of ordinary local
+                       sessions is not padded with the same word on every row. *@
+                    <td class="mono-dim">
+                        @session.AgentName · @session.Provider@(session.RemoteInstanceName is { Length: > 0 } instance ? $" · on {instance}" : "")
+                    </td>
                     <td class="mono-dim">@ProjectName(session.ProjectId)</td>
                     <td><StatusPill Session="session.Status" /></td>
                     <td class="mono-dim">@session.Trigger</td>

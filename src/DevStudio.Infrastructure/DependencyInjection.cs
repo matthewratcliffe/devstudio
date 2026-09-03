@@ -1,6 +1,7 @@
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
 using DevStudio.Application.Globals;
+using DevStudio.Application.Remoting;
 using DevStudio.Application.Sessions;
 using DevStudio.Application.Teams;
 using DevStudio.Domain.Agents;
@@ -23,6 +24,7 @@ using DevStudio.Infrastructure.Providers;
 using DevStudio.Infrastructure.Providers.Acp;
 using DevStudio.Infrastructure.Providers.OpenAi;
 using DevStudio.Infrastructure.Queues;
+using DevStudio.Infrastructure.Remoting;
 using DevStudio.Infrastructure.Scheduling;
 using DevStudio.Infrastructure.Skills;
 using DevStudio.Infrastructure.Seed;
@@ -146,6 +148,16 @@ public static class DependencyInjection
 
         // Keeps the sessions list to current work. Resolvable on its own so the UI can sweep on
         // demand as well.
+        // Remoting. The local host is registered as the implementation of IExecutionHost so that
+        // everything which does not care where it runs keeps resolving exactly what it always did;
+        // the resolver is the only thing that ever hands back anything else.
+        services.AddSingleton<IExecutionHost, LocalExecutionHost>();
+        services.AddSingleton<IRemoteConnectionPool, RemoteConnectionPool>();
+        services.AddSingleton<IExecutionHostResolver, ExecutionHostResolver>();
+        services.AddSingleton<IRemoteTokenIssuer, RemoteTokenIssuer>();
+        services.AddSingleton<IRemoteAccessService, RemoteAccessService>();
+        services.AddSingleton<IRemoteInstancePairing, RemoteInstancePairing>();
+
         services.AddSingleton<ISessionArchiver, SessionArchiver>();
         services.AddSingleton<ISessionIdleCloser, SessionIdleCloser>();
         services.AddHostedService<SessionSweepHostedService>();

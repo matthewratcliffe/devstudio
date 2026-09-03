@@ -35,6 +35,7 @@ only credential involved is the login you complete in the web UI.
 | **Output files** | Everything an agent writes in its workspace is listed in the chat, with images previewed inline and every file downloadable. |
 | **Skills** | Reusable instruction files, written to `.claude/skills/<slug>/SKILL.md` (and mirrored to `AGENTS.orchestrator.md` for Codex) before a session starts. |
 | **MCP — both directions** | Register MCP servers and attach them to agents (`.mcp.json` per workspace), **and** the orchestrator exposes its own MCP server at `/mcp` so agents can list sessions, read another agent's transcript, steer a run, leave notes, start sessions and run workflows. HTTP servers can authenticate with an OAuth client-credentials grant, refreshed automatically, or a pasted bearer token. **Test** connects like a CLI would and lists the tools the server actually offers. Servers attach to agents, and a chat — including a quick chat — can carry extra servers of its own, applied from its next turn. The built-in orchestrator entry cannot be deleted and is restored on start if it goes missing. Its own endpoints require a token this app generates and attaches to every session by itself, so nothing else that reaches the port can steer your agents. |
+| **Remote instances** | Run work on another machine's devStudio. Pair the two once — you ask, somebody at the other end approves, and a five-year key is issued — then pick it from the **Runs on** dropdown in a chat, on an agent, or on a schedule, queue or workflow. Every dependent dropdown follows: the CLIs, models, logins, checkouts, skills and MCP servers all come from that machine. The conversation, its transcript and the agent stay here ([how](#remote-instances)). |
 | **PWA** | Installable, with a themed offline page. |
 | **Version in the corner** | The build you are running sits under the sidebar, with a line beside it when a newer release exists. |
 | **Desktop app** | Installers for Windows, macOS and Linux that run the whole thing natively — no Docker, no volumes, direct access to your files ([how](#as-a-desktop-app-windows-macos-linux)). Updates download in the background and install when you quit. |
@@ -358,6 +359,10 @@ The key seam is `IProviderCli`. `ClaudeCli` runs `claude -p --output-format stre
 `CodexCli` runs `codex exec --json`; both translate CLI output into a common `AgentEvent` stream.
 `CustomCli` is the third implementation and it is data-driven: it builds its command from a stored
 `CliProvider` definition, so a new tool is a form to fill in rather than code to write.
+
+The second seam is `IExecutionHost` — which machine a session's work happens on. Everything on it is
+filesystem- or process-bound, which is exactly the set of things that stops being true when the work
+moves elsewhere ([remote instances](#remote-instances)).
 
 ### Adding a CLI
 
@@ -781,6 +786,73 @@ then choose per project which Claude and which Codex account its work runs under
 
 The seeded `Default` account for each provider points at the container home, so an existing login
 keeps working untouched.
+
+## Remote instances
+
+One devStudio can run work on another. The laptop drives; the desktop with the fast machine, the
+right checkouts and the logged-in CLIs does the work.
+
+What moves and what does not is the whole design. The **session**, its transcript, the agent, the
+project, the queue that dispatched it — all stay on the machine you are sitting at, so there is still
+one place you look for your conversations. What goes to the other machine is the part that is bound
+to a filesystem and a login: the CLI process, the account it runs as, the checkout, the workspace and
+the MCP servers wired into it.
+
+That is why choosing an instance reloads every other dropdown on the page. A repository id, a login,
+a skill and an MCP server all name something on one particular machine, and one of them pointing
+somewhere else would not fail until the agent's first turn.
+
+### Pairing
+
+Pairing is asked for on one side and granted on the other. Nothing is granted by knowing an address.
+
+1. On the machine that will **drive**, open **Remote instances → Add an instance** and give it a name
+   and the other machine's address (`http://desk.lan:7080`). Press **Request access**.
+2. A six-digit code appears. On the machine being **connected to**, its own Remote instances page now
+   shows the request — with the asking machine's name, the address it came from and that same code —
+   and a notification, so you find it without having to be looking at the page.
+3. Check the code matches and press **Approve**. A key is minted and the requester collects it on its
+   next poll.
+
+The key is a JWT valid for five years, signed with a secret generated on the granting machine's data
+volume. It is long on purpose: this pairs two machines the same person owns, and the thing that ends
+it is revocation, not the calendar — a key that expired monthly would only ever be re-approved on
+reflex. **Revoke** on the granting side takes effect on the far side's next call, because the grant
+is checked on every request rather than baked into the token.
+
+### Using one
+
+The **Runs on** dropdown appears wherever work starts, and only when something has been paired:
+
+- **New chat** — that conversation runs there. Its CLI, models and MCP servers are the remote's.
+- **Agents** — a lasting choice. Its repository, login, skills and MCP servers all come from that
+  machine, so those pickers reload when you change it.
+- **New session** — a one-off override, so an agent can be sent elsewhere without being edited.
+- **Schedules, queues and workflows** — an override for what they dispatch. Left alone they follow
+  each agent's own setting. A workflow sets it once for every step, because steps hand their working
+  directory to the next one and a directory does not cross machines.
+- **Terminal** — picking another machine turns the prompt into *that machine's shell*, with output
+  streaming back as it is printed. On this machine it stays the app's own command line, because the
+  devStudio over there is not the one holding your sessions.
+
+A conversation cannot be moved once it has started. The CLI on the far side is holding the
+conversation, and its id means nothing anywhere else.
+
+### Underneath
+
+The two ends talk over SignalR at `/hubs/remote`. A turn is a stream — the events a CLI produces
+arrive over a minute or several — so a hub method returning `IAsyncEnumerable<AgentEvent>` maps
+straight onto `IProviderCli.RunTurnAsync` and a remote transcript fills in as the work happens rather
+than arriving all at once at the end.
+
+The seam is `IExecutionHost`: the CLI registry, workspace service, account service, workspace files
+and terminal for one machine. `LocalExecutionHost` returns the services that were already registered,
+so the local path is unchanged and remoting is the special case. `RemoteExecutionHost` returns proxies
+that turn each call into a hub invocation, and the hub on the far side hands them to *its* ordinary
+services — the same ones its own UI uses. There is no separate "remote mode" to drift.
+
+Only two endpoints answer without a key, and both exist so pairing can happen at all: the request and
+its status. Everything else requires the key and a grant that is still approved.
 
 ## Summarisation
 

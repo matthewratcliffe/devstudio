@@ -3,6 +3,7 @@ using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
 using DevStudio.Infrastructure;
 using DevStudio.Ui.Components;
+using DevStudio.Application.Remoting;
 using DevStudio.Ui.Endpoints;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
@@ -25,6 +26,9 @@ builder.Services.AddRazorComponents()
     });
 
 builder.Services.AddApplication();
+
+// What the pickers on every page are built from, local or remote.
+builder.Services.AddSingleton<DevStudio.Ui.Services.ExecutionTargets>();
 builder.Services.AddInfrastructure(builder.Configuration);
 
 // Sign-in cookies are encrypted with data protection keys, which default to a folder inside the
@@ -55,6 +59,10 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.SlidingExpiration = true;
     });
 
+// A second scheme, for other installations rather than people. Added after the cookie so the cookie
+// stays the default and every page keeps authenticating exactly as it did.
+builder.Services.AddRemoteInstanceAuth();
+
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
 
@@ -65,7 +73,14 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
 }
 
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+// Friendly error pages are for browsers. Applied everywhere they would turn an empty 401 from the
+// remote endpoints into a redirect to the sign-in page, and another instance — which is checking for
+// exactly that 401 to notice its access was withdrawn — would follow it and get a page of HTML back
+// instead of an answer.
+app.UseWhen(
+    context => !context.Request.Path.StartsWithSegments(RemoteHubMethods.Path) &&
+               !context.Request.Path.StartsWithSegments("/remote"),
+    branch => branch.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
@@ -82,6 +97,12 @@ app.MapRazorComponents<App>()
 
 // Agents talk to the orchestrator over MCP.
 app.MapMcp();
+
+// Other installations pair with this one over plain HTTP, then drive it over the hub. The hub is
+// where a remote turn actually streams, which is what lets a conversation running on another machine
+// fill in a transcript here as it happens rather than all at once when it finishes.
+app.MapRemotePairing();
+app.MapHub<RemoteHostHub>(RemoteHubMethods.Path);
 
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok", time = DateTimeOffset.UtcNow }));
 
@@ -185,11 +206,17 @@ app.MapGet("/images/{fileName}", async (
 app.MapGet("/workspace/{sessionId}/{**path}", async (
     string sessionId,
     string path,
-    IWorkspaceFileService files,
+    IEntityStore<DevStudio.Domain.Sessions.ChatSession> sessions,
+    IExecutionHostResolver hosts,
     HttpContext context,
     CancellationToken ct) =>
 {
-    var file = await files.OpenAsync(sessionId, path, ct);
+    // Opened on whichever machine the session ran on. A remote session's output never touches this
+    // filesystem, so resolving the host is what makes the download link work at all.
+    var session = await sessions.GetAsync(sessionId, ct);
+    var host = await hosts.ResolveAsync(session?.RemoteInstanceId, ct);
+
+    var file = await host.Files.OpenAsync(sessionId, path, ct);
     if (file is null)
         return Results.NotFound();
 

@@ -33,9 +33,7 @@ public class ClosedSessionTests : IDisposable
         _sessions = new SessionManager(
             _store,
             _agents,
-            new StubRegistry(),
-            new StubWorkspace(_root),
-            new StubAccounts(_root),
+            new TestExecutionHost(new StubRegistry(), new StubWorkspace(_root), new StubAccounts(_root)),
             Store<Project>(options),
             Store<GlobalSettings>(options),
             options,
@@ -219,6 +217,27 @@ public class ClosedSessionTests : IDisposable
             IReadOnlyList<string>? extraServerIds,
             CancellationToken ct = default) =>
             PrepareAsync(agent, sessionId, projectId, ct);
+
+
+        public Task<WorkspacePlan> PlanAsync(
+
+            Agent agent,
+
+            string sessionId,
+
+            string? projectId,
+
+            IReadOnlyList<string>? extraServerIds,
+
+            CancellationToken ct = default) =>
+
+            Task.FromResult(new WorkspacePlan { Agent = agent, SessionId = sessionId, ProjectId = projectId });
+
+
+        public Task<SessionWorkspace> PrepareAsync(WorkspacePlan plan, CancellationToken ct = default) =>
+
+            PrepareAsync(plan.Agent, plan.SessionId, plan.ProjectId, ct);
+
 
         public Task ReleaseAsync(SessionWorkspace workspace, CancellationToken ct = default) => Task.CompletedTask;
         public Task MaterialiseSkillsAsync(Agent agent, string workspacePath, CancellationToken ct = default) => Task.CompletedTask;

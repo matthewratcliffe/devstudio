@@ -5,7 +5,7 @@
 @inject IGitService Git
 @inject IEntityStore<McpServer> McpStore
 @inject IEntityStore<GitRepository> RepositoryStore
-@inject IWorkspaceFileService WorkspaceFiles
+@inject IExecutionHostResolver Hosts
 @inject IEntityStore<Agent> AgentStore
 @inject IEntityStore<GlobalSettings> GlobalSettingsStore
 @inject IEntityStore<CliProvider> CliProviderStore
@@ -280,6 +280,19 @@ else
             <summary class="section-tag">Session</summary>
             <dl class="kv">
                 <dt>Agent</dt><dd>@_session.AgentName</dd>
+                @if (_session.RemoteInstanceName is { Length: > 0 } instance)
+                {
+                    @* Only when it is somewhere else. Saying "this machine" on every local session
+                       would be a row that never carries information. *@
+                    <dt>Runs on</dt>
+                    <dd>
+                        <span class="pill pill-cyan"><span class="dot"></span>@instance</span>
+                        <span class="hint">
+                            The CLI, the workspace and the files below are on that machine. This
+                            conversation cannot be moved — the CLI is holding it over there.
+                        </span>
+                    </dd>
+                }
                 <dt>Provider</dt>
                 <dd>
                     @if (_agent?.IsQuickChat == true)
@@ -1160,7 +1173,19 @@ else
         if (_session is null)
             return;
 
-        _files = await WorkspaceFiles.ListAsync(_session.Id);
+        try
+        {
+            // Read from the machine the session ran on. Its workspace is over there, and asking this
+            // filesystem would report an empty directory for a session full of work.
+            var host = await Hosts.ResolveAsync(_session.RemoteInstanceId);
+            _files = await host.Files.ListAsync(_session.Id);
+        }
+        catch (Exception ex)
+        {
+            // The panel is a convenience, and the chat itself still works when the far side is off.
+            _files = [];
+            Layout.Notify($"Could not list the workspace: {ex.Message}", "err");
+        }
     }
 
     private string DownloadUrl(WorkspaceFile file, bool inline) =>
