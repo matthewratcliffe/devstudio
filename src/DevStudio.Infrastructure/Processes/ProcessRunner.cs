@@ -169,9 +169,15 @@ public sealed class ProcessRunner : IProcessRunner
         if (!OperatingSystem.IsWindows() || Path.IsPathFullyQualified(fileName) || fileName.Contains(Path.DirectorySeparatorChar))
             return (fileName, IsWindowsScript(fileName));
 
-        var extensions = (Environment.GetEnvironmentVariable("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD")
-            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Prepend(string.Empty);
+        // The bare name comes last, never first: npm writes both a POSIX shim ("claude", a shell
+        // script CreateProcess cannot launch) and a Windows one ("claude.cmd") into the same
+        // directory, and picking the extensionless file fails with "not a valid application for
+        // this OS platform". An explicit extension is used exactly as given.
+        var extensions = Path.HasExtension(fileName)
+            ? [string.Empty]
+            : (Environment.GetEnvironmentVariable("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD")
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Append(string.Empty);
         var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
 
         foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
