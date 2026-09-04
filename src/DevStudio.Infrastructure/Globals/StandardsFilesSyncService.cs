@@ -1,6 +1,7 @@
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Globals;
 using DevStudio.Application.Repositories;
+using DevStudio.Domain.Common;
 using DevStudio.Domain.Globals;
 using DevStudio.Domain.Repositories;
 using Microsoft.Extensions.Logging;
@@ -50,17 +51,24 @@ public sealed class StandardsFilesSyncService : IStandardsFilesSyncService
             if (settings.FilesPullBeforeSync)
                 await PullAsync(settings, log, ct);
 
-            var (imported, removed) = await ImportAsync(settings, folder, log, ct);
+            var (imported, removed, unchanged) = await ImportAsync(settings, folder, log, ct);
 
             settings.FilesLastSyncedAt = DateTimeOffset.UtcNow;
             settings.FilesLastError = null;
             settings.FilesLastLog = log;
             await _globals.UpsertAsync(settings, ct);
 
-            var message = imported == 0 && removed == 0
-                ? "Nothing to import — the folder holds no files."
-                : $"Imported {imported} file{(imported == 1 ? "" : "s")}" +
-                  $"{(removed > 0 ? $", removed {removed}" : string.Empty)}.";
+            // "Nothing to import" used to cover both an empty folder and a folder that had simply not
+            // changed, which are worth telling apart — the second is the normal state and should not
+            // read as though the standards had gone missing.
+            var message = (imported, removed, unchanged) switch
+            {
+                (0, 0, 0) => "Nothing to import — the folder holds no files.",
+                (0, 0, _) => $"Up to date — {unchanged} file{(unchanged == 1 ? "" : "s")}, nothing changed.",
+                _ => $"Imported {imported} file{(imported == 1 ? "" : "s")}" +
+                     $"{(removed > 0 ? $", removed {removed}" : string.Empty)}" +
+                     $"{(unchanged > 0 ? $", {unchanged} unchanged" : string.Empty)}.",
+            };
 
             log.Add(message);
             return new StandardsSyncResult(true, message, log, imported, removed);
@@ -129,7 +137,7 @@ public sealed class StandardsFilesSyncService : IStandardsFilesSyncService
         }
     }
 
-    private async Task<(int Imported, int Removed)> ImportAsync(
+    private async Task<(int Imported, int Removed, int Unchanged)> ImportAsync(
         GlobalSettings settings,
         string folder,
         List<string> log,
@@ -137,6 +145,10 @@ public sealed class StandardsFilesSyncService : IStandardsFilesSyncService
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var imported = 0;
+        var unchanged = 0;
+
+        var library = _files.GetFilesPath(FileScope.Global);
+        var manifest = (await _globals.GetAsync(GlobalSettings.WellKnownId, ct) ?? settings).Files;
 
         foreach (var file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
                      .Where(f => !IsUnderGitFolder(folder, f))
@@ -145,6 +157,18 @@ public sealed class StandardsFilesSyncService : IStandardsFilesSyncService
             var relative = Path.GetRelativePath(folder, file).Replace(Path.DirectorySeparatorChar, '/');
             var flattenedName = relative.Replace("/", "__");
             var contentType = ContentTypeOf(relative);
+
+            // This runs on a timer and again before every session starts, so rewriting all of them
+            // each time was rewriting files nobody had changed. Every rewrite briefly swaps the
+            // published file, and a session provisioning its workspace at that moment copies a
+            // directory mid-change — so the churn was not merely wasteful, it was the thing making
+            // the swap something a session could land in.
+            if (IsAlreadyPublished(manifest, flattenedName, relative, Path.Combine(library, flattenedName), file))
+            {
+                seen.Add(relative);
+                unchanged++;
+                continue;
+            }
 
             await using (var stream = File.OpenRead(file))
                 await _files.SaveAsync(FileScope.Global, flattenedName, stream, contentType, relative, ct);
@@ -155,6 +179,9 @@ public sealed class StandardsFilesSyncService : IStandardsFilesSyncService
 
         if (imported > 0)
             log.Add($"{imported} file{(imported == 1 ? "" : "s")}.");
+
+        if (unchanged > 0)
+            log.Add($"{unchanged} already up to date.");
 
         var removed = 0;
         var current = await _globals.GetAsync(GlobalSettings.WellKnownId, ct) ?? settings;
@@ -168,7 +195,44 @@ public sealed class StandardsFilesSyncService : IStandardsFilesSyncService
             removed++;
         }
 
-        return (imported, removed);
+        return (imported, removed, unchanged);
+    }
+
+    /// <summary>
+    /// Whether the library already holds exactly this file, from exactly this source path. Both
+    /// halves matter: identical bytes on disk are not enough if nothing lists the file, because the
+    /// listing is what the UI shows and what an orphan sweep works from.
+    /// </summary>
+    private static bool IsAlreadyPublished(
+        IReadOnlyList<StoredFile> manifest,
+        string flattenedName,
+        string relative,
+        string publishedPath,
+        string sourcePath)
+    {
+        var listed = manifest.Any(f =>
+            string.Equals(f.FileName, flattenedName, StringComparison.OrdinalIgnoreCase) &&
+            f.TeamSourcePath == relative);
+
+        if (!listed || !File.Exists(publishedPath))
+            return false;
+
+        try
+        {
+            var published = new FileInfo(publishedPath);
+            var source = new FileInfo(sourcePath);
+
+            // Length first, which settles almost every case without reading anything. Content rather
+            // than timestamps because a fresh clone or a checkout rewrites mtimes without the bytes
+            // having changed at all.
+            return published.Length == source.Length &&
+                   File.ReadAllBytes(publishedPath).AsSpan().SequenceEqual(File.ReadAllBytes(sourcePath));
+        }
+        catch
+        {
+            // Unreadable for any reason: fall through and republish, which is the safe direction.
+            return false;
+        }
     }
 
     private static bool IsUnderGitFolder(string root, string file)
