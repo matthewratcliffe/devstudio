@@ -15,9 +15,17 @@ public sealed record StartSessionRequest
 
     /// <summary>
     /// Runs this conversation on another machine, overriding the agent's own choice. Null follows
-    /// the agent, which is what everything that does not care about remoting passes.
+    /// the agent, which is what everything that does not care about remoting passes — unless
+    /// <see cref="RemoteInstanceChosen"/> says the null was picked rather than left unset.
     /// </summary>
     public string? RemoteInstanceId { get; init; }
+
+    /// <summary>
+    /// Set by a caller that put the choice in front of an operator, so a null
+    /// <see cref="RemoteInstanceId"/> means "this machine" and not "whatever the agent says".
+    /// A dropdown reading This machine has to run here, or it is lying to the person who read it.
+    /// </summary>
+    public bool RemoteInstanceChosen { get; init; }
 
     /// <summary>Extra MCP servers for this conversation, beyond the agent's own.</summary>
     public IReadOnlyList<string> McpServerIds { get; init; } = [];

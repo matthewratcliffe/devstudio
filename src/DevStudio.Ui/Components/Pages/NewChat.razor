@@ -40,7 +40,7 @@ else
         </div>
 
         <RemoteInstancePicker Value="_remoteInstanceId" ValueChanged="v => _remoteInstanceId = v"
-                              Hint="For these sessions only. Leave on this machine to follow the agent's own setting." />
+                              Hint="For these sessions only. It starts on this machine whatever the agent is set to, so pick the remote again here if that is where this run belongs." />
 
         <div class="field">
             <label>First prompt</label>
@@ -88,7 +88,10 @@ else
     private string _prompt = string.Empty;
     private string _projectId = string.Empty;
 
-    /// <summary>Overrides where the agent runs, for these sessions only. Null follows the agent.</summary>
+    /// <summary>
+    /// Where these sessions run. Taken literally: null is this machine, not the agent's setting,
+    /// because that is what the field in front of the operator says.
+    /// </summary>
     private string? _remoteInstanceId;
     private bool _starting;
     private int _instanceCount = 1;
@@ -145,6 +148,7 @@ else
                         Prompt = prompt,
                         ProjectId = projectId,
                         RemoteInstanceId = remoteInstanceId,
+                        RemoteInstanceChosen = true,
                     });
 
                     firstSessionId ??= session.Id;

@@ -5,6 +5,7 @@
 @inject IEntityStore<Project> ProjectStore
 @inject IEntityStore<Schedule> ScheduleStore
 @inject IWorkflowEngine Workflows
+@inject IEntityStore<RemoteInstance> InstanceStore
 @inject NavigationManager Nav
 
 <PageTitle>Dashboard · devStudio</PageTitle>
@@ -55,6 +56,27 @@ else
                 }
             </a>
         }
+    </div>
+}
+
+@*
+    Only once a remote exists: on the overwhelming majority of installations there is no other
+    machine, and a permanently empty panel is worse than no panel.
+*@
+@if (_hasRemotes)
+{
+    <div class="card" style="margin-bottom:1.4rem">
+        <div class="card-head">
+            <h3>Remote tasks in progress</h3>
+            <span class="spacer"></span>
+            @if (_remote.Count > 0)
+            {
+                <span class="pill pill-cyan"><span class="dot"></span>@_remote.Count running</span>
+            }
+            <a class="btn btn-sm btn-ghost" href="/remote-instances">Instances</a>
+        </div>
+        <RemoteTaskList Sessions="_remote" ShowInstance="true"
+                        EmptyText="Nothing running on another machine." />
     </div>
 }
 
@@ -160,6 +182,10 @@ else
     private List<ChatSession> _live = [];
     private List<ChatSession> _recent = [];
 
+    /// <summary>The live sessions running on another machine — a subset of <c>_live</c>.</summary>
+    private List<ChatSession> _remote = [];
+    private bool _hasRemotes;
+
     protected override async Task OnInitializedAsync()
     {
         Sessions.SessionUpdated += OnSessionUpdated;
@@ -179,9 +205,17 @@ else
         _schedules = await ScheduleStore.GetAllAsync();
         _runs = await Workflows.GetRunsAsync();
 
+        _hasRemotes = (await InstanceStore.GetAllAsync()).Count > 0;
+
         var all = await Sessions.GetAllAsync();
+        Split(all);
+    }
+
+    private void Split(IReadOnlyList<ChatSession> all)
+    {
         _live = all.Where(s => s.IsLive).ToList();
         _recent = all.Where(s => !s.IsArchived).Take(8).ToList();
+        _remote = _live.Where(s => s.RemoteInstanceId is { Length: > 0 }).ToList();
     }
 
     private void Open(string url) => Nav.NavigateTo(url);
@@ -190,9 +224,7 @@ else
     // reloads are collapsed into one per interval rather than one per chunk.
     private void OnSessionUpdated(ChatSession session) => _render.Queue(() => InvokeAsync(async () =>
     {
-        var all = await Sessions.GetAllAsync();
-        _live = all.Where(s => s.IsLive).ToList();
-        _recent = all.Where(s => !s.IsArchived).Take(8).ToList();
+        Split(await Sessions.GetAllAsync());
         StateHasChanged();
     }));
 

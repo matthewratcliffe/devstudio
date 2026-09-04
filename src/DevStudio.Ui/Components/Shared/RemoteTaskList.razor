@@ -1,0 +1,52 @@
+@using DevStudio.Domain.Sessions
+
+@*
+    Work in flight on another machine. The transcript is the thing an operator actually wants when
+    they look at one of these — the CLI is over there, but everything it says is here — so each row
+    is a link straight into it rather than a status line that leaves them hunting through Sessions.
+*@
+@if (Sessions.Count == 0)
+{
+    <p class="mono-dim">@EmptyText</p>
+}
+else
+{
+    <div class="list">
+        @foreach (var session in Sessions)
+        {
+            <a class="list-row" href="/chat/@session.Id" style="text-decoration:none;color:inherit">
+                <div style="min-width:0">
+                    <strong>@session.Title</strong>
+                    <div class="mono-dim">
+                        @session.AgentName
+                        @if (ShowInstance && session.RemoteInstanceName is { Length: > 0 } instance)
+                        {
+                            <text> · @instance</text>
+                        }
+                        · started <Ago Value="@session.CreatedAt" />
+                    </div>
+                    @if (LastLine(session) is { Length: > 0 } line)
+                    {
+                        <div class="small" style="margin-top:0.3rem">@line</div>
+                    }
+                </div>
+                <span class="spacer"></span>
+                <StatusPill Session="session.Status" />
+            </a>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<ChatSession> Sessions { get; set; } = [];
+
+    /// <summary>Off on an instance's own card, where naming the machine again says nothing.</summary>
+    [Parameter] public bool ShowInstance { get; set; }
+
+    [Parameter] public string EmptyText { get; set; } = "Nothing running there right now.";
+
+    private static string? LastLine(ChatSession session) =>
+        session.Messages.LastOrDefault(m => m.Role == MessageRole.Agent && !string.IsNullOrWhiteSpace(m.Content))?.Content is { } text
+            ? (text.Length <= 120 ? text : text[..117] + "...")
+            : null;
+}

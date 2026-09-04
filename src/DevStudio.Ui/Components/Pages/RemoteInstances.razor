@@ -5,6 +5,7 @@
 @inject IEntityStore<RemoteInstance> InstanceStore
 @inject IRemoteInstancePairing Pairing
 @inject IRemoteAccessService Access
+@inject ISessionManager Sessions
 
 <PageTitle>Remote instances · devStudio</PageTitle>
 
@@ -127,6 +128,17 @@ else
                     <div class="mono-dim">last reached <Ago Value="seen" /></div>
                 }
 
+                @{ var running = TasksOn(instance.Id); }
+                <div class="card-head" style="margin-top:0.9rem">
+                    <div class="section-tag" style="margin:0">In progress</div>
+                    <span class="spacer"></span>
+                    @if (running.Count > 0)
+                    {
+                        <span class="pill pill-cyan"><span class="dot"></span>@running.Count running</span>
+                    }
+                </div>
+                <RemoteTaskList Sessions="running" EmptyText="No work running on this machine." />
+
                 <div class="btn-row">
                     @if (instance.State == RemoteInstanceState.AwaitingApproval)
                     {
@@ -202,6 +214,16 @@ else
 
     private IReadOnlyList<RemoteInstance> _instances = [];
     private IReadOnlyList<RemoteAccessGrant> _grants = [];
+
+    /// <summary>
+    /// Live sessions, by the instance they run on. The work is over there; the transcript is here,
+    /// which is what lets this page link straight into a conversation it is not hosting.
+    /// </summary>
+    private Dictionary<string, List<ChatSession>> _tasks = [];
+
+    // A streamed chunk raises SessionUpdated for every few tokens, and each pass reads the whole
+    // session store, so the reloads are collapsed rather than run once per chunk.
+    private readonly RenderCoalescer _render = new();
     private RemoteInstance? _editing;
     private bool _isNew;
 
@@ -215,7 +237,11 @@ else
         // A request arriving while this page is open should appear without a refresh — the whole
         // flow is "ask on one machine, walk to the other", and the walk is short.
         InstanceStore.Changed += OnChanged;
+        Sessions.SessionUpdated += OnSessionUpdated;
     }
+
+    private List<ChatSession> TasksOn(string instanceId) =>
+        _tasks.TryGetValue(instanceId, out var running) ? running : [];
 
     protected override void OnAfterRender(bool firstRender)
     {
@@ -223,7 +249,17 @@ else
             Layout.SetHeader("Remote instances", "Other machines this one can run work on");
     }
 
-    public void Dispose() => InstanceStore.Changed -= OnChanged;
+    public void Dispose()
+    {
+        InstanceStore.Changed -= OnChanged;
+        Sessions.SessionUpdated -= OnSessionUpdated;
+    }
+
+    private void OnSessionUpdated(ChatSession _) => _render.Queue(() => InvokeAsync(async () =>
+    {
+        await ReloadTasksAsync();
+        StateHasChanged();
+    }));
 
     private void OnChanged(RemoteInstance _) => InvokeAsync(async () =>
     {
@@ -238,7 +274,15 @@ else
             .ToList();
 
         _grants = await Access.GetAllAsync();
+
+        await ReloadTasksAsync();
     }
+
+    private async Task ReloadTasksAsync() =>
+        _tasks = (await Sessions.GetAllAsync())
+            .Where(s => s.IsLive && s.RemoteInstanceId is { Length: > 0 })
+            .GroupBy(s => s.RemoteInstanceId!)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.CreatedAt).ToList());
 
     private void New()
     {

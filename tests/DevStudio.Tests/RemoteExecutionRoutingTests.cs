@@ -138,6 +138,31 @@ public sealed class RemoteExecutionRoutingTests : IDisposable
         Assert.True(_remote.RanTurn);
     }
 
+    /// <summary>
+    /// The other half of the picker: an operator who leaves it reading "This machine" gets this
+    /// machine, even for an agent that normally runs elsewhere. A caller with no picker behind it
+    /// still passes nothing and still follows the agent.
+    /// </summary>
+    [Fact]
+    public async Task Choosing_this_machine_beats_the_agents_own_instance()
+    {
+        var agent = await AgentAsync("desk");
+
+        var session = await _manager.RunToCompletionAsync(
+            new StartSessionRequest
+            {
+                AgentId = agent.Id,
+                Prompt = "hello",
+                RemoteInstanceId = null,
+                RemoteInstanceChosen = true,
+            },
+            TimeSpan.FromSeconds(10));
+
+        Assert.Null(session.RemoteInstanceId);
+        Assert.True(_local.RanTurn);
+        Assert.False(_remote.RanTurn);
+    }
+
     [Fact]
     public async Task A_session_pointed_at_an_instance_that_is_gone_fails_rather_than_running_here()
     {

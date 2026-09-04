@@ -134,8 +134,12 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         // Where this runs, settled before anything is provisioned: the workspace, the login and the
         // CLI all have to come from the same machine, and resolving it here is what guarantees they
         // do. The request wins over the agent so one agent can be sent to a different machine for a
-        // single run without being edited.
-        var host = await _hosts.ResolveAsync(request.RemoteInstanceId ?? agent.RemoteInstanceId, ct);
+        // single run without being edited — and when the request came from a picker, its "this
+        // machine" is an answer too, not a gap for the agent's own setting to fill.
+        var target = request.RemoteInstanceChosen
+            ? request.RemoteInstanceId
+            : request.RemoteInstanceId ?? agent.RemoteInstanceId;
+        var host = await _hosts.ResolveAsync(target, ct);
         session.RemoteInstanceId = host.RemoteInstanceId;
         session.RemoteInstanceName = host.RemoteInstanceId is null ? null : host.DisplayName;
 
