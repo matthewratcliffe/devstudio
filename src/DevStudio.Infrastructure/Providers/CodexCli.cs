@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
+using DevStudio.Application.Globals;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Providers;
 using Microsoft.Extensions.Logging;
@@ -19,12 +20,18 @@ public sealed class CodexCli : IProviderCli
     private readonly IProcessRunner _runner;
     private readonly OrchestratorOptions _options;
     private readonly ILogger<CodexCli> _logger;
+    private readonly ISharedEnvironment? _shared;
 
-    public CodexCli(IProcessRunner runner, IOptions<OrchestratorOptions> options, ILogger<CodexCli> logger)
+    public CodexCli(
+        IProcessRunner runner,
+        IOptions<OrchestratorOptions> options,
+        ILogger<CodexCli> logger,
+        ISharedEnvironment? shared = null)
     {
         _runner = runner;
         _options = options.Value;
         _logger = logger;
+        _shared = shared;
     }
 
     public AiProvider Provider => AiProvider.Codex;
@@ -75,6 +82,9 @@ public sealed class CodexCli : IProviderCli
         // much of the current message has already been sent to the transcript.
         var stream = new MessageStream();
 
+        // Resolved before the pump starts so the variables are settled for the whole turn.
+        var environment = BuildEnvironment(request, await SharedAsync(ct));
+
         var pump = Task.Run(async () =>
         {
             try
@@ -84,7 +94,7 @@ public sealed class CodexCli : IProviderCli
                         _options.CodexExecutable,
                         arguments,
                         request.WorkingDirectory,
-                        BuildEnvironment(request),
+                        environment,
                         StandardInput: BuildPrompt(request),
                         TimeoutSeconds: 0),
                     async (line, isError, _) =>
@@ -300,10 +310,24 @@ public sealed class CodexCli : IProviderCli
     private static string TomlKey(string name) =>
         name.All(c => char.IsLetterOrDigit(c) || c is '_' or '-') ? name : TomlString(name);
 
-    private Dictionary<string, string> BuildEnvironment(TurnRequest request)
+    /// <summary>
+    /// The install-wide variables, or none when nothing supplies them — the dependency is optional
+    /// so a CLI constructed directly, as the tests do, needs no settings store behind it.
+    /// </summary>
+    internal async Task<IReadOnlyDictionary<string, string>> SharedAsync(CancellationToken ct) =>
+        _shared is null
+            ? new Dictionary<string, string>()
+            : await _shared.ForLocalAsync(ct);
+
+    internal Dictionary<string, string> BuildEnvironment(
+        TurnRequest request,
+        IReadOnlyDictionary<string, string> shared)
     {
         var home = request.HomeDirectory ?? _options.HomePath;
-        var environment = new Dictionary<string, string>
+
+        // Shared variables go down first, so the account selection below cannot be shadowed by a
+        // stray entry in Settings.
+        var environment = new Dictionary<string, string>(shared)
         {
             // HOME and CODEX_HOME together are what select the logged-in account.
             ["HOME"] = home,

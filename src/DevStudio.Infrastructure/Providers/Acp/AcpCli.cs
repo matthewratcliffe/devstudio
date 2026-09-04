@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
+using DevStudio.Application.Globals;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Providers;
 using DevStudio.Infrastructure.Workspaces;
@@ -26,19 +27,22 @@ public sealed class AcpCli : IProviderCli
     private readonly OrchestratorOptions _options;
     private readonly ILogger _logger;
     private readonly WorkspacePathPolicy _policy;
+    private readonly ISharedEnvironment? _shared;
 
     public AcpCli(
         CliProvider definition,
         IAcpConnectionFactory connections,
         OrchestratorOptions options,
         ILogger logger,
-        WorkspacePathPolicy? policy = null)
+        WorkspacePathPolicy? policy = null,
+        ISharedEnvironment? shared = null)
     {
         _definition = definition;
         _connections = connections;
         _options = options;
         _logger = logger;
         _policy = policy ?? new WorkspacePathPolicy();
+        _shared = shared;
     }
 
     public AiProvider Provider => AiProvider.Custom;
@@ -67,6 +71,9 @@ public sealed class AcpCli : IProviderCli
     {
         var events = Channel.CreateUnbounded<AgentEvent>();
 
+        // Resolved before the pump starts so the variables are settled for the whole turn.
+        var environment = BuildEnvironment(request, await SharedAsync(ct));
+
         var pump = Task.Run(async () =>
         {
             IAcpConnection? connection = null;
@@ -76,7 +83,7 @@ public sealed class AcpCli : IProviderCli
                     _definition.Executable,
                     [.. ClaudeCli.SplitArguments(_definition.AcpArguments)],
                     request.WorkingDirectory,
-                    BuildEnvironment(request),
+                    environment,
                     ct);
 
                 await new Turn(connection, request, _definition, events.Writer, _logger, _policy).RunAsync(ct);
@@ -105,9 +112,22 @@ public sealed class AcpCli : IProviderCli
         await pump;
     }
 
-    private Dictionary<string, string> BuildEnvironment(TurnRequest request)
+    /// <summary>
+    /// The install-wide variables, or none when nothing supplies them — the dependency is optional
+    /// so a CLI constructed directly, as the tests do, needs no settings store behind it.
+    /// </summary>
+    internal async Task<IReadOnlyDictionary<string, string>> SharedAsync(CancellationToken ct) =>
+        _shared is null
+            ? new Dictionary<string, string>()
+            : await _shared.ForLocalAsync(ct);
+
+    internal Dictionary<string, string> BuildEnvironment(
+        TurnRequest request,
+        IReadOnlyDictionary<string, string> shared)
     {
-        var environment = new Dictionary<string, string>
+        // Shared variables go down first, under the definition's own and then the turn's: the
+        // narrower the scope, the later it is applied and the more it wins.
+        var environment = new Dictionary<string, string>(shared)
         {
             ["HOME"] = request.HomeDirectory ?? _options.HomePath,
             ["NO_COLOR"] = "1",

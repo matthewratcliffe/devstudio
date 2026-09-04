@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using DevStudio.Application.Abstractions;
+using DevStudio.Application.Globals;
 using DevStudio.Application.Remoting;
 using DevStudio.Domain.Remoting;
 using Microsoft.Extensions.Logging;
@@ -16,6 +17,7 @@ public sealed class ExecutionHostResolver : IExecutionHostResolver
     private readonly IRemoteConnectionPool _pool;
     private readonly IWorkspaceService _localWorkspaces;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly ISharedEnvironment _shared;
     private readonly ConcurrentDictionary<string, RemoteExecutionHost> _hosts = new();
 
     public ExecutionHostResolver(
@@ -23,13 +25,15 @@ public sealed class ExecutionHostResolver : IExecutionHostResolver
         IEntityStore<RemoteInstance> instances,
         IRemoteConnectionPool pool,
         IWorkspaceService localWorkspaces,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        ISharedEnvironment shared)
     {
         Local = local;
         _instances = instances;
         _pool = pool;
         _localWorkspaces = localWorkspaces;
         _loggerFactory = loggerFactory;
+        _shared = shared;
 
         // A host caches what the far side offers, so it has to be thrown away when the instance it
         // was built from changes — a re-pair, a new address, or being switched off.
@@ -57,7 +61,8 @@ public sealed class ExecutionHostResolver : IExecutionHostResolver
             instance,
             _pool,
             _localWorkspaces,
-            _loggerFactory.CreateLogger<RemoteExecutionHost>()));
+            _loggerFactory.CreateLogger<RemoteExecutionHost>(),
+            _shared));
 
         // Its CLI registry is built from this, so nothing can resolve a CLI before the far side has
         // said what it has. Fetching here rather than at each use keeps that a single round trip.

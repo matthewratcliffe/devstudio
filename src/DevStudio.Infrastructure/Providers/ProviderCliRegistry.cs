@@ -1,5 +1,6 @@
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
+using DevStudio.Application.Globals;
 using DevStudio.Domain.Providers;
 using DevStudio.Infrastructure.Providers.Acp;
 using DevStudio.Infrastructure.Providers.OpenAi;
@@ -21,6 +22,7 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
     private readonly OrchestratorOptions _options;
     private readonly ILoggerFactory _loggerFactory;
     private readonly WorkspacePathPolicy _policy;
+    private readonly ISharedEnvironment _shared;
 
     public ProviderCliRegistry(
         IEnumerable<IProviderCli> clis,
@@ -32,7 +34,8 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
         IImageGenerationService images,
         IOptions<OrchestratorOptions> options,
         ILoggerFactory loggerFactory,
-        WorkspacePathPolicy policy)
+        WorkspacePathPolicy policy,
+        ISharedEnvironment shared)
     {
         _byProvider = clis.ToDictionary(c => c.Provider);
         _definitions = definitions;
@@ -44,6 +47,7 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
         _options = options.Value;
         _loggerFactory = loggerFactory;
         _policy = policy;
+        _shared = shared;
 
         All = _byProvider.Values.OrderBy(c => c.Provider).ToList();
     }
@@ -88,7 +92,7 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
     /// </summary>
     private IProviderCli Build(CliProvider definition) => definition.Transport switch
     {
-        CliTransport.Acp => new AcpCli(definition, _acp, _options, _loggerFactory.CreateLogger<AcpCli>(), _policy),
+        CliTransport.Acp => new AcpCli(definition, _acp, _options, _loggerFactory.CreateLogger<AcpCli>(), _policy, _shared),
         CliTransport.OpenAiCompatible => new OpenAiCompatibleCli(
             definition,
             _httpClients,
@@ -97,6 +101,6 @@ public sealed class ProviderCliRegistry : IProviderCliRegistry
             _images,
             _loggerFactory.CreateLogger<OpenAiCompatibleCli>(),
             _policy),
-        _ => new CustomCli(definition, _runner, _options, _loggerFactory.CreateLogger<CustomCli>()),
+        _ => new CustomCli(definition, _runner, _options, _loggerFactory.CreateLogger<CustomCli>(), _shared),
     };
 }

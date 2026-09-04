@@ -49,6 +49,13 @@ public sealed class GlobalSettings : Entity
     /// <summary>What the last files sync did, line by line.</summary>
     public List<string> FilesLastLog { get; set; } = [];
 
+    /// <summary>
+    /// Environment variables handed to every AI CLI this install launches — and so to the skills,
+    /// hooks and MCP servers those CLIs spawn as children, which is the whole point: a token given
+    /// only to one MCP server never reaches the sibling process that needs it.
+    /// </summary>
+    public List<SharedEnvironmentVariable> SharedEnvironment { get; set; } = [];
+
     /// <summary>Whether agent and browser workspace paths must stay inside their workspace.</summary>
     public bool ValidateWorkspacePaths { get; set; } = true;
 

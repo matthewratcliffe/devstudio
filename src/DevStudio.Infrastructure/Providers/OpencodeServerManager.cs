@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DevStudio.Application.Common;
+using DevStudio.Application.Globals;
 using DevStudio.Infrastructure.Terminals;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -25,14 +26,20 @@ public sealed class OpencodeServerManager : IOpencodeServerManager, IAsyncDispos
     private readonly IHttpClientFactory _clients;
     private readonly OrchestratorOptions _options;
     private readonly ILogger<OpencodeServerManager> _logger;
+    private readonly ISharedEnvironment _shared;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private Process? _process;
 
-    public OpencodeServerManager(IHttpClientFactory clients, IOptions<OrchestratorOptions> options, ILogger<OpencodeServerManager> logger)
+    public OpencodeServerManager(
+        IHttpClientFactory clients,
+        IOptions<OrchestratorOptions> options,
+        ILogger<OpencodeServerManager> logger,
+        ISharedEnvironment shared)
     {
         _clients = clients;
         _options = options.Value;
         _logger = logger;
+        _shared = shared;
     }
 
     public async Task EnsureRunningAsync(CancellationToken ct)
@@ -52,7 +59,7 @@ public sealed class OpencodeServerManager : IOpencodeServerManager, IAsyncDispos
                 return;
 
             if (_process is null || _process.HasExited)
-                Start();
+                Start(await _shared.ForLocalAsync(ct));
 
             await WaitUntilHealthyAsync(ct);
         }
@@ -62,7 +69,12 @@ public sealed class OpencodeServerManager : IOpencodeServerManager, IAsyncDispos
         }
     }
 
-    private void Start()
+    /// <summary>
+    /// Unlike the per-turn adapters this is one long-lived process, so the shared variables it gets
+    /// are the ones in force when it starts. Changing them takes effect for opencode only once the
+    /// server is restarted — which is what the Settings page warns about.
+    /// </summary>
+    private void Start(IReadOnlyDictionary<string, string> shared)
     {
         if (!Uri.TryCreate(_options.OpencodeBaseUrl, UriKind.Absolute, out var baseUri))
             throw new InvalidOperationException($"'{_options.OpencodeBaseUrl}' is not a valid opencode server URL.");
@@ -111,6 +123,9 @@ public sealed class OpencodeServerManager : IOpencodeServerManager, IAsyncDispos
 
         _logger.LogInformation("Starting opencode server: {Executable} serve --hostname {Host} --port {Port}",
             _options.OpencodeExecutable, baseUri.Host, baseUri.Port);
+
+        foreach (var pair in shared)
+            info.Environment[pair.Key] = pair.Value;
 
         var process = new Process { StartInfo = info, EnableRaisingEvents = true };
 

@@ -65,6 +65,9 @@ public static class DependencyInjection
 
         services.AddSingleton<IProcessRunner, ProcessRunner>();
 
+        // Install-wide environment variables, consulted by every CLI adapter below.
+        services.AddSingleton<ISharedEnvironment, SharedEnvironment>();
+
         // Provider CLIs. Adding another AI CLI means adding an IProviderCli here.
         services.AddSingleton<IProviderCli, ClaudeCli>();
         services.AddSingleton<IProviderCli, CodexCli>();

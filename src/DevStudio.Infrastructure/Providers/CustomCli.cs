@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
+using DevStudio.Application.Globals;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Providers;
 using Microsoft.Extensions.Logging;
@@ -19,13 +20,20 @@ public sealed class CustomCli : IProviderCli
     private readonly IProcessRunner _runner;
     private readonly OrchestratorOptions _options;
     private readonly ILogger _logger;
+    private readonly ISharedEnvironment? _shared;
 
-    public CustomCli(CliProvider definition, IProcessRunner runner, OrchestratorOptions options, ILogger logger)
+    public CustomCli(
+        CliProvider definition,
+        IProcessRunner runner,
+        OrchestratorOptions options,
+        ILogger logger,
+        ISharedEnvironment? shared = null)
     {
         _definition = definition;
         _runner = runner;
         _options = options;
         _logger = logger;
+        _shared = shared;
     }
 
     public AiProvider Provider => AiProvider.Custom;
@@ -42,6 +50,9 @@ public sealed class CustomCli : IProviderCli
         var channel = Channel.CreateUnbounded<AgentEvent>();
         var arguments = BuildArguments(request);
 
+        // Resolved before the pump starts so the variables are settled for the whole turn.
+        var environment = BuildEnvironment(request, await SharedAsync(ct));
+
         var pump = Task.Run(async () =>
         {
             try
@@ -51,7 +62,7 @@ public sealed class CustomCli : IProviderCli
                         _definition.Executable,
                         arguments,
                         request.WorkingDirectory,
-                        BuildEnvironment(request),
+                        environment,
                         TimeoutSeconds: 0),
                     async (line, isError, _) =>
                     {
@@ -159,9 +170,22 @@ public sealed class CustomCli : IProviderCli
             : $"{request.SystemPrompt}\n\n---\n\n{request.Prompt}";
     }
 
-    private Dictionary<string, string> BuildEnvironment(TurnRequest request)
+    /// <summary>
+    /// The install-wide variables, or none when nothing supplies them — the dependency is optional
+    /// so a CLI constructed directly, as the tests do, needs no settings store behind it.
+    /// </summary>
+    internal async Task<IReadOnlyDictionary<string, string>> SharedAsync(CancellationToken ct) =>
+        _shared is null
+            ? new Dictionary<string, string>()
+            : await _shared.ForLocalAsync(ct);
+
+    internal Dictionary<string, string> BuildEnvironment(
+        TurnRequest request,
+        IReadOnlyDictionary<string, string> shared)
     {
-        var environment = new Dictionary<string, string>
+        // Shared variables go down first, under the definition's own and then the turn's: the
+        // narrower the scope, the later it is applied and the more it wins.
+        var environment = new Dictionary<string, string>(shared)
         {
             ["HOME"] = request.HomeDirectory ?? _options.HomePath,
             ["NO_COLOR"] = "1",

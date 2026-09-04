@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using DevStudio.Application.Abstractions;
+using DevStudio.Application.Globals;
 using DevStudio.Application.Remoting;
 using DevStudio.Application.Sessions;
 using DevStudio.Domain.Providers;
@@ -22,12 +23,18 @@ public sealed class RemoteProviderCli : IProviderCli
     private readonly RemoteInstance _instance;
     private readonly IRemoteConnectionPool _pool;
     private readonly RemoteCliDescriptor _descriptor;
+    private readonly ISharedEnvironment? _shared;
 
-    public RemoteProviderCli(RemoteInstance instance, IRemoteConnectionPool pool, RemoteCliDescriptor descriptor)
+    public RemoteProviderCli(
+        RemoteInstance instance,
+        IRemoteConnectionPool pool,
+        RemoteCliDescriptor descriptor,
+        ISharedEnvironment? shared = null)
     {
         _instance = instance;
         _pool = pool;
         _descriptor = descriptor;
+        _shared = shared;
     }
 
     public AiProvider Provider => _descriptor.Provider;
@@ -66,15 +73,38 @@ public sealed class RemoteProviderCli : IProviderCli
             yield break;
         }
 
+        // Only the variables somebody has marked as shareable travel with the turn. The far side
+        // layers its own shared environment underneath these, so a machine that already has the
+        // variable set locally needs nothing sent at all — which is the preferred arrangement.
         var stream = connection.StreamAsync<AgentEvent>(
             RemoteHubMethods.RunTurn,
             _descriptor.Provider,
             _descriptor.CliProviderId,
-            request,
+            await WithSharedEnvironmentAsync(request, ct),
             ct);
 
         await foreach (var evt in stream.WithCancellation(ct))
             yield return evt;
+    }
+
+    /// <summary>
+    /// The turn as it goes over the wire: shareable variables underneath, so anything the agent or
+    /// the turn itself set still wins.
+    /// </summary>
+    private async Task<TurnRequest> WithSharedEnvironmentAsync(TurnRequest request, CancellationToken ct)
+    {
+        if (_shared is null)
+            return request;
+
+        var shared = await _shared.ForRemoteAsync(ct);
+        if (shared.Count == 0)
+            return request;
+
+        var environment = new Dictionary<string, string>(shared);
+        foreach (var pair in request.Environment)
+            environment[pair.Key] = pair.Value;
+
+        return request with { Environment = environment };
     }
 
     public async Task<ProviderAuthStatus> GetAuthStatusAsync(string? homePath = null, CancellationToken ct = default)
@@ -126,9 +156,13 @@ public sealed class RemoteProviderCliRegistry : IProviderCliRegistry
 {
     private readonly IReadOnlyList<RemoteProviderCli> _clis;
 
-    public RemoteProviderCliRegistry(RemoteInstance instance, IRemoteConnectionPool pool, RemoteHostConfig config)
+    public RemoteProviderCliRegistry(
+        RemoteInstance instance,
+        IRemoteConnectionPool pool,
+        RemoteHostConfig config,
+        ISharedEnvironment? shared = null)
     {
-        _clis = config.Clis.Select(d => new RemoteProviderCli(instance, pool, d)).ToList();
+        _clis = config.Clis.Select(d => new RemoteProviderCli(instance, pool, d, shared)).ToList();
         All = _clis.Where(c => c.DefinitionId is null).Cast<IProviderCli>().ToList();
     }
 

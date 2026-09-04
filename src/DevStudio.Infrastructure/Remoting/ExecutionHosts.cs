@@ -1,5 +1,6 @@
 using System.Reflection;
 using DevStudio.Application.Abstractions;
+using DevStudio.Application.Globals;
 using DevStudio.Application.Remoting;
 using DevStudio.Domain.Mcp;
 using DevStudio.Domain.Providers;
@@ -181,6 +182,7 @@ public sealed class RemoteExecutionHost : IExecutionHost
 {
     private readonly RemoteInstance _instance;
     private readonly IRemoteConnectionPool _pool;
+    private readonly ISharedEnvironment? _shared;
 
     /// <summary>
     /// Cached because every picker on a page asks for it and it is a round trip to another machine.
@@ -196,10 +198,12 @@ public sealed class RemoteExecutionHost : IExecutionHost
         RemoteInstance instance,
         IRemoteConnectionPool pool,
         IWorkspaceService localWorkspaces,
-        ILogger logger)
+        ILogger logger,
+        ISharedEnvironment? shared = null)
     {
         _instance = instance;
         _pool = pool;
+        _shared = shared;
 
         Workspaces = new RemoteWorkspaceService(instance, pool, localWorkspaces);
         Accounts = new RemoteAccountService(instance, pool);
@@ -223,7 +227,8 @@ public sealed class RemoteExecutionHost : IExecutionHost
         new RemoteProviderCliRegistry(
             _instance,
             _pool,
-            _config ?? throw new InvalidOperationException($"'{_instance.Name}' has not been asked what it offers yet."));
+            _config ?? throw new InvalidOperationException($"'{_instance.Name}' has not been asked what it offers yet."),
+            _shared);
 
     public async Task<RemoteHostConfig> GetConfigAsync(CancellationToken ct = default)
     {

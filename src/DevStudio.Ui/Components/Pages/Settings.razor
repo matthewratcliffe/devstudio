@@ -147,6 +147,91 @@
     <div class="card card-wide">
         <div class="setting-group">
             <div class="setting-group-head">
+                <span class="ico">🔑</span>
+                <div><h3 style="margin:0">Shared environment</h3></div>
+            </div>
+            <p class="small setting-group-desc">
+                Variables handed to every AI CLI this install launches — and so to the skills, hooks and
+                MCP servers those CLIs start as children. A token set against a single MCP server reaches
+                only that one process; set it here and everything the CLI runs can see it. A CLI provider,
+                an agent, or the turn itself still overrides a name set here.
+            </p>
+
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                    <tr>
+                        <th style="width:22%">Name</th>
+                        <th style="width:30%">Value</th>
+                        <th>What it is for</th>
+                        <th style="width:1%">On</th>
+                        <th style="width:1%">Remote</th>
+                        <th style="width:1%"></th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var variable in _settings.SharedEnvironment)
+                    {
+                        <tr @key="variable">
+                            <td>
+                                <input placeholder="FASTMAIL_API_TOKEN" @bind="variable.Name" @bind:event="oninput" />
+                            </td>
+                            <td>
+                                <div style="display:flex;gap:0.35rem;align-items:center">
+                                    <input type="@(_revealed.Contains(variable) ? "text" : "password")"
+                                           autocomplete="off"
+                                           @bind="variable.Value" @bind:event="oninput" />
+                                    <button class="btn btn-ghost btn-sm"
+                                            title="@(_revealed.Contains(variable) ? "Hide the value" : "Show the value")"
+                                            @onclick="() => ToggleReveal(variable)">
+                                        @(_revealed.Contains(variable) ? "🙈" : "👁")
+                                    </button>
+                                </div>
+                            </td>
+                            <td>
+                                <input placeholder="Fastmail folder skill" @bind="variable.Description" @bind:event="oninput" />
+                            </td>
+                            <td style="text-align:center">
+                                <input class="switch" type="checkbox" @bind="variable.Enabled"
+                                       title="Off keeps the value but stops it being passed to anything" />
+                            </td>
+                            <td style="text-align:center">
+                                <input class="switch" type="checkbox" @bind="variable.ShareWithRemote"
+                                       title="Send this to remote instances as well. Off by default — a remote applies its own shared environment." />
+                            </td>
+                            <td>
+                                <button class="btn btn-ghost btn-sm btn-danger"
+                                        title="Remove this variable"
+                                        @onclick="() => Remove(variable)">✕</button>
+                            </td>
+                        </tr>
+                    }
+                    @if (_settings.SharedEnvironment.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="6" class="small">Nothing shared yet.</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.6rem">
+                <button class="btn btn-sm" @onclick="Add">Add variable</button>
+                <span class="small">
+                    Values are stored in this install's data folder as plain text, the same as the
+                    environment already set against a CLI provider or an MCP server — keep anything you
+                    would not put in that folder out of here. Remote sharing is off until you turn it on
+                    per variable. Changes apply to the next turn; opencode picks them up when its server
+                    is next restarted.
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card card-wide">
+        <div class="setting-group">
+            <div class="setting-group-head">
                 <span class="ico">🧮</span>
                 <div><h3 style="margin:0">Token minimisation defaults</h3></div>
             </div>
@@ -166,6 +251,9 @@
 
     private GlobalSettings _settings = new();
 
+    /// <summary>Which values are shown in the clear. Per view, never persisted.</summary>
+    private readonly HashSet<SharedEnvironmentVariable> _revealed = [];
+
     protected override async Task OnInitializedAsync()
     {
         _settings = await SettingsStore.GetAsync(GlobalSettings.WellKnownId) ?? new GlobalSettings();
@@ -178,8 +266,37 @@
             Layout.SetHeader("Settings", "Security and application behaviour");
     }
 
+    private void Add()
+    {
+        var variable = new SharedEnvironmentVariable();
+        _settings.SharedEnvironment.Add(variable);
+
+        // A new row has nothing worth hiding yet, and typing into a masked box you cannot read is
+        // how a token ends up wrong.
+        _revealed.Add(variable);
+    }
+
+    private void Remove(SharedEnvironmentVariable variable)
+    {
+        _settings.SharedEnvironment.Remove(variable);
+        _revealed.Remove(variable);
+    }
+
+    private void ToggleReveal(SharedEnvironmentVariable variable)
+    {
+        if (!_revealed.Remove(variable))
+            _revealed.Add(variable);
+    }
+
     private async Task SaveAsync()
     {
+        // A row somebody added and then left blank is not an error worth a message — just not a
+        // variable. Trimmed here so a stray space in a pasted name does not become part of it.
+        foreach (var variable in _settings.SharedEnvironment)
+            variable.Name = variable.Name.Trim();
+
+        _settings.SharedEnvironment.RemoveAll(v => v.Name.Length == 0 && v.Value.Length == 0);
+
         await SettingsStore.UpsertAsync(_settings);
         PathPolicy.Apply(_settings);
         Layout.Notify("Settings saved.", "ok");

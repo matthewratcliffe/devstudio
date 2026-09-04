@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
+using DevStudio.Application.Globals;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Mcp;
 using DevStudio.Domain.Providers;
@@ -35,19 +36,22 @@ public sealed class ClaudeCli : IProviderCli
     private readonly IEntityStore<McpServer> _mcpServers;
     private readonly OrchestratorOptions _options;
     private readonly ILogger<ClaudeCli> _logger;
+    private readonly ISharedEnvironment? _shared;
 
     public ClaudeCli(
         IProcessRunner runner,
         IMcpProbeService mcpProbe,
         IEntityStore<McpServer> mcpServers,
         IOptions<OrchestratorOptions> options,
-        ILogger<ClaudeCli> logger)
+        ILogger<ClaudeCli> logger,
+        ISharedEnvironment? shared = null)
     {
         _runner = runner;
         _mcpProbe = mcpProbe;
         _mcpServers = mcpServers;
         _options = options.Value;
         _logger = logger;
+        _shared = shared;
     }
 
     public AiProvider Provider => AiProvider.Claude;
@@ -114,6 +118,10 @@ public sealed class ClaudeCli : IProviderCli
 
         DisableBashSandbox(request.HomeDirectory ?? _options.HomePath);
 
+        // Resolved before the pump starts so the variables are settled for the whole turn, rather
+        // than read on a background thread while the settings are being edited.
+        var environment = BuildEnvironment(request, await SharedAsync(ct));
+
         var pump = Task.Run(async () =>
         {
             try
@@ -123,7 +131,7 @@ public sealed class ClaudeCli : IProviderCli
                         _options.ClaudeExecutable,
                         arguments,
                         request.WorkingDirectory,
-                        BuildEnvironment(request),
+                        environment,
                         StandardInput: request.Prompt,
                         TimeoutSeconds: 0),
                     async (line, isError, _) =>
@@ -344,10 +352,28 @@ public sealed class ClaudeCli : IProviderCli
         }
     }
 
-    private Dictionary<string, string> BuildEnvironment(TurnRequest request)
+    /// <summary>
+    /// The install-wide variables, or none when nothing supplies them — the dependency is optional
+    /// so a CLI constructed directly, as the tests do, needs no settings store behind it.
+    /// </summary>
+    internal async Task<IReadOnlyDictionary<string, string>> SharedAsync(CancellationToken ct) =>
+        _shared is null
+            ? new Dictionary<string, string>()
+            : await _shared.ForLocalAsync(ct);
+
+    internal Dictionary<string, string> BuildEnvironment(
+        TurnRequest request,
+        IReadOnlyDictionary<string, string> shared)
     {
         var home = request.HomeDirectory ?? _options.HomePath;
-        var environment = BuildHomeEnvironment(home);
+
+        // Shared variables go down first, so everything this adapter sets for itself — the account's
+        // HOME above all — is applied over them and cannot be shadowed by a stray entry in Settings.
+        var environment = new Dictionary<string, string>(shared);
+
+        foreach (var pair in BuildHomeEnvironment(home))
+            environment[pair.Key] = pair.Value;
+
         environment["CLAUDE_CODE_NONINTERACTIVE"] = "1";
 
         // The CLI otherwise wraps each command in bubblewrap, which cannot create its namespace
