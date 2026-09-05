@@ -402,9 +402,10 @@
                     }
                     @foreach (var skill in _target.Skills)
                     {
-                        <div class="check">
-                            <input type="checkbox" checked="@_editing.SkillIds.Contains(skill.Id)"
-                                   @onchange="e => Toggle(_editing.SkillIds, skill.Id, e)" />
+                        <div class="check" @key="skill.Id">
+                            <input type="checkbox"
+                                   @bind:get="_editing.SkillIds.Contains(skill.Id)"
+                                   @bind:set="on => Toggle(_editing.SkillIds, skill.Id, on)" />
                             <span>@skill.Name</span>
                         </div>
                     }
@@ -417,10 +418,11 @@
                     }
                     @foreach (var server in _target.McpServers)
                     {
-                        <div class="check">
-                            <input type="checkbox" checked="@(_editing.McpServerIds.Contains(server.Id) || server.IsDefault)"
+                        <div class="check" @key="server.Id">
+                            <input type="checkbox"
                                    disabled="@server.IsDefault"
-                                   @onchange="e => Toggle(_editing.McpServerIds, server.Id, e)" />
+                                   @bind:get="_editing.McpServerIds.Contains(server.Id) || server.IsDefault"
+                                   @bind:set="on => Toggle(_editing.McpServerIds, server.Id, on)" />
                             <span>@server.Name @(server.IsDefault ? "(always on)" : "")</span>
                         </div>
                     }
@@ -584,6 +586,13 @@
         if (_editing is null)
             return;
 
+        remoteInstanceId = Blank(remoteInstanceId);
+
+        // Re-selecting the machine it is already on is not a change, and must not cost the agent its
+        // repository, login, skills and servers.
+        if (remoteInstanceId == _editing.RemoteInstanceId)
+            return;
+
         _editing.RemoteInstanceId = remoteInstanceId;
 
         // Repositories, logins, skills and MCP servers are all named by ids that belong to one
@@ -671,14 +680,17 @@
     {
         _isNew = string.IsNullOrWhiteSpace(agent.Name) || _agents.All(a => a.Id != agent.Id);
         // Edit a copy so cancelling leaves the stored agent untouched.
-        _editing = Clone(agent);
-        _handover = _editing.OpeningTurns > 0;
+        var editing = Clone(agent);
+        _handover = editing.OpeningTurns > 0;
         _branches = [];
 
-        // Awaited rather than left running: every picker below is built from it, and an editor that
-        // opened with empty dropdowns and filled them in a moment later would invite a choice made
-        // before the real options arrived.
-        await LoadTargetAsync();
+        // Fetched before the editor is on screen, not after. Every picker below is built from it,
+        // and the skill and MCP ticks are drawn from the list it carries: an editor that opened
+        // first and filled its lists in a moment later showed those two sections built against
+        // nothing, so an agent's saved skills and servers came up unticked.
+        (_target, _targetError) = await Targets.ConfigAsync(editing.RemoteInstanceId);
+
+        _editing = editing;
 
         // A model that is not in the list is still valid — show it in the free-text box.
         _customModel = !string.IsNullOrWhiteSpace(_editing.Model) && !ModelsFor(_editing).Contains(_editing.Model);
@@ -743,9 +755,9 @@
 
     private void StartChat(Agent agent) => Nav.NavigateTo($"/agents/{agent.Id}/chat");
 
-    private static void Toggle(List<string> list, string id, ChangeEventArgs args)
+    private static void Toggle(List<string> list, string id, bool on)
     {
-        if (args.Value is true)
+        if (on)
         {
             if (!list.Contains(id))
                 list.Add(id);
@@ -782,6 +794,7 @@
         CreatedAt = agent.CreatedAt,
         Name = agent.Name,
         Description = agent.Description,
+        Category = agent.Category,
         Provider = agent.Provider,
         CliProviderId = agent.CliProviderId,
         Model = agent.Model,
@@ -798,6 +811,7 @@
         ProjectId = agent.ProjectId,
         AccountId = agent.AccountId,
         FallbackAccountId = agent.FallbackAccountId,
+        RemoteInstanceId = agent.RemoteInstanceId,
         RepositoryId = agent.RepositoryId,
         BaseBranch = agent.BaseBranch,
         UseWorktree = agent.UseWorktree,
@@ -807,5 +821,10 @@
         ExtraArguments = agent.ExtraArguments,
         Enabled = agent.Enabled,
         Accent = agent.Accent,
+        // Carried even though the editor never shows them: a copy that dropped them would put an
+        // agent back on this machine, out of its category, or adrift from the team file it came
+        // from, every time somebody opened it to change something else.
+        IsQuickChat = agent.IsQuickChat,
+        TeamSourcePath = agent.TeamSourcePath,
     };
 }
