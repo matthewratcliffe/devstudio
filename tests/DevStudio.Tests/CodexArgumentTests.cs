@@ -2,6 +2,9 @@ using System.Text.Json.Nodes;
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
 using DevStudio.Domain.Agents;
+using DevStudio.Domain.Plugins;
+using DevStudio.Domain.Providers;
+using DevStudio.Infrastructure.Plugins;
 using DevStudio.Infrastructure.Providers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -77,6 +80,40 @@ public class CodexArgumentTests
         Assert.DoesNotContain("resume", arguments);
         Assert.Contains("--cd", arguments);
         Assert.Equal("workspace-write", arguments[arguments.IndexOf("--sandbox") + 1]);
+    }
+
+    [Fact]
+    public async Task Each_plugin_is_switched_on_or_off_by_config_override()
+    {
+        // codex keeps the same decision in config.toml, and -c is that key set for one run, so the
+        // login's own config is left alone. The name needs quoting: it has an @ in it.
+        var workspace = Path.Combine(Path.GetTempPath(), "devstudio-codexplugins-" + Guid.NewGuid().ToString("n"));
+        Directory.CreateDirectory(workspace);
+
+        try
+        {
+            WorkspacePlugins.Write(workspace, [
+                new WorkspacePlugin(new PluginKey(AiProvider.Codex, "gmail@openai-curated"), true),
+                new WorkspacePlugin(new PluginKey(AiProvider.Codex, "codex-security@openai-curated"), false),
+            ]);
+
+            var arguments = await ArgumentsFor(Turn() with { WorkingDirectory = workspace });
+
+            Assert.Contains("plugins.\"gmail@openai-curated\".enabled=true", arguments);
+            Assert.Contains("plugins.\"codex-security@openai-curated\".enabled=false", arguments);
+        }
+        finally
+        {
+            Directory.Delete(workspace, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task No_plugin_override_is_passed_when_nothing_has_been_said_about_plugins()
+    {
+        var arguments = await ArgumentsFor(Turn());
+
+        Assert.DoesNotContain(arguments, a => a.StartsWith("plugins.", StringComparison.Ordinal));
     }
 
     [Fact]

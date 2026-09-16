@@ -146,10 +146,12 @@ public sealed class SessionManager : ISessionManager, IAsyncDisposable
         SessionWorkspace workspace;
         if (!string.IsNullOrWhiteSpace(request.WorkingDirectoryOverride))
         {
-            // A workflow step reusing the previous step's directory still needs its own skills and MCP config.
+            // A workflow step reusing the previous step's directory still needs its own skills, MCP
+            // config and plugins — the step before it may well have been a different agent.
             workspace = new SessionWorkspace(request.WorkingDirectoryOverride!, agent.RepositoryId, null, session.ProjectId);
             await host.Workspaces.MaterialiseSkillsAsync(agent, workspace.Path, ct);
             await host.Workspaces.MaterialiseMcpAsync(agent, workspace.Path, session.McpServerIds, ct);
+            await host.Workspaces.MaterialisePluginsAsync(agent, workspace.Path, ct);
         }
         else
         {

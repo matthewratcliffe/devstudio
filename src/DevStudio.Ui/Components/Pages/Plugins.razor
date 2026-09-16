@@ -1,0 +1,134 @@
+@page "/plugins"
+@inject IEntityStore<Agent> AgentStore
+@inject ExecutionTargets Targets
+
+<PageTitle>Plugins · devStudio</PageTitle>
+
+<div class="card" style="margin-bottom:1.2rem">
+    <div class="section-tag">Plugins belong to the CLIs</div>
+    <p class="small">
+        A plugin is installed by the CLI that runs it — <code>claude plugin install &lt;name&gt;@@&lt;marketplace&gt;</code>,
+        <code>codex plugin install</code>, or a package named in opencode's config — so this page
+        lists what the machine below already has rather than keeping a second list that would only
+        ever be one install behind. Install one from the
+        <a href="/terminal">terminal</a> and it shows up here.
+    </p>
+    <p class="small">
+        Each agent picks which of them its sessions run. Everything installed and not picked is
+        switched <em>off</em> for that session, so an agent's tools are what its editor shows and not
+        whatever happens to be enabled on the machine. Nothing here changes a CLI's own
+        configuration: claude is handed a settings file for the run, codex a config override, and
+        opencode the project config its server reads for that workspace.
+    </p>
+</div>
+
+<RemoteInstancePicker Value="_instanceId" ValueChanged="SelectInstanceAsync"
+                      Hint="Which machine's installed plugins to show. An agent picks from the machine it runs on." />
+
+@if (_error is { Length: > 0 })
+{
+    <div class="setting-callout warn">@_error</div>
+}
+
+@foreach (var group in Groups)
+{
+    <div class="section-tag" style="margin:1.4rem 0 0.7rem">@Title(group.Key)</div>
+
+    <div class="grid grid-auto">
+        @foreach (var plugin in group.Value)
+        {
+            <div class="card" @key="plugin.Id">
+                <div class="card-head">
+                    <h3>@ShortName(plugin)</h3>
+                    <div class="spacer"></div>
+                    @if (plugin.IsDefault)
+                    {
+                        <span class="pill pill-cyan" title="Switched on in the CLI's own configuration, for anyone using it outside devStudio">
+                            on by default
+                        </span>
+                    }
+                </div>
+                <div class="btn-row">
+                    @if (Marketplace(plugin) is { Length: > 0 } marketplace)
+                    {
+                        <span class="pill" title="Marketplace it was installed from">@marketplace</span>
+                    }
+                    @if (plugin.Detail is { Length: > 0 } origin)
+                    {
+                        <span class="pill" title="The login directory it was found in">@origin</span>
+                    }
+                    <span class="pill">used by @UsageCount(plugin.Id)</span>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (Groups.Count == 0)
+{
+    <div class="empty">
+        <div class="big">◈</div>
+        Nothing installed on this machine yet. Plugins arrive through their own CLI —
+        <code>claude plugin install &lt;name&gt;@@&lt;marketplace&gt;</code>,
+        <code>codex plugin install &lt;name&gt;@@&lt;marketplace&gt;</code>, or a package added to
+        opencode's <code>plugin</code> list — and appear here for agents to switch on.
+    </div>
+}
+
+@code {
+    [CascadingParameter] private MainLayout Layout { get; set; } = default!;
+
+    private RemoteHostConfig _config = RemoteHostConfig.Empty(string.Empty);
+    private IReadOnlyList<Agent> _agents = [];
+    private string? _instanceId;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _agents = await AgentStore.GetAllAsync();
+        await LoadAsync();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            Layout.SetHeader("Plugins", "What each CLI can load, and which agents load it");
+    }
+
+    /// <summary>
+    /// Installed plugins by the CLI that owns them. Anything whose id this build cannot read — a
+    /// newer machine offering a plugin system this one has never heard of — is left out rather than
+    /// shown under a guess.
+    /// </summary>
+    private Dictionary<AiProvider, List<RemoteNamedItem>> Groups =>
+        _config.Plugins
+            .Select(item => (Item: item, Key: PluginKey.Parse(item.Id)))
+            .Where(pair => pair.Key is not null)
+            .GroupBy(pair => pair.Key!.Value.Provider)
+            .OrderBy(group => group.Key)
+            .ToDictionary(group => group.Key, group => group.Select(pair => pair.Item).ToList());
+
+    private async Task SelectInstanceAsync(string? remoteInstanceId)
+    {
+        _instanceId = string.IsNullOrWhiteSpace(remoteInstanceId) ? null : remoteInstanceId;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => (_config, _error) = await Targets.ConfigAsync(_instanceId);
+
+    private int UsageCount(string pluginId) =>
+        _agents.Count(a => a.PluginIds.Contains(pluginId, StringComparer.OrdinalIgnoreCase));
+
+    private static string ShortName(RemoteNamedItem plugin) =>
+        PluginKey.Parse(plugin.Id)?.ShortName ?? plugin.Name;
+
+    private static string? Marketplace(RemoteNamedItem plugin) => PluginKey.Parse(plugin.Id)?.Marketplace;
+
+    private static string Title(AiProvider provider) => provider switch
+    {
+        AiProvider.Claude => "Claude Code",
+        AiProvider.Codex => "OpenAI Codex",
+        AiProvider.Opencode => "OpenCode",
+        _ => provider.ToString(),
+    };
+}

@@ -51,6 +51,7 @@ public class McpWorkspaceCredentialTests : IDisposable
             Store<Skill>(),
             _servers,
             tokens,
+            new StubPluginCatalog(),
             Store<Project>(),
             Store<GlobalSettings>(),
             new StubStandardsFilesSyncService(),

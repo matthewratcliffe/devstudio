@@ -182,6 +182,7 @@ public class TranscriptRaceTests : IDisposable
 
         public Task ReleaseAsync(SessionWorkspace workspace, CancellationToken ct = default) => Task.CompletedTask;
         public Task MaterialiseSkillsAsync(Agent agent, string workspacePath, CancellationToken ct = default) => Task.CompletedTask;
+        public Task MaterialisePluginsAsync(Agent agent, string workspacePath, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task<IReadOnlyList<string>> MaterialiseMcpAsync(
             Agent agent,

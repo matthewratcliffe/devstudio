@@ -70,6 +70,10 @@
             {
                 <span class="pill">@agent.McpServerIds.Count mcp</span>
             }
+            @if (agent.PluginIds.Count > 0)
+            {
+                <span class="pill">@agent.PluginIds.Count plugins</span>
+            }
             @if (!agent.Enabled)
             {
                 <span class="pill pill-red">disabled</span>
@@ -120,7 +124,7 @@
             </div>
 
             <RemoteInstancePicker Value="_editing.RemoteInstanceId" ValueChanged="SelectInstanceAsync"
-                                  Hint="Where this agent's sessions run. Its repository, login, skills and MCP servers below all come from that machine." />
+                                  Hint="Where this agent's sessions run. Its repository, login, skills, MCP servers and plugins below all come from that machine." />
 
             @if (_targetError is { Length: > 0 })
             {
@@ -393,7 +397,7 @@
 
             <div class="divider"></div>
 
-            <div class="grid grid-2">
+            <div class="grid grid-3">
                 <div>
                     <div class="section-tag">Skills</div>
                     @if (_target.Skills.Count == 0)
@@ -425,6 +429,33 @@
                                    @bind:set="on => Toggle(_editing.McpServerIds, server.Id, on)" />
                             <span>@server.Name @(server.IsDefault ? "(always on)" : "")</span>
                         </div>
+                    }
+                </div>
+                <div>
+                    <div class="section-tag">Plugins</div>
+                    @if (!PluginKey.Supports(_editing.Provider))
+                    {
+                        <p class="mono-dim">A custom CLI has no plugin system this app can configure.</p>
+                    }
+                    else if (Plugins.Count == 0)
+                    {
+                        <p class="mono-dim">
+                            Nothing installed for this CLI on that machine. Plugins are installed by the
+                            CLI itself and then appear here.
+                        </p>
+                    }
+                    else
+                    {
+                        @foreach (var plugin in Plugins)
+                        {
+                            <div class="check" @key="plugin.Id">
+                                <input type="checkbox"
+                                       @bind:get="_editing.PluginIds.Contains(plugin.Id)"
+                                       @bind:set="on => Toggle(_editing.PluginIds, plugin.Id, on)" />
+                                <span title="@plugin.Id">@PluginLabel(plugin)</span>
+                            </div>
+                        }
+                        <span class="hint">Anything left unticked is switched off for this agent's sessions.</span>
                     }
                 </div>
             </div>
@@ -595,8 +626,8 @@
 
         _editing.RemoteInstanceId = remoteInstanceId;
 
-        // Repositories, logins, skills and MCP servers are all named by ids that belong to one
-        // machine. Carrying them over would leave the agent pointing at things that are not there,
+        // Repositories, logins, skills, MCP servers and plugins are all named by things that belong
+        // to one machine. Carrying them over would leave the agent pointing at what is not there,
         // and the failure would not show up until its first turn.
         _editing.RepositoryId = null;
         _editing.BaseBranch = null;
@@ -604,6 +635,7 @@
         _editing.FallbackAccountId = null;
         _editing.SkillIds.Clear();
         _editing.McpServerIds.Clear();
+        _editing.PluginIds.Clear();
         _branches = [];
 
         await LoadTargetAsync();
@@ -770,6 +802,24 @@
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
+    /// <summary>
+    /// The plugins the target machine has for the CLI this agent drives. Filtered by provider
+    /// because each CLI has its own plugin system: a codex plugin listed under a claude agent would
+    /// be a tick that quietly did nothing.
+    /// </summary>
+    private IReadOnlyList<RemoteNamedItem> Plugins =>
+        _editing is null
+            ? []
+            : _target.Plugins
+                .Where(p => PluginKey.Parse(p.Id)?.Provider == _editing.Provider)
+                .ToList();
+
+    /// <summary>Marketplace plugins read as name@@marketplace; the marketplace is the quieter half.</summary>
+    private static string PluginLabel(RemoteNamedItem plugin) =>
+        PluginKey.Parse(plugin.Id) is { Marketplace: { Length: > 0 } marketplace } key
+            ? $"{key.ShortName} ({marketplace})"
+            : plugin.Name;
+
     private bool HasMcp(Agent agent) =>
         agent.McpServerIds.Count > 0 || _mcpServers.Any(s => s.IsDefault && s.Enabled);
 
@@ -817,6 +867,7 @@
         UseWorktree = agent.UseWorktree,
         SkillIds = [.. agent.SkillIds],
         McpServerIds = [.. agent.McpServerIds],
+        PluginIds = [.. agent.PluginIds],
         Environment = new Dictionary<string, string>(agent.Environment),
         ExtraArguments = agent.ExtraArguments,
         Enabled = agent.Enabled,

@@ -23,6 +23,7 @@ public sealed class LocalExecutionHost : IExecutionHost
 {
     private readonly IEntityStore<McpServer> _mcpServers;
     private readonly IEntityStore<Skill> _skills;
+    private readonly IPluginCatalog _plugins;
     private readonly IEntityStore<GitRepository> _repositories;
     private readonly IEntityStore<ProviderAccount> _accounts;
     private readonly IEntityStore<CliProvider> _cliProviders;
@@ -37,6 +38,7 @@ public sealed class LocalExecutionHost : IExecutionHost
         ITerminalService terminals,
         IEntityStore<McpServer> mcpServers,
         IEntityStore<Skill> skills,
+        IPluginCatalog plugins,
         IEntityStore<GitRepository> repositories,
         IEntityStore<ProviderAccount> providerAccounts,
         IEntityStore<CliProvider> cliProviders,
@@ -50,6 +52,7 @@ public sealed class LocalExecutionHost : IExecutionHost
         Terminals = terminals;
         _mcpServers = mcpServers;
         _skills = skills;
+        _plugins = plugins;
         _repositories = repositories;
         _accounts = providerAccounts;
         _cliProviders = cliProviders;
@@ -107,7 +110,14 @@ public sealed class LocalExecutionHost : IExecutionHost
                     a.IsDefault,
                     a.CliProviderId is { Length: > 0 } cli ? $"Custom:{cli}" : a.Provider.ToString()))
                 .ToList(),
-            OperatingSystem.IsWindows());
+            OperatingSystem.IsWindows())
+        {
+            // Named by the CLI that owns them, and shown with the login directory they were found
+            // in: a machine with two Claude logins can have a plugin installed for one of them only.
+            Plugins = (await _plugins.GetAllAsync(ct))
+                .Select(p => new RemoteNamedItem(p.Id, p.Key.Name, p.EnabledByDefault, p.Origin))
+                .ToList(),
+        };
     }
 
     /// <summary>Read the way the sidebar reads it, so both agree on what is running.</summary>

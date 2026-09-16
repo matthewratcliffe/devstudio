@@ -7,6 +7,7 @@ using DevStudio.Application.Common;
 using DevStudio.Application.Sessions;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Providers;
+using DevStudio.Infrastructure.Plugins;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -87,10 +88,29 @@ public sealed class OpencodeCli : IProviderCli
         await pump;
     }
 
+    /// <summary>
+    /// Hands opencode the agent's plugin selection through the project config its server reads for
+    /// the workspace. Best effort: a turn that could not be told about plugins still runs, with
+    /// whatever the server already had loaded.
+    /// </summary>
+    private void WritePluginConfig(string workingDirectory)
+    {
+        try
+        {
+            OpencodePluginConfig.Write(workingDirectory);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not write the opencode plugin config in {Directory}", workingDirectory);
+        }
+    }
+
     private async Task ConverseAsync(TurnRequest request, ChannelWriter<AgentEvent> events, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(_options.OpencodeBaseUrl))
             throw new InvalidOperationException("No opencode server URL is configured.");
+
+        WritePluginConfig(request.WorkingDirectory);
 
         await _server.EnsureRunningAsync(ct);
 

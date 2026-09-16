@@ -9,6 +9,7 @@ using DevStudio.Application.Globals;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Mcp;
 using DevStudio.Domain.Providers;
+using DevStudio.Infrastructure.Plugins;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -218,6 +219,23 @@ public sealed class ClaudeCli : IProviderCli
         return path;
     }
 
+    /// <summary>
+    /// Best effort: a session that could not be told which plugins to run is better off running
+    /// with whatever the login already has enabled than not running at all.
+    /// </summary>
+    private string? WritePluginSettings(string workingDirectory)
+    {
+        try
+        {
+            return ClaudePluginSettings.Write(workingDirectory);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not write the plugin settings for {Directory}", workingDirectory);
+            return null;
+        }
+    }
+
     private List<string> BuildArguments(TurnRequest request, string? systemPromptFile)
     {
         // The prompt travels on stdin rather than as an argument value: on Windows the whole
@@ -283,6 +301,15 @@ public sealed class ClaudeCli : IProviderCli
         {
             arguments.Add("--mcp-config");
             arguments.Add(mcpConfig);
+        }
+
+        // The agent's plugin choice, as a settings file for this run only. Written here rather than
+        // by the provisioner because it is claude's own format: the workspace holds the decision,
+        // and each CLI turns it into whatever it reads.
+        if (WritePluginSettings(request.WorkingDirectory) is { } pluginSettings)
+        {
+            arguments.Add("--settings");
+            arguments.Add(pluginSettings);
         }
 
         // Without this the CLI asks permission for every MCP tool and, with no one to answer,
