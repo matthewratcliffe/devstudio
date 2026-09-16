@@ -48,6 +48,7 @@ public class SkillMaterialisationTests : IDisposable
             _skills,
             Store<McpServer>(options),
             new StubTokens(),
+            new StubPluginCatalog(),
             Store<Project>(options),
             Store<GlobalSettings>(options),
             new StubStandardsFilesSyncService(),

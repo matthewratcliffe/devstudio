@@ -6,6 +6,7 @@ using DevStudio.Application.Common;
 using DevStudio.Application.Globals;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Providers;
+using DevStudio.Infrastructure.Plugins;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -209,6 +210,7 @@ public sealed class CodexCli : IProviderCli
         }
 
         arguments.AddRange(McpOverrides(request.WorkingDirectory));
+        arguments.AddRange(PluginOverrides(request.WorkingDirectory));
 
         // --sandbox is an `exec` flag only, so resuming sets the same thing through config, which
         // both subcommands take.
@@ -296,6 +298,20 @@ public sealed class CodexCli : IProviderCli
                 yield return "-c";
                 yield return $"{key}.env={{{string.Join(", ", pairs)}}}";
             }
+        }
+    }
+
+    /// <summary>
+    /// Switches the agent's plugins on and the rest off for this run. codex keeps the same decision
+    /// in its config as <c>[plugins."name@marketplace"] enabled = ...</c>, and a <c>-c</c> override
+    /// is that key set for one invocation, so nothing in the login's own config is rewritten.
+    /// </summary>
+    private IEnumerable<string> PluginOverrides(string workspace)
+    {
+        foreach (var plugin in WorkspacePlugins.Read(workspace, AiProvider.Codex))
+        {
+            yield return "-c";
+            yield return $"plugins.{TomlKey(plugin.Name)}.enabled={(plugin.Enabled ? "true" : "false")}";
         }
     }
 

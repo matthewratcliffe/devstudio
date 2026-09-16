@@ -3,7 +3,10 @@ using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Mcp;
+using DevStudio.Domain.Plugins;
+using DevStudio.Domain.Providers;
 using DevStudio.Infrastructure.Persistence;
+using DevStudio.Infrastructure.Plugins;
 using DevStudio.Infrastructure.Providers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -87,6 +90,34 @@ public class ClaudeArgumentTests : IDisposable
 
         var path = arguments[index + 1];
         Assert.Equal("Follow the house style.", await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task The_plugins_the_agent_chose_are_passed_as_a_settings_file()
+    {
+        // --settings applies for this run only and beats the user and project files, so a session
+        // gets the agent's plugins without the login's own configuration being rewritten.
+        WorkspacePlugins.Write(_root, [
+            new WorkspacePlugin(new PluginKey(AiProvider.Claude, "github@claude-plugins-official"), true),
+            new WorkspacePlugin(new PluginKey(AiProvider.Claude, "linear@claude-plugins-official"), false),
+        ]);
+
+        var arguments = await ArgumentsFor(Turn());
+
+        var index = arguments.IndexOf("--settings");
+        Assert.True(index >= 0, "no --settings was passed");
+
+        var settings = JsonNode.Parse(await File.ReadAllTextAsync(arguments[index + 1]))!["enabledPlugins"]!.AsObject();
+        Assert.True(settings["github@claude-plugins-official"]!.GetValue<bool>());
+        Assert.False(settings["linear@claude-plugins-official"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task No_settings_file_is_passed_when_nothing_has_been_said_about_plugins()
+    {
+        var arguments = await ArgumentsFor(Turn());
+
+        Assert.DoesNotContain("--settings", arguments);
     }
 
     [Fact]

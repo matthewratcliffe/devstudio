@@ -35,6 +35,7 @@ public class SystemPromptLayeringTests : IDisposable
             Store<Skill>(options),
             Store<McpServer>(options),
             new StubTokens(),
+            new StubPluginCatalog(),
             _projects,
             _globals,
             new StubStandardsFilesSyncService(),

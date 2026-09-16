@@ -14,7 +14,7 @@ only credential involved is the login you complete in the web UI.
 
 | Area | What you get |
 | --- | --- |
-| **Agents** | Any number, each bound to `claude`, `codex`, `opencode` or a CLI you define yourself, with its own system prompt, model, permission mode, skills and MCP servers. |
+| **Agents** | Any number, each bound to `claude`, `codex`, `opencode` or a CLI you define yourself, with its own system prompt, model, permission mode, skills, MCP servers and plugins. |
 | **Bring your own CLI** | Describe any installed, already-signed-in CLI on the **CLI providers** page — executable, argument template, output format, sign-in command — and it becomes an agent provider. No code change, no API key. |
 | **Concurrent chats** | Sessions run in parallel up to a configurable cap. Each session queues its own turns, so you can keep typing while an agent is working. |
 | **Team settings** | One git repository holding the team's agents, workflows, skills, schedules and standards. Point every install at it and they all get the same definitions, reviewed and versioned like code instead of retyped on each machine. Anything you make in the UI stays local and is never touched by a sync ([how](#team-settings)). |
@@ -34,8 +34,9 @@ only credential involved is the login you complete in the web UI.
 | **New chat** | A conversation with no project and no agent: type and send. The CLI, permission mode, model and MCP servers sit on the right of the chat and stay changeable once it is running — including swapping CLI mid-conversation. Read-only by default, in a scratch directory. |
 | **Output files** | Everything an agent writes in its workspace is listed in the chat, with images previewed inline and every file downloadable. |
 | **Skills** | Reusable instruction files, written to `.claude/skills/<slug>/SKILL.md` (and mirrored to `AGENTS.orchestrator.md` for Codex) before a session starts. |
+| **Plugins** | The plugins each CLI has installed — `claude plugin install`, `codex plugin install`, packages in opencode's config — listed on the **Plugins** page for whichever machine you pick, and ticked on per agent. Everything installed and not ticked is switched *off* for that session, so an agent's tools are what its editor shows rather than whatever happens to be enabled on the machine. Nothing here rewrites a CLI's own configuration: claude is handed a settings file for the run, codex a config override, opencode the project config its server reads ([how](#plugins)). |
 | **MCP — both directions** | Register MCP servers and attach them to agents (`.mcp.json` per workspace), **and** the orchestrator exposes its own MCP server at `/mcp` so agents can list sessions, read another agent's transcript, steer a run, leave notes, start sessions and run workflows. HTTP servers can authenticate with an OAuth client-credentials grant, refreshed automatically, or a pasted bearer token. **Test** connects like a CLI would and lists the tools the server actually offers. Servers attach to agents, and a chat — including a quick chat — can carry extra servers of its own, applied from its next turn. The built-in orchestrator entry cannot be deleted and is restored on start if it goes missing. Its own endpoints require a token this app generates and attaches to every session by itself, so nothing else that reaches the port can steer your agents. |
-| **Remote instances** | Run work on another machine's devStudio. Pair the two once — you ask, somebody at the other end approves, and a five-year key is issued — then pick it from the **Runs on** dropdown in a chat, on an agent, or on a schedule, queue or workflow. Every dependent dropdown follows: the CLIs, models, logins, checkouts, skills and MCP servers all come from that machine. The conversation, its transcript and the agent stay here ([how](#remote-instances)). |
+| **Remote instances** | Run work on another machine's devStudio. Pair the two once — you ask, somebody at the other end approves, and a five-year key is issued — then pick it from the **Runs on** dropdown in a chat, on an agent, or on a schedule, queue or workflow. Every dependent dropdown follows: the CLIs, models, logins, checkouts, skills, MCP servers and plugins all come from that machine. The conversation, its transcript and the agent stay here ([how](#remote-instances)). |
 | **PWA** | Installable, with a themed offline page. |
 | **Version in the corner** | The build you are running sits under the sidebar, with a line beside it when a newer release exists. |
 | **Desktop app** | Installers for Windows, macOS and Linux that run the whole thing natively — no Docker, no volumes, direct access to your files ([how](#as-a-desktop-app-windows-macos-linux)). Updates download in the background and install when you quit. |
@@ -526,6 +527,33 @@ else; the window is written to disk beside the token, so a redeploy mid-turn doe
 **Rotate and cut off now** skips the window for when the token itself has leaked, and any turn
 mid-flight loses its MCP tools with a 401.
 
+## Plugins
+
+Each CLI has its own plugin system, and each installs plugins for itself: `claude plugin install
+<name>@<marketplace>`, `codex plugin install <name>@<marketplace>`, or a package named in opencode's
+`plugin` list. devStudio keeps no second list of them. The **Plugins** page reads what the CLIs
+themselves recorded — claude's `installed_plugins.json`, codex's plugin cache and `config.toml`,
+opencode's config — for every login on the machine you pick, so a plugin installed at a terminal
+shows up without anything being synced.
+
+What devStudio owns is *which* of them an agent runs. Tick them in the agent editor, and before a
+session starts its choice is staged into the workspace. Everything installed and not ticked is
+written out as **off**, which is the point: without that, a plugin somebody enabled globally would
+ride along with every agent, and what an agent could do would depend on the machine rather than on
+its own definition.
+
+Each CLI is then told in its own language, for that run only — no login's configuration is rewritten:
+
+| CLI | How the selection is applied |
+| --- | --- |
+| `claude` | A settings file of `enabledPlugins`, passed as `--settings`. It applies to the run and takes precedence over the user and project settings files. |
+| `codex` | One `-c plugins."<name>@<marketplace>".enabled=…` override per plugin, the same key codex keeps the decision under in `config.toml`. |
+| `opencode` | The `plugin` array of the workspace's own `opencode.json` — the project config its server reads for that directory. Only that key is written, so a repository's other opencode settings survive. Plugins dropped straight into an opencode plugin directory load regardless and are deliberately not offered here. |
+
+An agent pinned to a remote instance picks from that machine's installed plugins, alongside its
+repository, login, skills and MCP servers; changing the machine clears the selection rather than
+leaving it naming something that is not there.
+
 ## Guidance
 
 A turn is one CLI invocation and its prompt cannot be rewritten once the process has it, so a steer
@@ -825,7 +853,7 @@ is checked on every request rather than baked into the token.
 The **Runs on** dropdown appears wherever work starts, and only when something has been paired:
 
 - **New chat** — that conversation runs there. Its CLI, models and MCP servers are the remote's.
-- **Agents** — a lasting choice. Its repository, login, skills and MCP servers all come from that
+- **Agents** — a lasting choice. Its repository, login, skills, MCP servers and plugins all come from that
   machine, so those pickers reload when you change it.
 - **New session** — a one-off override, so an agent can be sent elsewhere without being edited.
 - **Schedules, queues and workflows** — an override for what they dispatch. Left alone they follow

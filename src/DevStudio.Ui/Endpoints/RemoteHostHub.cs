@@ -114,6 +114,9 @@ public sealed class RemoteHostHub : Hub
         IReadOnlyList<string> extraServerIds) =>
         _local.Workspaces.MaterialiseMcpAsync(agent, workspacePath, extraServerIds, Context.ConnectionAborted);
 
+    public Task MaterialisePlugins(Agent agent, string workspacePath) =>
+        _local.Workspaces.MaterialisePluginsAsync(agent, workspacePath, Context.ConnectionAborted);
+
     public Task MaterialiseGlobalFiles(string workspacePath) =>
         _local.Workspaces.MaterialiseGlobalFilesAsync(workspacePath, Context.ConnectionAborted);
 

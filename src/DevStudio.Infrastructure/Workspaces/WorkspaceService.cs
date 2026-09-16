@@ -8,10 +8,12 @@ using DevStudio.Application.Globals;
 using DevStudio.Domain.Agents;
 using DevStudio.Domain.Globals;
 using DevStudio.Domain.Mcp;
+using DevStudio.Domain.Plugins;
 using DevStudio.Domain.Projects;
 using DevStudio.Domain.Repositories;
 using DevStudio.Domain.Sessions;
 using DevStudio.Domain.Skills;
+using DevStudio.Infrastructure.Plugins;
 using DevStudio.Infrastructure.Skills;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -29,6 +31,7 @@ public sealed class WorkspaceService : IWorkspaceService
     private readonly IEntityStore<Skill> _skills;
     private readonly IEntityStore<McpServer> _mcpServers;
     private readonly IMcpTokenService _mcpTokens;
+    private readonly IPluginCatalog _plugins;
     private readonly IEntityStore<Project> _projects;
     private readonly IEntityStore<GlobalSettings> _globals;
     private readonly IStandardsFilesSyncService _standardsFiles;
@@ -41,6 +44,7 @@ public sealed class WorkspaceService : IWorkspaceService
         IEntityStore<Skill> skills,
         IEntityStore<McpServer> mcpServers,
         IMcpTokenService mcpTokens,
+        IPluginCatalog plugins,
         IEntityStore<Project> projects,
         IEntityStore<GlobalSettings> globals,
         IStandardsFilesSyncService standardsFiles,
@@ -52,6 +56,7 @@ public sealed class WorkspaceService : IWorkspaceService
         _skills = skills;
         _mcpServers = mcpServers;
         _mcpTokens = mcpTokens;
+        _plugins = plugins;
         _projects = projects;
         _globals = globals;
         _standardsFiles = standardsFiles;
@@ -134,6 +139,7 @@ public sealed class WorkspaceService : IWorkspaceService
 
         await MaterialiseSkillsAsync(agent, workspace.Path, ct);
         await MaterialiseMcpAsync(agent, workspace.Path, plan.ExtraServerIds, ct);
+        await MaterialisePluginsAsync(agent, workspace.Path, ct);
         await MaterialiseGlobalFilesAsync(workspace.Path, ct);
 
         WriteSuppliedFiles(plan.ProjectFiles, Path.Combine(workspace.Path, "project-files"));
@@ -304,6 +310,46 @@ public sealed class WorkspaceService : IWorkspaceService
         return selected.Select(s => s.Name).ToList();
     }
 
+    public async Task MaterialisePluginsAsync(Agent agent, string workspacePath, CancellationToken ct = default)
+    {
+        if (!PluginKey.Supports(agent.Provider))
+        {
+            WorkspacePlugins.Write(workspacePath, []);
+            return;
+        }
+
+        var selected = agent.PluginIds
+            .Select(PluginKey.Parse)
+            .Where(key => key?.Provider == agent.Provider)
+            .Select(key => key!.Value.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Everything installed for this CLI, whether or not the agent wants it: naming only the
+        // wanted ones would leave a plugin somebody enabled globally switched on for every agent,
+        // and an agent's tools would then depend on the machine rather than on its own definition.
+        var installed = (await _plugins.GetAllAsync(ct))
+            .Where(p => p.Key.Provider == agent.Provider)
+            .Select(p => p.Key.Name);
+
+        var plugins = installed
+            .Concat(selected)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .Select(name => new WorkspacePlugin(new PluginKey(agent.Provider, name), selected.Contains(name)))
+            .ToList();
+
+        try
+        {
+            WorkspacePlugins.Write(workspacePath, plugins);
+        }
+        catch (Exception ex)
+        {
+            // A session that cannot be told about plugins still runs; it runs with whatever the
+            // CLI's own configuration says, which is where it was before this app existed.
+            _logger.LogWarning(ex, "Could not write the plugin selection into {Path}", workspacePath);
+        }
+    }
+
     /// <summary>
     /// Adds the files this app stages into a workspace to that checkout's private exclude list, so
     /// they never show up as untracked work in an editor pointed at the same directory. It is the
@@ -318,6 +364,9 @@ public sealed class WorkspaceService : IWorkspaceService
             "/GUIDANCE.md",
             "/AGENTS.orchestrator.md",
             "/.mcp.json",
+            "/" + WorkspacePlugins.FileName,
+            "/" + ClaudePluginSettings.FileName,
+            "/" + OpencodePluginConfig.FileName,
             "/.claude/skills/",
         ];
 

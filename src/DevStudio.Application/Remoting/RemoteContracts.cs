@@ -20,6 +20,7 @@ public static class RemoteHubMethods
     public const string ReleaseWorkspace = nameof(ReleaseWorkspace);
     public const string MaterialiseSkills = nameof(MaterialiseSkills);
     public const string MaterialiseMcp = nameof(MaterialiseMcp);
+    public const string MaterialisePlugins = nameof(MaterialisePlugins);
     public const string MaterialiseProjectFiles = nameof(MaterialiseProjectFiles);
     public const string MaterialiseGlobalFiles = nameof(MaterialiseGlobalFiles);
     public const string WriteGuidance = nameof(WriteGuidance);
@@ -116,6 +117,14 @@ public sealed record RemoteHostConfig(
         IsWindows
             ? ("cmd.exe", ["/c", commandLine])
             : ("/bin/sh", ["-lc", commandLine]);
+
+    /// <summary>
+    /// CLI plugins installed over there, as <c>provider:name</c> ids. Declared beside the positional
+    /// members rather than among them so a remote running an older build — one that has never heard
+    /// of plugins — still answers a config this side can read, with an empty list rather than a
+    /// deserialisation failure.
+    /// </summary>
+    public IReadOnlyList<RemoteNamedItem> Plugins { get; init; } = [];
 
     public static RemoteHostConfig Empty(string hostName) =>
         new(hostName, null, [], [], [], [], []);

@@ -106,6 +106,12 @@ public sealed class RemoteWorkspaceService : IWorkspaceService
             ct);
     }
 
+    public async Task MaterialisePluginsAsync(Agent agent, string workspacePath, CancellationToken ct = default)
+    {
+        var connection = await _pool.GetAsync(_instance, ct);
+        await connection.InvokeAsync(RemoteHubMethods.MaterialisePlugins, agent, workspacePath, ct);
+    }
+
     public async Task WriteGuidanceAsync(
         string workspacePath,
         IEnumerable<GuidanceMessage> guidance,

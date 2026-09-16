@@ -100,9 +100,9 @@ public sealed class Agent : Entity
     /// on. Set to a <c>RemoteInstance</c> id and the CLI, its login, the checkout and the workspace
     /// are all that machine's; the agent, its sessions and their transcripts stay here.
     ///
-    /// It follows that <see cref="RepositoryId"/>, <see cref="AccountId"/>, <see cref="SkillIds"/>
-    /// and <see cref="McpServerIds"/> then name things on the remote, which is why choosing an
-    /// instance reloads every one of those pickers.
+    /// It follows that <see cref="RepositoryId"/>, <see cref="AccountId"/>, <see cref="SkillIds"/>,
+    /// <see cref="McpServerIds"/> and <see cref="PluginIds"/> then name things on the remote, which
+    /// is why choosing an instance reloads every one of those pickers.
     /// </summary>
     public string? RemoteInstanceId { get; set; }
 
@@ -120,6 +120,15 @@ public sealed class Agent : Entity
 
     /// <summary>MCP servers wired up for this agent, on top of any marked as default.</summary>
     public List<string> McpServerIds { get; set; } = [];
+
+    /// <summary>
+    /// CLI plugins this agent's sessions run with, as <c>provider:name</c> — see
+    /// <c>PluginKey</c>. Plugins are installed by the CLI itself; this only says which of the
+    /// installed ones are switched on, and everything installed and not listed here is switched
+    /// off for the session, so an agent's tool surface is what its editor shows rather than
+    /// whatever the machine happens to have enabled.
+    /// </summary>
+    public List<string> PluginIds { get; set; } = [];
 
     /// <summary>Extra environment variables handed to the CLI process.</summary>
     public Dictionary<string, string> Environment { get; set; } = [];

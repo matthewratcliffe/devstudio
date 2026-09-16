@@ -42,6 +42,7 @@ public class LocalWorkspaceExcludeTests : IDisposable
             Store<Skill>(options),
             Store<McpServer>(options),
             new StubTokens(),
+            new StubPluginCatalog(),
             Store<Project>(options),
             Store<GlobalSettings>(options),
             new StubStandardsFilesSyncService(),

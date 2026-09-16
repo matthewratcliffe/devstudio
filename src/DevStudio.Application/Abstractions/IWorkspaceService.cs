@@ -46,7 +46,7 @@ public sealed record WorkspacePlan
 
 /// <summary>
 /// Prepares the directory an agent session runs in: worktree or project folder, the agent's skills,
-/// its MCP configuration, and the project's uploaded files.
+/// its MCP configuration, its plugin selection, and the project's uploaded files.
 /// </summary>
 public interface IWorkspaceService
 {
@@ -94,6 +94,13 @@ public interface IWorkspaceService
         string workspacePath,
         IReadOnlyList<string>? extraServerIds = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Writes the agent's plugin selection into the workspace for its CLI to apply. Everything this
+    /// machine has installed for that CLI is written, on or off, so a session runs the plugins the
+    /// agent names and nothing else — including when the CLI's own configuration has more enabled.
+    /// </summary>
+    Task MaterialisePluginsAsync(Agent agent, string workspacePath, CancellationToken ct = default);
 
     /// <summary>Copies a project's uploaded files into the workspace so agents can read them.</summary>
     Task MaterialiseProjectFilesAsync(string projectId, string workspacePath, CancellationToken ct = default);

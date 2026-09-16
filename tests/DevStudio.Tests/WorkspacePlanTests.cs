@@ -41,6 +41,7 @@ public sealed class WorkspacePlanTests : IDisposable
             new JsonEntityStore<Skill>(options, NullLogger<JsonEntityStore<Skill>>.Instance),
             new JsonEntityStore<McpServer>(options, NullLogger<JsonEntityStore<McpServer>>.Instance),
             new StubMcpTokens(),
+            new StubPluginCatalog(),
             _projects,
             new JsonEntityStore<GlobalSettings>(options, NullLogger<JsonEntityStore<GlobalSettings>>.Instance),
             new StubStandardsFilesSyncService(),

@@ -19,6 +19,7 @@ using DevStudio.Infrastructure.Images;
 using DevStudio.Infrastructure.Mcp;
 using DevStudio.Infrastructure.SourceControl;
 using DevStudio.Infrastructure.Persistence;
+using DevStudio.Infrastructure.Plugins;
 using DevStudio.Infrastructure.Processes;
 using DevStudio.Infrastructure.Providers;
 using DevStudio.Infrastructure.Providers.Acp;
@@ -120,6 +121,10 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.UserAgent.ParseAdd("devStudio");
         });
         services.AddSingleton<ISkillImporter, SkillImporter>();
+
+        // What the CLIs on this machine have installed. Read from their own files on demand rather
+        // than kept here, so an install done at a terminal shows up without anything being synced.
+        services.AddSingleton<IPluginCatalog, PluginCatalog>();
 
         services.AddSingleton<IGitService, GitService>();
         services.AddSingleton<ISourceControlHosts, SourceControlHosts>();
