@@ -463,13 +463,15 @@ jobs:
           script: |
             const { owner, repo } = context.repo;
             const mine = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, { owner, repo, run_id: context.runId, per_page: 100 });
-            const names = new Set(mine.map(a => a.name));
+            // docker/build-push-action names its build record afresh every run (owner~repo~XXXXXX.dockerbuild)
+            const kind = name => name.endsWith('.dockerbuild') ? '*.dockerbuild' : name;
+            const names = new Set(mine.map(a => kind(a.name)));
             const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, { owner, repo, per_page: 100 });
             const finished = new Map();
             let deleted = 0, bytes = 0;
             for (const a of artifacts) {
               const runId = a.workflow_run?.id;
-              if (a.expired || !names.has(a.name) || !runId || runId === context.runId) continue;
+              if (a.expired || !names.has(kind(a.name)) || !runId || runId === context.runId) continue;
               if (!finished.has(runId)) {
                 const { data: run } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: runId });
                 finished.set(runId, run.status === 'completed' && run.run_number < context.runNumber);
