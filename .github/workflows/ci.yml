@@ -436,3 +436,47 @@ jobs:
           echo >> "$GITHUB_STEP_SUMMARY"
           echo "Published channels:$published" >> "$GITHUB_STEP_SUMMARY"
           [ -n "$published" ] || { echo "FATAL: no packages to publish"; exit 1; }
+
+  # The artifacts only carry this run's tests and packages between jobs (the release keeps the
+  # packages), and the account's artifact storage quota is shared, so a green run clears out the
+  # older copies of what it uploaded itself: a pull request replaces the test results, a default
+  # branch build the packages too. Only runs that have finished: one still going may need its
+  # packages for its own release job. A skipped job (a pull request stops after the tests) is not a
+  # failure.
+  cleanup:
+    name: Remove older artifacts
+    needs: [test, version, image, installers, release]
+    if: >-
+      !cancelled()
+      && !contains(needs.*.result, 'failure')
+      && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      actions: write
+
+    steps:
+      - name: Delete artifacts from older, finished runs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const mine = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, { owner, repo, run_id: context.runId, per_page: 100 });
+            const names = new Set(mine.map(a => a.name));
+            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, { owner, repo, per_page: 100 });
+            const finished = new Map();
+            let deleted = 0, bytes = 0;
+            for (const a of artifacts) {
+              const runId = a.workflow_run?.id;
+              if (a.expired || !names.has(a.name) || !runId || runId === context.runId) continue;
+              if (!finished.has(runId)) {
+                const { data: run } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: runId });
+                finished.set(runId, run.status === 'completed' && run.run_number < context.runNumber);
+              }
+              if (!finished.get(runId)) continue;
+              await github.rest.actions.deleteArtifact({ owner, repo, artifact_id: a.id });
+              core.info(`Deleted ${a.name} from run ${runId} (${a.created_at}, ${Math.round(a.size_in_bytes / 1048576)} MB)`);
+              deleted++; bytes += a.size_in_bytes;
+            }
+            core.info(`${deleted} older artifact(s) deleted, ${Math.round(bytes / 1048576)} MB.`);
