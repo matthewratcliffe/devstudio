@@ -68,6 +68,7 @@ jobs:
           name: test-results
           path: "**/TestResults/*.trx"
           if-no-files-found: ignore
+          retention-days: 7
 
   # Everything below runs for the default branch, a tag, or a deliberate dispatch — a pull request
   # and an ordinary branch push get the tests and stop there. Skipping this job skips the three
@@ -237,7 +238,7 @@ jobs:
             main-exe: DevStudio.Desktop.exe
             channel: win-x64
             icon: src/DevStudio.Desktop/app.ico
-            extra-pack-args: --framework webview2
+            extra-pack-args: --framework webview2 --noPortable
 
           - name: macOS (Apple silicon)
             os: macos-latest
@@ -246,7 +247,7 @@ jobs:
             main-exe: devstudio
             channel: osx-arm64
             icon: artifacts/app.icns
-            extra-pack-args: --bundleId com.matthewratcliffe.devstudio
+            extra-pack-args: --bundleId com.matthewratcliffe.devstudio --noPortable
 
           # macos-13 was retired in December 2025; macos-15-intel is the last x86_64 image
           # Actions will offer, and it goes away in Fall 2027 with the architecture.
@@ -257,7 +258,7 @@ jobs:
             main-exe: devstudio
             channel: osx-x64
             icon: artifacts/app.icns
-            extra-pack-args: --bundleId com.matthewratcliffe.devstudio
+            extra-pack-args: --bundleId com.matthewratcliffe.devstudio --noPortable
 
           - name: Linux (x64)
             os: ubuntu-latest
@@ -284,8 +285,20 @@ jobs:
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
           restore-keys: nuget-${{ runner.os }}-
 
-      # Two self-contained publishes: the shell, and the same web app the container runs, nested in
-      # ./server where the shell looks for it. Neither needs .NET installed on the target machine.
+      # Two self-contained publishes into one directory: the same web app the container runs, and the
+      # shell beside it, where the shell looks for it. Neither needs .NET installed on the target
+      # machine, and they share the one copy of the runtime (each in its own process, as before):
+      # publishing them into separate directories shipped .NET twice, a third of every package.
+      # The server goes first so the shell's files win where the two differ — on Windows a handful
+      # of assemblies the Windows Desktop runtime builds itself, at the same or a higher version
+      # than the server's, so the server still binds to them. Everywhere else they are identical.
+      - name: Publish the server
+        run: >
+          dotnet publish src/DevStudio.Ui/DevStudio.Ui.csproj
+          -c Release -r ${{ matrix.rid }} --self-contained
+          -p:Version=${{ needs.version.outputs.value }}
+          -o artifacts/publish
+
       - name: Publish the shell
         run: >
           dotnet publish ${{ matrix.shell-project }}
@@ -293,19 +306,15 @@ jobs:
           -p:Version=${{ needs.version.outputs.value }}
           -o artifacts/publish
 
-      - name: Publish the server
-        run: >
-          dotnet publish src/DevStudio.Ui/DevStudio.Ui.csproj
-          -c Release -r ${{ matrix.rid }} --self-contained
-          -p:Version=${{ needs.version.outputs.value }}
-          -o artifacts/publish/server
-
       # The publish is worthless if the UI came out inert, and that failure is silent at runtime.
       - name: Verify the published output
         shell: bash
         run: |
+          server=DevStudio.Ui; [ "$RUNNER_OS" = Windows ] && server=DevStudio.Ui.exe
           for file in "artifacts/publish/${{ matrix.main-exe }}" \
-                      "artifacts/publish/server/wwwroot/_framework/blazor.web.js"; do
+                      "artifacts/publish/$server" \
+                      "artifacts/publish/DevStudio.Ui.dll" \
+                      "artifacts/publish/wwwroot/_framework/blazor.web.js"; do
             [ -f "$file" ] || { echo "FATAL: $file missing from the publish output"; exit 1; }
           done
 
@@ -339,7 +348,8 @@ jobs:
       # what makes vpk emit a delta alongside the full package. Without it every build ships a
       # ~100 MB full package and an installed app has to pull the whole thing down in the background
       # before it can update — a download that rarely survives to the end of a session. There is
-      # nothing to fetch for the first release on a channel, and that is not a failure.
+      # nothing to fetch for the first release on a channel, and that is not a failure. The fetched
+      # packages are only an input: they are dropped again before the upload below.
       - name: Fetch the published packages for delta generation
         shell: bash
         continue-on-error: true
@@ -362,14 +372,23 @@ jobs:
           --outputDir artifacts/releases
           ${{ matrix.extra-pack-args }}
 
-      # The whole output directory, not just the installer: the release job uploads it verbatim, and
-      # the update packages and the channel index beside them are what make the feed a feed.
+      # The previous release's full package was fetched only to compute the delta. The upload reads
+      # what this build produced from assets.<channel>.json and publishes just those files and the
+      # channel index, so carrying the old package to the release job only doubled the artifact.
+      - name: Drop the fetched packages
+        shell: bash
+        run: find artifacts/releases -name '*.nupkg' ! -name '*-${{ needs.version.outputs.value }}-*' -print -delete
+
+      # The rest of the output directory, not just the installer: the release job uploads it, and the
+      # update packages and the channel index beside them are what make the feed a feed. Only this
+      # run needs it, so it is kept for a day (the cleanup job removes older copies sooner).
       - name: Upload the packages
         uses: actions/upload-artifact@v4
         with:
           name: devstudio-${{ matrix.channel }}
           path: artifacts/releases
           if-no-files-found: error
+          retention-days: 1
 
       - name: Summary
         shell: bash
@@ -436,3 +455,49 @@ jobs:
           echo >> "$GITHUB_STEP_SUMMARY"
           echo "Published channels:$published" >> "$GITHUB_STEP_SUMMARY"
           [ -n "$published" ] || { echo "FATAL: no packages to publish"; exit 1; }
+
+  # The artifacts only carry this run's tests and packages between jobs (the release keeps the
+  # packages), and the account's artifact storage quota is shared, so a green run clears out the
+  # older copies of what it uploaded itself: a pull request replaces the test results, a default
+  # branch build the packages too. Only runs that have finished: one still going may need its
+  # packages for its own release job. A skipped job (a pull request stops after the tests) is not a
+  # failure.
+  cleanup:
+    name: Remove older artifacts
+    needs: [test, version, image, installers, release]
+    if: >-
+      !cancelled()
+      && !contains(needs.*.result, 'failure')
+      && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      actions: write
+
+    steps:
+      - name: Delete artifacts from older, finished runs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const mine = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, { owner, repo, run_id: context.runId, per_page: 100 });
+            // docker/build-push-action names its build record afresh every run (owner~repo~XXXXXX.dockerbuild)
+            const kind = name => name.endsWith('.dockerbuild') ? '*.dockerbuild' : name;
+            const names = new Set(mine.map(a => kind(a.name)));
+            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, { owner, repo, per_page: 100 });
+            const finished = new Map();
+            let deleted = 0, bytes = 0;
+            for (const a of artifacts) {
+              const runId = a.workflow_run?.id;
+              if (a.expired || !names.has(kind(a.name)) || !runId || runId === context.runId) continue;
+              if (!finished.has(runId)) {
+                const { data: run } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: runId });
+                finished.set(runId, run.status === 'completed' && run.run_number < context.runNumber);
+              }
+              if (!finished.get(runId)) continue;
+              await github.rest.actions.deleteArtifact({ owner, repo, artifact_id: a.id });
+              core.info(`Deleted ${a.name} from run ${runId} (${a.created_at}, ${Math.round(a.size_in_bytes / 1048576)} MB)`);
+              deleted++; bytes += a.size_in_bytes;
+            }
+            core.info(`${deleted} older artifact(s) deleted, ${Math.round(bytes / 1048576)} MB.`);

@@ -170,11 +170,12 @@ public sealed class ServerProcess : IDisposable
         if (Environment.GetEnvironmentVariable("DEVSTUDIO_SERVER") is { Length: > 0 } configured)
             candidates.Add(configured);
 
-        // Installed layout, the same on all three platforms: the shell at the root of the package,
-        // the server one directory down. On macOS that root is Contents/MacOS inside the .app.
+        // Installed layout, the same on all three platforms: the shell and the server side by side
+        // at the root of the package, sharing one copy of the runtime. On macOS that root is
+        // Contents/MacOS inside the .app. Builds before that kept the server one directory down.
         var here = AppContext.BaseDirectory;
-        candidates.Add(Path.Combine(here, "server", name));
         candidates.Add(Path.Combine(here, name));
+        candidates.Add(Path.Combine(here, "server", name));
 
         // Running from the build output: walk up to the repository and use the sibling project.
         for (var directory = new DirectoryInfo(here); directory is not null; directory = directory.Parent)

@@ -17,6 +17,8 @@
          used, but the WPF assembly is still resolved and reports a WindowsBase conflict that means
          nothing here. -->
     <MSBuildWarningsAsMessages>MSB3277</MSBuildWarningsAsMessages>
+    <!-- The WebView2 package's IntelliSense XML is for the editor, not the installed app. -->
+    <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
   </PropertyGroup>
 
   <ItemGroup>
