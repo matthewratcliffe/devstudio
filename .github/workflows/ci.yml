@@ -196,8 +196,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           # The .NET build stage runs natively and cross-compiles, so arm64 costs
           # a publish rather than a fully emulated SDK run.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=devstudio
+          cache-to: type=gha,mode=min,scope=devstudio
           provenance: mode=max
           sbom: true
 
