@@ -46,9 +46,16 @@ public sealed class AcpProcessConnectionFactory : IAcpConnectionFactory
         IReadOnlyDictionary<string, string> environment,
         CancellationToken ct)
     {
+        // CreateProcess knows nothing about PATHEXT, so a bare "codex" must be resolved first, and
+        // npm's .cmd shims have to go through the command interpreter.
+        var resolved = OperatingSystem.IsWindows()
+            ? Terminals.WindowsCommandLine.Resolve(executable)
+            : executable;
+        var viaCmd = OperatingSystem.IsWindows() && Terminals.WindowsCommandLine.NeedsCommandInterpreter(resolved);
+
         var info = new ProcessStartInfo
         {
-            FileName = executable,
+            FileName = viaCmd ? Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe" : resolved,
             WorkingDirectory = workingDirectory,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -59,8 +66,22 @@ public sealed class AcpProcessConnectionFactory : IAcpConnectionFactory
             StandardErrorEncoding = Encoding.UTF8,
         };
 
-        foreach (var argument in arguments)
-            info.ArgumentList.Add(argument);
+        if (viaCmd)
+        {
+            info.ArgumentList.Add("/d");
+            info.ArgumentList.Add("/s");
+            info.ArgumentList.Add("/c");
+            var quoted = new[] { resolved }.Concat(arguments)
+                .Select(a => a.Length > 0 && !a.Any(c => char.IsWhiteSpace(c) || c == '"')
+                    ? a
+                    : "\"" + a.Replace("\"", "\\\"") + "\"");
+            info.ArgumentList.Add(string.Join(' ', quoted));
+        }
+        else
+        {
+            foreach (var argument in arguments)
+                info.ArgumentList.Add(argument);
+        }
 
         foreach (var pair in environment)
             info.Environment[pair.Key] = pair.Value;

@@ -107,6 +107,10 @@ public static class WindowsCommandLine
             var npmBin = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm");
 
+            // Claude Code's native installer puts claude.exe here.
+            directories.Add(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin"));
+
             if (!string.IsNullOrWhiteSpace(npmBin) &&
                 !directories.Any(path => string.Equals(path.TrimEnd('\\', '/'), npmBin.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)))
             {
