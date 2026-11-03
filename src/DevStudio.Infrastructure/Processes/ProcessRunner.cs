@@ -180,7 +180,16 @@ public sealed class ProcessRunner : IProcessRunner
                 .Append(string.Empty);
         var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
 
-        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        // A desktop app can hold a PATH from before the CLI was installed. Claude Code's native
+        // installer puts claude.exe in ~/.local/bin and npm uses %APPDATA%\npm; search both last.
+        var fallbacks = new[]
+        {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm"),
+        };
+
+        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                     .Concat(fallbacks))
         foreach (var extension in extensions)
         {
             var candidate = Path.Combine(directory.Trim('"'), fileName + extension);
