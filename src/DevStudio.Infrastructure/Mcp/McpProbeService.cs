@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using DevStudio.Application.Abstractions;
 using DevStudio.Application.Common;
 using DevStudio.Domain.Mcp;
+using DevStudio.Infrastructure.Terminals;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -114,9 +115,16 @@ public sealed class McpProbeService : IMcpProbeService
         if (string.IsNullOrWhiteSpace(server.Command))
             return new Exchange(null, null, "No command is configured.");
 
+        // CreateProcess knows nothing about PATHEXT, so a bare "npx" must be resolved first, and
+        // npm's .cmd shims (npx.cmd) have to go through the command interpreter.
+        var resolved = OperatingSystem.IsWindows()
+            ? WindowsCommandLine.Resolve(server.Command)
+            : server.Command;
+        var viaCmd = OperatingSystem.IsWindows() && WindowsCommandLine.NeedsCommandInterpreter(resolved);
+
         var info = new ProcessStartInfo
         {
-            FileName = server.Command,
+            FileName = viaCmd ? Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe" : resolved,
             WorkingDirectory = _options.ScratchPath,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -126,8 +134,22 @@ public sealed class McpProbeService : IMcpProbeService
             StandardOutputEncoding = Encoding.UTF8,
         };
 
-        foreach (var argument in server.Arguments)
-            info.ArgumentList.Add(argument);
+        if (viaCmd)
+        {
+            info.ArgumentList.Add("/d");
+            info.ArgumentList.Add("/s");
+            info.ArgumentList.Add("/c");
+            var quoted = new[] { resolved }.Concat(server.Arguments)
+                .Select(a => a.Length > 0 && !a.Any(c => char.IsWhiteSpace(c) || c == '"')
+                    ? a
+                    : "\"" + a.Replace("\"", "\\\"") + "\"");
+            info.ArgumentList.Add(string.Join(' ', quoted));
+        }
+        else
+        {
+            foreach (var argument in server.Arguments)
+                info.ArgumentList.Add(argument);
+        }
 
         info.Environment["HOME"] = _options.HomePath;
         foreach (var pair in server.Environment)
